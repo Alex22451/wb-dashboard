@@ -513,15 +513,11 @@ export async function GET(request: NextRequest) {
       // Week/Month aggregates
       const mskOffset2 = 3 * 3600000
       const mskNow2 = new Date(Date.now() + mskOffset2)
-      const todayMsk2 = mskNow2.toISOString().split('T')[0]
       const yesterdayMsk2 = new Date(mskNow2.getTime() - 86400000).toISOString().split('T')[0]
 
-      // Current week (Mon-yesterday)
-      const mskDayOfWeek = mskNow2.getUTCDay()
-      const daysSinceMonday = mskDayOfWeek === 0 ? 6 : mskDayOfWeek - 1
-      const weekMonday = new Date(mskNow2.getTime() - daysSinceMonday * 86400000).toISOString().split('T')[0]
-
-      const weekDates = prodDates.filter(d => d >= weekMonday && d < todayMsk2)
+      // Rolling 7 days ending yesterday (not calendar week)
+      const weekFromDate = new Date(mskNow2.getTime() - 7 * 86400000).toISOString().split('T')[0] // yesterday - 6 days
+      const weekDates = prodDates.filter(d => d >= weekFromDate && d <= yesterdayMsk2)
       const weekTotalItems = weekDates.reduce((sum, d) => {
         const idx = prodDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
@@ -529,15 +525,14 @@ export async function GET(request: NextRequest) {
       const weekDays = weekDates.length || 1
       const weekAvgLoadPct = Math.round((weekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
 
-      // Current month
-      const currentMonth2 = todayMsk2.substring(0, 7)
-      const monthDates = prodDates.filter(d => d.startsWith(currentMonth2) && d < todayMsk2)
+      // Rolling 30 days ending yesterday (not calendar month)
+      const monthFromDate = new Date(mskNow2.getTime() - 30 * 86400000).toISOString().split('T')[0] // yesterday - 29 days
+      const monthDates = prodDates.filter(d => d >= monthFromDate && d <= yesterdayMsk2)
       const monthTotalItems = monthDates.reduce((sum, d) => {
         const idx = prodDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
       }, 0)
       const monthDays = monthDates.length || 1
-      const daysInMonth = new Date(mskNow2.getUTCFullYear(), mskNow2.getUTCMonth() + 1, 0).getDate()
       const monthAvgLoadPct = Math.round((monthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
 
       // Yesterday load
@@ -558,8 +553,8 @@ export async function GET(request: NextRequest) {
         productOrders: prodProductOrders,
         summary: {
           yesterday: { date: yesterdayMsk2, items: yesterdayItems, loadPct: yesterdayLoadPct, orders: yesterdayIdx >= 0 ? prodDateOrders[yesterdayIdx] : 0 },
-          week: { dateFrom: weekMonday, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, days: weekDays },
-          month: { month: currentMonth2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, days: monthDays, daysInMonth },
+          week: { dateFrom: weekFromDate, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, days: weekDays },
+          month: { dateFrom: monthFromDate, dateTo: yesterdayMsk2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, days: monthDays },
         },
       }
     }

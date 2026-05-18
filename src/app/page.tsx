@@ -161,7 +161,7 @@ interface ProductionLoadData {
   summary: {
     yesterday: { date: string; items: number; loadPct: number; orders: number }
     week: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
-    month: { month: string; totalItems: number; avgLoadPct: number; days: number; daysInMonth: number }
+    month: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
   }
 }
 
@@ -1153,13 +1153,13 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
             />
             <ThermometerGauge
               pct={fetchedData.summary.week.avgLoadPct}
-              label="Средняя за неделю"
-              sublabel={`${formatNumber(fetchedData.summary.week.totalItems)} изделий за ${fetchedData.summary.week.days} дн.`}
+              label="Средняя за 7 дней"
+              sublabel={`${formatNumber(fetchedData.summary.week.totalItems)} изделий за ${fetchedData.summary.week.days} дн. (${formatDateShort(fetchedData.summary.week.dateFrom)} — ${formatDateShort(fetchedData.summary.week.dateTo)})`}
             />
             <ThermometerGauge
               pct={fetchedData.summary.month.avgLoadPct}
-              label="Средняя за месяц"
-              sublabel={`${formatNumber(fetchedData.summary.month.totalItems)} изделий за ${fetchedData.summary.month.days} дн.`}
+              label="Средняя за 30 дней"
+              sublabel={`${formatNumber(fetchedData.summary.month.totalItems)} изделий за ${fetchedData.summary.month.days} дн. (${formatDateShort(fetchedData.summary.month.dateFrom)} — ${formatDateShort(fetchedData.summary.month.dateTo)})`}
             />
           </div>
 
@@ -1231,7 +1231,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {viewMode === 'week' && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Сводка за текущую неделю</CardTitle>
+                <CardTitle className="text-base">Сводка за 7 дней (скользящее окно)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1240,8 +1240,8 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                     <div className="text-sm font-medium">{formatDateShort(fetchedData.summary.week.dateFrom)} — {formatDateShort(fetchedData.summary.week.dateTo)}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-muted-foreground">Рабочих дней</div>
-                    <div className="text-sm font-medium">{fetchedData.summary.week.days}</div>
+                    <div className="text-xs text-muted-foreground">Дней с данными</div>
+                    <div className="text-sm font-medium">{fetchedData.summary.week.days} из 7</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Всего изделий</div>
@@ -1262,17 +1262,17 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {viewMode === 'month' && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Сводка за текущий месяц</CardTitle>
+                <CardTitle className="text-base">Сводка за 30 дней (скользящее окно)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div>
-                    <div className="text-xs text-muted-foreground">Месяц</div>
-                    <div className="text-sm font-medium">{fetchedData.summary.month.month}</div>
+                    <div className="text-xs text-muted-foreground">Период</div>
+                    <div className="text-sm font-medium">{formatDateShort(fetchedData.summary.month.dateFrom)} — {formatDateShort(fetchedData.summary.month.dateTo)}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-muted-foreground">Рабочих дней</div>
-                    <div className="text-sm font-medium">{fetchedData.summary.month.days} из {fetchedData.summary.month.daysInMonth}</div>
+                    <div className="text-xs text-muted-foreground">Дней с данными</div>
+                    <div className="text-sm font-medium">{fetchedData.summary.month.days} из 30</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Всего изделий</div>
