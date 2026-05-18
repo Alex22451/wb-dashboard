@@ -19,6 +19,7 @@ import {
   Trash2,
   Plus,
   Download,
+  Thermometer,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -144,6 +145,24 @@ interface RateLimitError {
   id: number
   name: string
   error: string
+}
+
+interface ProductionLoadData {
+  capacity: number
+  dates: string[]
+  products: { id: number; name: string; multiplier: number }[]
+  pivot: Record<number, Record<number, number>>
+  ordersPivot: Record<number, Record<number, number>>
+  dateItems: number[]
+  dateOrders: number[]
+  dateLoadPct: number[]
+  productItems: Record<number, number>
+  productOrders: Record<number, number>
+  summary: {
+    yesterday: { date: string; items: number; loadPct: number; orders: number }
+    week: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
+    month: { month: string; totalItems: number; avgLoadPct: number; days: number; daysInMonth: number }
+  }
 }
 
 const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
@@ -983,6 +1002,361 @@ function monthsChartData(data: MonthlyData, view: 'entrepreneurs' | 'products') 
   })
 }
 
+// --- Production Load Tab ---
+function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+  const [fetchedData, setFetchedData] = useState<ProductionLoadData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    setRateLimitErrors([])
+    try {
+      const params = new URLSearchParams()
+      params.set('entrepreneurId', selectedEnt)
+      params.set('section', 'production')
+      const res = await fetch(`/api/wb-data?${params.toString()}`)
+      const json = await res.json()
+      if (json.production) setFetchedData(json.production)
+      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedEnt])
+
+  // Helper: get load color
+  const getLoadColor = (pct: number) => {
+    if (pct >= 90) return 'red'
+    if (pct >= 70) return 'orange'
+    return 'emerald'
+  }
+
+  // Helper: get load color classes
+  const getLoadColorClasses = (pct: number) => {
+    if (pct >= 90) return { bar: 'bg-red-500', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800', bg: 'bg-red-50 dark:bg-red-950/20' }
+    if (pct >= 70) return { bar: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-200 dark:border-orange-800', bg: 'bg-orange-50 dark:bg-orange-950/20' }
+    return { bar: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-800', bg: 'bg-emerald-50 dark:bg-emerald-950/20' }
+  }
+
+  // Helper: load label
+  const getLoadLabel = (pct: number) => {
+    if (pct >= 90) return 'Пиковая / перегруз'
+    if (pct >= 70) return 'Повышенная'
+    return 'Нормальная'
+  }
+
+  // Thermometer component
+  function ThermometerGauge({ pct, label, sublabel }: { pct: number; label: string; sublabel?: string }) {
+    const colors = getLoadColorClasses(pct)
+    const clampedPct = Math.min(pct, 120) // cap visual at 120%
+    return (
+      <Card className={`${colors.border}`}>
+        <CardContent className="pt-6 pb-4">
+          <div className="text-center mb-3">
+            <div className={`text-3xl font-bold ${colors.text}`}>{pct.toFixed(1)}%</div>
+            <div className="text-sm font-medium text-muted-foreground mt-1">{label}</div>
+            {sublabel && <div className="text-xs text-muted-foreground">{sublabel}</div>}
+          </div>
+          {/* Progress bar thermometer */}
+          <div className="h-4 bg-muted rounded-full overflow-hidden relative">
+            {/* 70% threshold marker */}
+            <div className="absolute top-0 bottom-0 left-[70%] w-0.5 bg-orange-400/50 z-10" />
+            {/* 90% threshold marker */}
+            <div className="absolute top-0 bottom-0 left-[90%] w-0.5 bg-red-400/50 z-10" />
+            <div
+              className={`h-full ${colors.bar} rounded-full transition-all duration-700`}
+              style={{ width: `${Math.min(clampedPct, 100)}%` }}
+            />
+          </div>
+          {/* Scale labels */}
+          <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+            <span>0%</span>
+            <span className="text-orange-500">70%</span>
+            <span className="text-red-500">90%</span>
+            <span>100%</span>
+          </div>
+          {/* Status badge */}
+          <div className="text-center mt-3">
+            <Badge variant="secondary" className={`${colors.text} ${colors.bg} border ${colors.border}`}>
+              {getLoadLabel(pct)}
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <RateLimitAlert errors={rateLimitErrors} />
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={selectedEnt} onValueChange={setSelectedEnt}>
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="Все ИП" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все ИП (сводный)</SelectItem>
+            {entrepreneurs.map((e) => (
+              <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button onClick={fetchData} disabled={loading} className="gap-2">
+          {loading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Загрузка...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" />
+              Загрузить
+            </>
+          )}
+        </Button>
+      </div>
+
+      {loading && <Skeleton className="h-96 w-full" />}
+
+      {!loading && !fetchedData && (
+        <EmptyState
+          message="Выберите ИП и нажмите «Загрузить» для расчёта нагрузки"
+          icon={<Thermometer className="h-12 w-12" />}
+        />
+      )}
+
+      {!loading && fetchedData && (
+        <>
+          {/* Capacity info */}
+          <Card className="border-dashed">
+            <CardContent className="py-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Package className="h-4 w-4" />
+                <span>Максимальная производительность: <strong className="text-foreground">{formatNumber(fetchedData.capacity)}</strong> изделий/день (FBS)</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Thermometer Gauges */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ThermometerGauge
+              pct={fetchedData.summary.yesterday.loadPct}
+              label="Вчера"
+              sublabel={`${formatNumber(fetchedData.summary.yesterday.items)} изделий / ${formatNumber(fetchedData.summary.yesterday.orders)} заказов`}
+            />
+            <ThermometerGauge
+              pct={fetchedData.summary.week.avgLoadPct}
+              label="Средняя за неделю"
+              sublabel={`${formatNumber(fetchedData.summary.week.totalItems)} изделий за ${fetchedData.summary.week.days} дн.`}
+            />
+            <ThermometerGauge
+              pct={fetchedData.summary.month.avgLoadPct}
+              label="Средняя за месяц"
+              sublabel={`${formatNumber(fetchedData.summary.month.totalItems)} изделий за ${fetchedData.summary.month.days} дн.`}
+            />
+          </div>
+
+          {/* View mode toggle */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Разбивка:</span>
+            <ToggleGroup type="single" value={viewMode} onValueChange={(v) => { if (v) setViewMode(v as 'day' | 'week' | 'month') }} className="border rounded-md">
+              <ToggleGroupItem value="day" className="text-xs px-3">По дням</ToggleGroupItem>
+              <ToggleGroupItem value="week" className="text-xs px-3">За неделю</ToggleGroupItem>
+              <ToggleGroupItem value="month" className="text-xs px-3">За месяц</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
+          {/* Daily load table */}
+          {viewMode === 'day' && fetchedData.dates.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  Нагрузка по дням
+                  <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="w-full">
+                  <table className="text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">Дата</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Заказов</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Изделий</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Нагрузка</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[120px]">Шкала</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fetchedData.dates.map((date, i) => {
+                        const loadPct = fetchedData.dateLoadPct[i]
+                        const colors = getLoadColorClasses(loadPct)
+                        return (
+                          <tr key={date} className={`border-b hover:bg-muted/30 transition-colors ${i === fetchedData.dates.length - 1 ? '' : ''}`}>
+                            <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">
+                              {formatDateFull(date)}
+                            </td>
+                            <td className="text-right px-3 py-2">{formatNumber(fetchedData.dateOrders[i])}</td>
+                            <td className="text-right px-3 py-2 font-medium">{formatNumber(fetchedData.dateItems[i])}</td>
+                            <td className={`text-right px-3 py-2 font-bold ${colors.text}`}>
+                              {loadPct.toFixed(1)}%
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="h-2.5 bg-muted rounded-full overflow-hidden min-w-[100px]">
+                                <div
+                                  className={`h-full ${colors.bar} rounded-full transition-all duration-500`}
+                                  style={{ width: `${Math.min(loadPct, 100)}%` }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  <ScrollBar orientation="horizontal" />
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Weekly summary */}
+          {viewMode === 'week' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Сводка за текущую неделю</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Период</div>
+                    <div className="text-sm font-medium">{formatDateShort(fetchedData.summary.week.dateFrom)} — {formatDateShort(fetchedData.summary.week.dateTo)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Рабочих дней</div>
+                    <div className="text-sm font-medium">{fetchedData.summary.week.days}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Всего изделий</div>
+                    <div className="text-sm font-bold">{formatNumber(fetchedData.summary.week.totalItems)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Средняя нагрузка</div>
+                    <div className={`text-sm font-bold ${getLoadColorClasses(fetchedData.summary.week.avgLoadPct).text}`}>
+                      {fetchedData.summary.week.avgLoadPct.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Monthly summary */}
+          {viewMode === 'month' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Сводка за текущий месяц</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Месяц</div>
+                    <div className="text-sm font-medium">{fetchedData.summary.month.month}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Рабочих дней</div>
+                    <div className="text-sm font-medium">{fetchedData.summary.month.days} из {fetchedData.summary.month.daysInMonth}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Всего изделий</div>
+                    <div className="text-sm font-bold">{formatNumber(fetchedData.summary.month.totalItems)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Средняя нагрузка</div>
+                    <div className={`text-sm font-bold ${getLoadColorClasses(fetchedData.summary.month.avgLoadPct).text}`}>
+                      {fetchedData.summary.month.avgLoadPct.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Product breakdown - top products by items */}
+          {fetchedData.products.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  Разбивка по продуктам (Топ-15)
+                  <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="w-full">
+                  <table className="text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">Продукт</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">× множ.</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Заказов</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Изделий</th>
+                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Доля</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fetchedData.products
+                        .slice() // copy
+                        .sort((a, b) => (fetchedData.productItems[b.id] || 0) - (fetchedData.productItems[a.id] || 0))
+                        .slice(0, 15)
+                        .map((p) => {
+                          const items = fetchedData.productItems[p.id] || 0
+                          const orders = fetchedData.productOrders[p.id] || 0
+                          const totalItems = Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0)
+                          const share = totalItems > 0 ? (items / totalItems * 100).toFixed(1) : '0'
+                          return (
+                            <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
+                              <td className="px-3 py-2 sticky left-0 bg-background z-10">
+                                <span className="font-medium">{p.name}</span>
+                                {p.multiplier > 1 && (
+                                  <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                                    ×{p.multiplier}
+                                  </Badge>
+                                )}
+                              </td>
+                              <td className="text-right px-3 py-2 text-muted-foreground">×{p.multiplier}</td>
+                              <td className="text-right px-3 py-2">{formatNumber(orders)}</td>
+                              <td className="text-right px-3 py-2 font-medium">{formatNumber(items)}</td>
+                              <td className="text-right px-3 py-2 text-muted-foreground">{share}%</td>
+                            </tr>
+                          )
+                        })}
+                      <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
+                        <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
+                        <td className="text-right px-3 py-2 bg-emerald-50 dark:bg-emerald-950/20">—</td>
+                        <td className="text-right px-3 py-2">{formatNumber(Object.values(fetchedData.productOrders).reduce((s, v) => s + v, 0))}</td>
+                        <td className="text-right px-3 py-2 font-bold">{formatNumber(Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0))}</td>
+                        <td className="text-right px-3 py-2">100%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <ScrollBar orientation="horizontal" />
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // --- Ad Spend Tab ---
 function AdSpendTab() {
   const [data, setData] = useState<AdSpendData | null>(null)
@@ -1686,6 +2060,10 @@ export default function Home() {
               <Table2 className="h-4 w-4" />
               <span className="hidden sm:inline">Ежедневные</span>
             </TabsTrigger>
+            <TabsTrigger value="production" className="gap-2">
+              <Thermometer className="h-4 w-4" />
+              <span className="hidden sm:inline">Нагрузка</span>
+            </TabsTrigger>
             <TabsTrigger value="monthly" className="gap-2">
               <Calendar className="h-4 w-4" />
               <span className="hidden sm:inline">По месяцам</span>
@@ -1718,6 +2096,9 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="daily">
             <DailyOrdersTab entrepreneurs={entrepreneurs} />
+          </TabsContent>
+          <TabsContent value="production">
+            <ProductionLoadTab entrepreneurs={entrepreneurs} />
           </TabsContent>
           <TabsContent value="monthly">
             <MonthlyTab entrepreneurs={entrepreneurs} />

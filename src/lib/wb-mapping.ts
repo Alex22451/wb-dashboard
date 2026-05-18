@@ -31,8 +31,8 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
-  { subject: 'Наборы для создания слепков', types: ['набор'] },
-  { subject: 'Наборы для рисования', types: ['набор'] },
+  { subject: 'Наборы для создания слепков', types: ['набор для слепков'] },
+  { subject: 'Наборы для рисования', types: ['набор для рисования'] },
   { subject: 'Стаканы', types: [] },
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
   { subject: 'Мягкие игрушки', types: ['мягкие игрушки', 'игрушки антистресс'] },
@@ -114,8 +114,8 @@ export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'игрушки антистресс', articlePattern: /./i, excelType: 'игрушки антистресс', priority: 20 },
   { subjectContains: 'мягкие игрушки', articlePattern: /./i, excelType: 'мягкие игрушки', priority: 20 },
 
-  { subjectContains: 'наборы для создания слепков', articlePattern: /./i, excelType: 'набор', priority: 50 },
-  { subjectContains: 'наборы для рисования', articlePattern: /./i, excelType: 'набор', priority: 50 },
+  { subjectContains: 'наборы для создания слепков', articlePattern: /./i, excelType: 'набор для слепков', priority: 50 },
+  { subjectContains: 'наборы для рисования', articlePattern: /./i, excelType: 'набор для рисования', priority: 50 },
 ]
 
 // ─── Find matching subject types ──────────────────────────────────
@@ -168,8 +168,8 @@ export function extractWbSize(article: string, subject?: string): string {
           if (match4) return 'набор 4 шт'
         }
       }
-      // Дорожки наборы: "набор220см+6шт" → "набор"
-      return 'набор'
+      // Дорожки наборы: "набор220см+6шт" → "набор 4шт" (4 изделия в заказе)
+      return 'набор 4шт'
     }
     // Special case: салфетки 40х40 with 6шт/4шт but NO "набор" word — still a набора
     if (isSalfetki) {
@@ -237,6 +237,23 @@ export function normalizeSize(size: string): string {
 export function extractPackQty(name: string): string {
   const match = name.match(/(\d+)\s*шт/i)
   return match ? match[1] : ''
+}
+
+// ─── Extract items multiplier for production load ───────────────────
+// Determines how many physical items one order contains.
+// "салфетки набор 6 шт" → 6 items per order
+// "дорожки набор 4шт" → 4 items per order
+// "подушка декоративная 45х45" → 1 item per order
+export function extractItemsMultiplier(productName: string): number {
+  const lower = productName.toLowerCase()
+  // Match patterns like "6 шт", "4шт", "2 шт" in product name
+  const match = lower.match(/(\d+)\s*шт/i)
+  if (match) {
+    const n = parseInt(match[1])
+    if (n >= 1 && n <= 100) return n
+  }
+  // Default: 1 item per order
+  return 1
 }
 
 // ─── WB API Request with minimal retry ──────────────────────────────────

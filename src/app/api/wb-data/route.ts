@@ -4,6 +4,7 @@ import {
   mapWbOrderToProductKey,
   filterToDateRange,
   EXCLUDED_WB_SUBJECTS,
+  extractItemsMultiplier,
 } from '@/lib/wb-mapping'
 
 // ─── In-memory cache ────────────────────────────────────────────────
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
-    const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | '' (all)
+    const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
 
     // Calculate date range based on section
     const mskOffset = 3 * 60 * 60 * 1000
@@ -66,6 +67,9 @@ export async function GET(request: NextRequest) {
     } else if (section === 'daily') {
       const threeDaysAgo = new Date(nowMsk.getTime() - 3 * 86400000)
       defaultDateFrom = threeDaysAgo.toISOString().split('T')[0]
+    } else if (section === 'production') {
+      const tenDaysAgo = new Date(nowMsk.getTime() - 10 * 86400000)
+      defaultDateFrom = tenDaysAgo.toISOString().split('T')[0]
     } else {
       const threeMonthsAgo = new Date(nowMsk.getTime() - 90 * 86400000)
       defaultDateFrom = threeMonthsAgo.toISOString().split('T')[0]
@@ -107,9 +111,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Determine cache TTL based on section
+    const CACHE_TTL_PRODUCTION = 2 * 60 * 1000  // 2 min
     const cacheTtl = section === 'dashboard' ? CACHE_TTL_DASHBOARD
       : section === 'daily' ? CACHE_TTL_DAILY
       : section === 'monthly' ? CACHE_TTL_MONTHLY
+      : section === 'production' ? CACHE_TTL_PRODUCTION
       : CACHE_TTL_DASHBOARD
 
     // Fetch orders for each entrepreneur SEQUENTIALLY with delays
@@ -236,6 +242,7 @@ export async function GET(request: NextRequest) {
     const needDashboard = !section || section === 'dashboard'
     const needDaily = !section || section === 'daily'
     const needMonthly = !section || section === 'monthly'
+    const needProduction = !section || section === 'production'
 
     // Product types (shared across sections)
     const productTypes = [...new Set(allMappedOrders.map(o => o.mappedType))]
@@ -444,6 +451,116 @@ export async function GET(request: NextRequest) {
         months,
         monthlyData,
         productMonthlyData,
+      }
+    }
+
+    // ─── Build Production Load ───
+    if (needProduction) {
+      // Maximum FBS production capacity per day
+      const DAILY_CAPACITY = 2300
+
+      // Only FBS orders matter for production load
+      const fbsOrders = allMappedOrders.filter(o => o.isFbs)
+
+      // Get unique dates
+      const prodDates = [...new Set(fbsOrders.map(o => o.dateStr).filter(Boolean))].sort()
+
+      // Product types with items multiplier
+      const fbsProductTypes = [...new Set(fbsOrders.map(o => o.mappedType))]
+      const prodProducts = fbsProductTypes.map((name, i) => ({
+        id: i,
+        name,
+        multiplier: extractItemsMultiplier(name),
+      }))
+      const prodProductMap = new Map(fbsProductTypes.map((name, i) => [name, i]))
+
+      // Build production pivot: productId → dateIdx → items count (orders × multiplier)
+      const prodPivot: Record<number, Record<number, number>> = {}   // items
+      const prodOrdersPivot: Record<number, Record<number, number>> = {} // raw orders
+      const prodDateItems: number[] = new Array(prodDates.length).fill(0)   // total items per date
+      const prodDateOrders: number[] = new Array(prodDates.length).fill(0)  // total orders per date
+      const prodProductItems: Record<number, number> = {}   // total items per product
+      const prodProductOrders: Record<number, number> = {}  // total orders per product
+
+      for (const o of fbsOrders) {
+        const dateIdx = prodDates.indexOf(o.dateStr)
+        if (dateIdx === -1) continue
+
+        const productId = prodProductMap.get(o.mappedType)
+        if (productId === undefined) continue
+
+        const multiplier = prodProducts[productId].multiplier
+        const items = multiplier // 1 order × multiplier = multiplier items
+
+        // Items pivot
+        if (!prodPivot[productId]) prodPivot[productId] = {}
+        prodPivot[productId][dateIdx] = (prodPivot[productId][dateIdx] || 0) + items
+        prodDateItems[dateIdx] += items
+        prodProductItems[productId] = (prodProductItems[productId] || 0) + items
+
+        // Orders pivot
+        if (!prodOrdersPivot[productId]) prodOrdersPivot[productId] = {}
+        prodOrdersPivot[productId][dateIdx] = (prodOrdersPivot[productId][dateIdx] || 0) + 1
+        prodDateOrders[dateIdx]++
+        prodProductOrders[productId] = (prodProductOrders[productId] || 0) + 1
+      }
+
+      // Calculate load percentages per date
+      const prodDateLoadPct: number[] = prodDateItems.map(items =>
+        Math.round((items / DAILY_CAPACITY) * 1000) / 10 // round to 1 decimal
+      )
+
+      // Week/Month aggregates
+      const mskOffset2 = 3 * 3600000
+      const mskNow2 = new Date(Date.now() + mskOffset2)
+      const todayMsk2 = mskNow2.toISOString().split('T')[0]
+      const yesterdayMsk2 = new Date(mskNow2.getTime() - 86400000).toISOString().split('T')[0]
+
+      // Current week (Mon-yesterday)
+      const mskDayOfWeek = mskNow2.getUTCDay()
+      const daysSinceMonday = mskDayOfWeek === 0 ? 6 : mskDayOfWeek - 1
+      const weekMonday = new Date(mskNow2.getTime() - daysSinceMonday * 86400000).toISOString().split('T')[0]
+
+      const weekDates = prodDates.filter(d => d >= weekMonday && d < todayMsk2)
+      const weekTotalItems = weekDates.reduce((sum, d) => {
+        const idx = prodDates.indexOf(d)
+        return sum + (prodDateItems[idx] || 0)
+      }, 0)
+      const weekDays = weekDates.length || 1
+      const weekAvgLoadPct = Math.round((weekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
+
+      // Current month
+      const currentMonth2 = todayMsk2.substring(0, 7)
+      const monthDates = prodDates.filter(d => d.startsWith(currentMonth2) && d < todayMsk2)
+      const monthTotalItems = monthDates.reduce((sum, d) => {
+        const idx = prodDates.indexOf(d)
+        return sum + (prodDateItems[idx] || 0)
+      }, 0)
+      const monthDays = monthDates.length || 1
+      const daysInMonth = new Date(mskNow2.getUTCFullYear(), mskNow2.getUTCMonth() + 1, 0).getDate()
+      const monthAvgLoadPct = Math.round((monthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
+
+      // Yesterday load
+      const yesterdayIdx = prodDates.indexOf(yesterdayMsk2)
+      const yesterdayItems = yesterdayIdx >= 0 ? prodDateItems[yesterdayIdx] : 0
+      const yesterdayLoadPct = yesterdayIdx >= 0 ? prodDateLoadPct[yesterdayIdx] : 0
+
+      response.production = {
+        capacity: DAILY_CAPACITY,
+        dates: prodDates,
+        products: prodProducts,
+        pivot: prodPivot,
+        ordersPivot: prodOrdersPivot,
+        dateItems: prodDateItems,
+        dateOrders: prodDateOrders,
+        dateLoadPct: prodDateLoadPct,
+        productItems: prodProductItems,
+        productOrders: prodProductOrders,
+        summary: {
+          yesterday: { date: yesterdayMsk2, items: yesterdayItems, loadPct: yesterdayLoadPct, orders: yesterdayIdx >= 0 ? prodDateOrders[yesterdayIdx] : 0 },
+          week: { dateFrom: weekMonday, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, days: weekDays },
+          month: { month: currentMonth2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, days: monthDays, daysInMonth },
+        },
       }
     }
 
