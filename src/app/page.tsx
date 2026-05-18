@@ -21,6 +21,7 @@ import {
   Download,
   Thermometer,
   Truck,
+  RefreshCw,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -1032,20 +1033,20 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
   const [selectedEnt, setSelectedEnt] = useState<string>('all')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
+  const [initialLoadDone, setInitialLoadDone] = useState(false)
 
-  const fetchData = useCallback(async () => {
+  // Always fetch 31 days of data — viewMode only affects display, not API calls
+  const fetchData = useCallback(async (entId?: string) => {
     setLoading(true)
     setRateLimitErrors([])
     try {
-      // Calculate date range based on viewMode: day=2 days, week=8 days, month=31 days (all ending yesterday)
       const mskOffset = 3 * 60 * 60 * 1000
       const nowMsk = new Date(Date.now() + mskOffset)
       const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
-      const daysBack = viewMode === 'day' ? 2 : viewMode === 'week' ? 8 : 31
-      const from = new Date(nowMsk.getTime() - daysBack * 86400000).toISOString().split('T')[0]
+      const from = new Date(nowMsk.getTime() - 31 * 86400000).toISOString().split('T')[0]
 
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectedEnt)
+      params.set('entrepreneurId', entId || selectedEnt)
       params.set('section', 'production')
       params.set('dateFrom', from)
       params.set('dateTo', yesterday)
@@ -1058,40 +1059,15 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, viewMode])
+  }, [selectedEnt])
 
-  // Auto-fetch when viewMode changes (if data was already loaded)
+  // Auto-load on first mount with "Все ИП"
   useEffect(() => {
-    if (fetchedData || viewMode) {
-      // Re-fetch with new date range when viewMode changes
-      const doFetch = async () => {
-        setLoading(true)
-        setRateLimitErrors([])
-        try {
-          const mskOffset = 3 * 60 * 60 * 1000
-          const nowMsk = new Date(Date.now() + mskOffset)
-          const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
-          const daysBack = viewMode === 'day' ? 2 : viewMode === 'week' ? 8 : 31
-          const from = new Date(nowMsk.getTime() - daysBack * 86400000).toISOString().split('T')[0]
-
-          const params = new URLSearchParams()
-          params.set('entrepreneurId', selectedEnt)
-          params.set('section', 'production')
-          params.set('dateFrom', from)
-          params.set('dateTo', yesterday)
-          const res = await fetch(`/api/wb-data?${params.toString()}`)
-          const json = await res.json()
-          if (json.production) setFetchedData(json.production)
-          if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
-        } catch (e) {
-          console.error(e)
-        } finally {
-          setLoading(false)
-        }
-      }
-      doFetch()
+    if (!initialLoadDone) {
+      setInitialLoadDone(true)
+      fetchData('all')
     }
-  }, [viewMode])
+  }, [initialLoadDone, fetchData])
 
   // Helper: get load color
   const getLoadColor = (pct: number) => {
@@ -1161,7 +1137,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedEnt} onValueChange={setSelectedEnt}>
+        <Select value={selectedEnt} onValueChange={(v) => { setSelectedEnt(v); fetchData(v) }}>
           <SelectTrigger className="w-56">
             <SelectValue placeholder="Все ИП" />
           </SelectTrigger>
@@ -1173,7 +1149,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           </SelectContent>
         </Select>
 
-        <Button onClick={fetchData} disabled={loading} className="gap-2">
+        <Button onClick={() => fetchData()} disabled={loading} className="gap-2">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -1181,24 +1157,32 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
             </>
           ) : (
             <>
-              <Download className="h-4 w-4" />
-              Загрузить
+              <RefreshCw className="h-4 w-4" />
+              Обновить
             </>
           )}
         </Button>
       </div>
 
-      {loading && <Skeleton className="h-96 w-full" />}
+      {loading && !fetchedData && <Skeleton className="h-96 w-full" />}
 
       {!loading && !fetchedData && (
         <EmptyState
-          message="Выберите ИП и нажмите «Загрузить» для расчёта нагрузки"
+          message="Загрузка данных о нагрузке..."
           icon={<Thermometer className="h-12 w-12" />}
         />
       )}
 
-      {!loading && fetchedData && (
+      {fetchedData && (
         <>
+          {/* Loading overlay when switching ИП */}
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Обновление данных...
+            </div>
+          )}
+
           {/* Capacity info */}
           <Card className="border-dashed">
             <CardContent className="py-3">
@@ -1241,22 +1225,22 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {/* Daily load table */}
           {viewMode === 'day' && fetchedData.dates.length > 0 && (
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   Нагрузка по дням
-                  <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
+                  <Badge variant="secondary" className="text-xs">{fetchedData.dates.length} дней</Badge>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <ScrollArea className="w-full max-h-[500px]">
-                  <table className="text-sm">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                  <table className="text-sm w-full">
                     <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">Дата</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Заказов</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Изделий</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[80px]">Нагрузка</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[120px]">Шкала</th>
+                      <tr className="bg-muted/50 border-b sticky top-0 z-10">
+                        <th className="text-left px-4 py-2.5 font-medium">Дата</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Заказов</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Изделий</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Нагрузка</th>
+                        <th className="text-right px-4 py-2.5 font-medium min-w-[140px]">Шкала</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1264,17 +1248,15 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                         const loadPct = fetchedData.dateLoadPct[i]
                         const colors = getLoadColorClasses(loadPct)
                         return (
-                          <tr key={date} className={`border-b hover:bg-muted/30 transition-colors ${i === fetchedData.dates.length - 1 ? '' : ''}`}>
-                            <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">
-                              {formatDateFull(date)}
-                            </td>
+                          <tr key={date} className="border-b hover:bg-muted/30 transition-colors">
+                            <td className="px-4 py-2 font-medium">{formatDateFull(date)}</td>
                             <td className="text-right px-3 py-2">{formatNumber(fetchedData.dateOrders[i])}</td>
                             <td className="text-right px-3 py-2 font-medium">{formatNumber(fetchedData.dateItems[i])}</td>
                             <td className={`text-right px-3 py-2 font-bold ${colors.text}`}>
                               {loadPct.toFixed(1)}%
                             </td>
-                            <td className="px-3 py-2">
-                              <div className="h-2.5 bg-muted rounded-full overflow-hidden min-w-[100px]">
+                            <td className="px-4 py-2">
+                              <div className="h-2.5 bg-muted rounded-full overflow-hidden w-full">
                                 <div
                                   className={`h-full ${colors.bar} rounded-full transition-all duration-500`}
                                   style={{ width: `${Math.min(loadPct, 100)}%` }}
@@ -1286,8 +1268,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                       })}
                     </tbody>
                   </table>
-                  <ScrollBar orientation="horizontal" />
-                </ScrollArea>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -1357,27 +1338,27 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {/* Product breakdown - top products by items */}
           {fetchedData.products.length > 0 && (
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   Разбивка по продуктам (Топ-15)
                   <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <ScrollArea className="w-full max-h-[500px]">
-                  <table className="text-sm">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="text-sm w-full">
                     <thead>
                       <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">Продукт</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">× множ.</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Заказов</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Изделий</th>
-                        <th className="text-right px-3 py-2 font-medium min-w-[70px]">Доля</th>
+                        <th className="text-left px-4 py-2.5 font-medium">Продукт</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[60px]">Множ.</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Заказов</th>
+                        <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Изделий</th>
+                        <th className="text-right px-4 py-2.5 font-medium min-w-[60px]">Доля</th>
                       </tr>
                     </thead>
                     <tbody>
                       {fetchedData.products
-                        .slice() // copy
+                        .slice()
                         .sort((a, b) => (fetchedData.productItems[b.id] || 0) - (fetchedData.productItems[a.id] || 0))
                         .slice(0, 15)
                         .map((p) => {
@@ -1387,32 +1368,32 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                           const share = totalItems > 0 ? (items / totalItems * 100).toFixed(1) : '0'
                           return (
                             <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
-                              <td className="px-3 py-2 sticky left-0 bg-background z-10">
+                              <td className="px-4 py-2">
                                 <span className="font-medium">{p.name}</span>
-                                {p.multiplier > 1 && (
-                                  <Badge variant="secondary" className="ml-2 text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                              </td>
+                              <td className="text-right px-3 py-2 text-muted-foreground">
+                                {p.multiplier > 1 ? (
+                                  <Badge variant="secondary" className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
                                     ×{p.multiplier}
                                   </Badge>
-                                )}
+                                ) : '×1'}
                               </td>
-                              <td className="text-right px-3 py-2 text-muted-foreground">×{p.multiplier}</td>
                               <td className="text-right px-3 py-2">{formatNumber(orders)}</td>
                               <td className="text-right px-3 py-2 font-medium">{formatNumber(items)}</td>
-                              <td className="text-right px-3 py-2 text-muted-foreground">{share}%</td>
+                              <td className="text-right px-4 py-2 text-muted-foreground">{share}%</td>
                             </tr>
                           )
                         })}
                       <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
-                        <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
-                        <td className="text-right px-3 py-2 bg-emerald-50 dark:bg-emerald-950/20">—</td>
+                        <td className="px-4 py-2">ИТОГО</td>
+                        <td className="text-right px-3 py-2">—</td>
                         <td className="text-right px-3 py-2">{formatNumber(Object.values(fetchedData.productOrders).reduce((s, v) => s + v, 0))}</td>
                         <td className="text-right px-3 py-2 font-bold">{formatNumber(Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0))}</td>
-                        <td className="text-right px-3 py-2">100%</td>
+                        <td className="text-right px-4 py-2">100%</td>
                       </tr>
                     </tbody>
                   </table>
-                  <ScrollBar orientation="horizontal" />
-                </ScrollArea>
+                </div>
               </CardContent>
             </Card>
           )}
