@@ -304,13 +304,9 @@ export async function GET(request: NextRequest) {
         entStats[o.entrepreneurId].totalOrders++
       }
 
-      // Entrepreneur stats for current week (Monday to yesterday, excluding today)
-      // Calculate Monday of current week in Moscow timezone
-      const mskDayOfWeek = mskNow.getUTCDay() // 0=Sunday, 1=Monday, ..., 6=Saturday
-      const daysSinceMonday = mskDayOfWeek === 0 ? 6 : mskDayOfWeek - 1 // Monday=0, Sunday=6
-      const weekMonday = new Date(mskNow.getTime() - daysSinceMonday * 86400000).toISOString().split('T')[0]
-
-      const weekOrders = allMappedOrders.filter(o => o.dateStr >= weekMonday && o.dateStr < todayMsk)
+      // Entrepreneur stats for rolling 7 days ending yesterday
+      const weekFromDate = new Date(mskNow.getTime() - 7 * 86400000).toISOString().split('T')[0]
+      const weekOrders = allMappedOrders.filter(o => o.dateStr >= weekFromDate && o.dateStr <= yesterdayMsk)
       const weekTotalOrders = weekOrders.length
 
       const weekEntStats: Record<number, { id: number; name: string; totalOrders: number }> = {}
@@ -341,7 +337,7 @@ export async function GET(request: NextRequest) {
         entrepreneurStats: Object.values(entStats),
         weekEntrepreneurStats: Object.values(weekEntStats),
         weekTotalOrders,
-        weekDateFrom: weekMonday,
+        weekDateFrom: weekFromDate,
         weekDateTo: yesterdayMsk,
         productCount: productTypes.length,
       }
