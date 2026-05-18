@@ -573,7 +573,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 
   return (
     <div className="border rounded-lg overflow-hidden">
-      <ScrollArea className="w-full">
+      <ScrollArea className="w-full max-h-[600px]">
         <table className="text-sm">
           <thead>
             <tr className="bg-muted/50 border-b">
@@ -1204,7 +1204,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="w-full">
+                <ScrollArea className="w-full max-h-[500px]">
                   <table className="text-sm">
                     <thead>
                       <tr className="bg-muted/50 border-b">
@@ -1320,7 +1320,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="w-full">
+                <ScrollArea className="w-full max-h-[500px]">
                   <table className="text-sm">
                     <thead>
                       <tr className="bg-muted/50 border-b">
@@ -1386,6 +1386,9 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [supplyDays, setSupplyDays] = useState<number>(14)
   const [sortBy, setSortBy] = useState<'supplyQty' | 'avgDaily' | 'article'>('supplyQty')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [page, setPage] = useState(0)
+  const PAGE_SIZE = 50
 
   // Default date range: last 30 days ending yesterday
   const getDefaultDates = () => {
@@ -1402,6 +1405,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const fetchData = useCallback(async () => {
     setLoading(true)
     setRateLimitErrors([])
+    setPage(0)
     try {
       const params = new URLSearchParams()
       params.set('entrepreneurId', selectedEnt)
@@ -1427,7 +1431,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     { label: '2 месяца', value: 60 },
   ]
 
-  // Sort articles
+  // Sort + filter articles
   const sortedArticles = fetchedData
     ? [...fetchedData.articles].sort((a, b) => {
         if (sortBy === 'supplyQty') return b.supplyQty - a.supplyQty
@@ -1435,6 +1439,16 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
         return a.article.localeCompare(b.article)
       })
     : []
+
+  const filteredArticles = searchQuery
+    ? sortedArticles.filter(a =>
+        a.article.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.subject.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : sortedArticles
+
+  const totalPages = Math.ceil(filteredArticles.length / PAGE_SIZE)
+  const paginatedArticles = filteredArticles.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   return (
     <div className="space-y-4">
@@ -1535,72 +1549,132 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
           <Card className="border-dashed">
             <CardContent className="py-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Package className="h-4 w-4" />
+                <Package className="h-4 w-4 shrink-0" />
                 <span>Формула: <strong>Шт к поставке</strong> = (заказов / {fetchedData.daysInRange} дней) × {fetchedData.supplyDays} дней × {fetchedData.coefficient}</span>
                 <span className="text-xs">| Период: {formatDateShort(fetchedData.dateFrom)} — {formatDateShort(fetchedData.dateTo)}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Sort controls */}
-          <div className="flex items-center gap-3">
+          {/* Search + Sort controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              placeholder="Поиск по артикулу или категории..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(0) }}
+              className="w-72"
+            />
             <span className="text-sm font-medium text-muted-foreground">Сортировка:</span>
             <ToggleGroup type="single" value={sortBy} onValueChange={(v) => { if (v) setSortBy(v as 'supplyQty' | 'avgDaily' | 'article') }} className="border rounded-md">
               <ToggleGroupItem value="supplyQty" className="text-xs px-3">К поставке</ToggleGroupItem>
               <ToggleGroupItem value="avgDaily" className="text-xs px-3">Среднее/день</ToggleGroupItem>
               <ToggleGroupItem value="article" className="text-xs px-3">Артикул</ToggleGroupItem>
             </ToggleGroup>
+            {searchQuery && (
+              <Badge variant="secondary" className="text-xs">
+                Найдено: {filteredArticles.length} из {fetchedData.totalArticles}
+              </Badge>
+            )}
           </div>
 
           {/* Articles table */}
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 Расчёт поставки по артикулам
                 <Badge variant="secondary" className="text-xs">{fetchedData.totalArticles} артикулов</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <ScrollArea className="w-full max-h-[600px]">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
                 <table className="text-sm w-full">
-                  <thead className="sticky top-0 bg-background z-10">
-                    <tr className="bg-muted/50 border-b">
-                      <th className="text-left px-3 py-2 font-medium min-w-[160px]">Артикул поставщика</th>
-                      <th className="text-left px-3 py-2 font-medium min-w-[140px]">Категория</th>
-                      <th className="text-right px-3 py-2 font-medium min-w-[80px]">Всего заказов</th>
-                      <th className="text-right px-3 py-2 font-medium min-w-[70px]">FBS</th>
-                      <th className="text-right px-3 py-2 font-medium min-w-[70px]">FBO</th>
-                      <th className="text-right px-3 py-2 font-medium min-w-[80px]">Среднее/день</th>
-                      <th className="text-right px-3 py-2 font-medium min-w-[100px]">Шт к поставке</th>
+                  <thead>
+                    <tr className="bg-muted/50 border-b sticky top-0 z-10">
+                      <th className="text-left px-4 py-2.5 font-medium min-w-[180px]">Артикул поставщика</th>
+                      <th className="text-left px-3 py-2.5 font-medium min-w-[160px]">Категория</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[90px]">Всего заказов</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[70px]">FBS</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[70px]">FBO</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[90px]">Среднее/день</th>
+                      <th className="text-right px-4 py-2.5 font-medium min-w-[110px]">Шт к поставке</th>
                     </tr>
                   </thead>
                   <tbody>
                     {/* Totals row */}
-                    <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold">
-                      <td className="px-3 py-2" colSpan={2}>ИТОГО</td>
-                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.totalOrders, 0))}</td>
-                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fbsOrders, 0))}</td>
-                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fboOrders, 0))}</td>
-                      <td className="text-right px-3 py-2">—</td>
-                      <td className="text-right px-3 py-2 font-bold">{formatNumber(fetchedData.totalSupplyQty)}</td>
+                    <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold sticky top-[41px] z-10">
+                      <td className="px-4 py-2.5" colSpan={2}>ИТОГО</td>
+                      <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.totalOrders, 0))}</td>
+                      <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fbsOrders, 0))}</td>
+                      <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fboOrders, 0))}</td>
+                      <td className="text-right px-3 py-2.5">—</td>
+                      <td className="text-right px-4 py-2.5 font-bold">{formatNumber(fetchedData.totalSupplyQty)}</td>
                     </tr>
-                    {sortedArticles.map((a, i) => (
+                    {paginatedArticles.map((a, i) => (
                       <tr key={`${a.article}-${i}`} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="px-3 py-2 font-medium font-mono text-xs">{a.article}</td>
+                        <td className="px-4 py-2 font-medium font-mono text-xs">{a.article}</td>
                         <td className="px-3 py-2 text-muted-foreground text-xs max-w-[200px] truncate" title={a.subject}>{a.subject}</td>
                         <td className="text-right px-3 py-2">{formatNumber(a.totalOrders)}</td>
                         <td className="text-right px-3 py-2 text-amber-600 dark:text-amber-400">{a.fbsOrders}</td>
                         <td className="text-right px-3 py-2 text-sky-600 dark:text-sky-400">{a.fboOrders}</td>
                         <td className="text-right px-3 py-2">{a.avgDaily.toFixed(2)}</td>
-                        <td className="text-right px-3 py-2 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(a.supplyQty)}</td>
+                        <td className="text-right px-4 py-2 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(a.supplyQty)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
+              </div>
             </CardContent>
           </Card>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Показано {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filteredArticles.length)} из {filteredArticles.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page === 0}
+                  onClick={() => setPage(page - 1)}
+                >
+                  ← Назад
+                </Button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum: number
+                  if (totalPages <= 5) {
+                    pageNum = i
+                  } else if (page < 3) {
+                    pageNum = i
+                  } else if (page > totalPages - 4) {
+                    pageNum = totalPages - 5 + i
+                  } else {
+                    pageNum = page - 2 + i
+                  }
+                  return (
+                    <Button
+                      key={pageNum}
+                      variant={pageNum === page ? 'default' : 'outline'}
+                      size="sm"
+                      className="w-9"
+                      onClick={() => setPage(pageNum)}
+                    >
+                      {pageNum + 1}
+                    </Button>
+                  )
+                })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage(page + 1)}
+                >
+                  Вперёд →
+                </Button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -2299,7 +2373,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-[1800px] mx-auto w-full px-4 sm:px-6 py-6 pb-24">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6 flex-wrap h-auto gap-1">
             <TabsTrigger value="dashboard" className="gap-2">
@@ -2373,7 +2447,7 @@ export default function Home() {
       </main>
 
       <footer className="border-t mt-auto">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4">
+        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-4">
           <p className="text-xs text-muted-foreground text-center">
             WB Отчёты — Аналитика заказов Wildberries • 2026 • {entrepreneurs.length} ИП
           </p>
