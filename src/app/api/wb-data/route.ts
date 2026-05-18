@@ -70,6 +70,9 @@ export async function GET(request: NextRequest) {
     } else if (section === 'production') {
       const tenDaysAgo = new Date(nowMsk.getTime() - 10 * 86400000)
       defaultDateFrom = tenDaysAgo.toISOString().split('T')[0]
+    } else if (section === 'supply') {
+      const thirtyDaysAgo = new Date(nowMsk.getTime() - 30 * 86400000)
+      defaultDateFrom = thirtyDaysAgo.toISOString().split('T')[0]
     } else {
       const threeMonthsAgo = new Date(nowMsk.getTime() - 90 * 86400000)
       defaultDateFrom = threeMonthsAgo.toISOString().split('T')[0]
@@ -112,10 +115,12 @@ export async function GET(request: NextRequest) {
 
     // Determine cache TTL based on section
     const CACHE_TTL_PRODUCTION = 2 * 60 * 1000  // 2 min
+    const CACHE_TTL_SUPPLY = 2 * 60 * 1000  // 2 min
     const cacheTtl = section === 'dashboard' ? CACHE_TTL_DASHBOARD
       : section === 'daily' ? CACHE_TTL_DAILY
       : section === 'monthly' ? CACHE_TTL_MONTHLY
       : section === 'production' ? CACHE_TTL_PRODUCTION
+      : section === 'supply' ? CACHE_TTL_SUPPLY
       : CACHE_TTL_DASHBOARD
 
     // Fetch orders for each entrepreneur SEQUENTIALLY with delays
@@ -243,6 +248,7 @@ export async function GET(request: NextRequest) {
     const needDaily = !section || section === 'daily'
     const needMonthly = !section || section === 'monthly'
     const needProduction = !section || section === 'production'
+    const needSupply = !section || section === 'supply'
 
     // Product types (shared across sections)
     const productTypes = [...new Set(allMappedOrders.map(o => o.mappedType))]
@@ -556,6 +562,81 @@ export async function GET(request: NextRequest) {
           week: { dateFrom: weekFromDate, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, days: weekDays },
           month: { dateFrom: monthFromDate, dateTo: yesterdayMsk2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, days: monthDays },
         },
+      }
+    }
+
+    // ─── Build Supply Calculation ───
+    if (needSupply) {
+      const FBO_COEFFICIENT = 1.2  // FBO sells more than FBS
+      const supplyDays = Number(searchParams.get('supplyDays')) || 14  // default 2 weeks
+
+      // Count orders per supplierArticle in the selected period
+      // We use ALL orders (both FBS and FBO) to calculate average daily demand
+      const articleStats: Record<string, {
+        article: string
+        subject: string
+        brand: string
+        totalOrders: number
+        fbsOrders: number
+        fboOrders: number
+      }> = {}
+
+      // Calculate number of unique days in the date range that have orders
+      const allOrderDates = new Set<string>()
+      for (const o of allMappedOrders) {
+        if (o.dateStr) allOrderDates.add(o.dateStr)
+
+        const article = o.order.supplierArticle || ''
+        if (!article) continue
+
+        if (!articleStats[article]) {
+          articleStats[article] = {
+            article,
+            subject: o.order.subject || '',
+            brand: o.order.brand || '',
+            totalOrders: 0,
+            fbsOrders: 0,
+            fboOrders: 0,
+          }
+        }
+        articleStats[article].totalOrders++
+        if (o.isFbs) {
+          articleStats[article].fbsOrders++
+        } else {
+          articleStats[article].fboOrders++
+        }
+      }
+
+      // Number of days in the analysis period
+      const daysInRange = allOrderDates.size || 1
+
+      // Build supply table
+      const supplyTable = Object.values(articleStats)
+        .map(stat => {
+          const avgDaily = stat.totalOrders / daysInRange
+          const supplyQty = Math.ceil(avgDaily * supplyDays * FBO_COEFFICIENT)
+          return {
+            article: stat.article,
+            subject: stat.subject,
+            brand: stat.brand,
+            totalOrders: stat.totalOrders,
+            fbsOrders: stat.fbsOrders,
+            fboOrders: stat.fboOrders,
+            avgDaily: Math.round(avgDaily * 100) / 100,
+            supplyQty,
+          }
+        })
+        .sort((a, b) => b.supplyQty - a.supplyQty)
+
+      response.supply = {
+        dateFrom,
+        dateTo,
+        daysInRange,
+        supplyDays,
+        coefficient: FBO_COEFFICIENT,
+        totalArticles: supplyTable.length,
+        totalSupplyQty: supplyTable.reduce((s, r) => s + r.supplyQty, 0),
+        articles: supplyTable,
       }
     }
 

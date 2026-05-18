@@ -20,6 +20,7 @@ import {
   Plus,
   Download,
   Thermometer,
+  Truck,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -163,6 +164,26 @@ interface ProductionLoadData {
     week: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
     month: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
   }
+}
+
+interface SupplyData {
+  dateFrom: string
+  dateTo: string
+  daysInRange: number
+  supplyDays: number
+  coefficient: number
+  totalArticles: number
+  totalSupplyQty: number
+  articles: Array<{
+    article: string
+    subject: string
+    brand: string
+    totalOrders: number
+    fbsOrders: number
+    fboOrders: number
+    avgDaily: number
+    supplyQty: number
+  }>
 }
 
 const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
@@ -1357,6 +1378,235 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
   )
 }
 
+// --- Supply Tab (Поставки) ---
+function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+  const [fetchedData, setFetchedData] = useState<SupplyData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
+  const [supplyDays, setSupplyDays] = useState<number>(14)
+  const [sortBy, setSortBy] = useState<'supplyQty' | 'avgDaily' | 'article'>('supplyQty')
+
+  // Default date range: last 30 days ending yesterday
+  const getDefaultDates = () => {
+    const mskOffset = 3 * 60 * 60 * 1000
+    const nowMsk = new Date(Date.now() + mskOffset)
+    const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+    const monthAgo = new Date(nowMsk.getTime() - 31 * 86400000).toISOString().split('T')[0]
+    return { from: monthAgo, to: yesterday }
+  }
+  const defaults = getDefaultDates()
+  const [dateFrom, setDateFrom] = useState<string>(defaults.from)
+  const [dateTo, setDateTo] = useState<string>(defaults.to)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    setRateLimitErrors([])
+    try {
+      const params = new URLSearchParams()
+      params.set('entrepreneurId', selectedEnt)
+      params.set('section', 'supply')
+      params.set('dateFrom', dateFrom)
+      params.set('dateTo', dateTo)
+      params.set('supplyDays', String(supplyDays))
+      const res = await fetch(`/api/wb-data?${params.toString()}`)
+      const json = await res.json()
+      if (json.supply) setFetchedData(json.supply)
+      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedEnt, dateFrom, dateTo, supplyDays])
+
+  const supplyPeriods = [
+    { label: '7 дней', value: 7 },
+    { label: '2 недели', value: 14 },
+    { label: 'Месяц', value: 30 },
+    { label: '2 месяца', value: 60 },
+  ]
+
+  // Sort articles
+  const sortedArticles = fetchedData
+    ? [...fetchedData.articles].sort((a, b) => {
+        if (sortBy === 'supplyQty') return b.supplyQty - a.supplyQty
+        if (sortBy === 'avgDaily') return b.avgDaily - a.avgDaily
+        return a.article.localeCompare(b.article)
+      })
+    : []
+
+  return (
+    <div className="space-y-4">
+      <RateLimitAlert errors={rateLimitErrors} />
+
+      {/* Controls row 1: ИП + Date range */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1">ИП</Label>
+          <Select value={selectedEnt} onValueChange={setSelectedEnt}>
+            <SelectTrigger className="w-56">
+              <SelectValue placeholder="Все ИП" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все ИП (сводный)</SelectItem>
+              {entrepreneurs.map((e) => (
+                <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1">Период анализа (от)</Label>
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" />
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1">Период анализа (до)</Label>
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" />
+        </div>
+
+        <Button onClick={fetchData} disabled={loading} className="gap-2">
+          {loading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Расчёт...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" />
+              Рассчитать
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* Controls row 2: Supply period */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium text-muted-foreground">Загрузить склад на:</span>
+        <ToggleGroup type="single" value={String(supplyDays)} onValueChange={(v) => { if (v) setSupplyDays(Number(v)) }} className="border rounded-md">
+          {supplyPeriods.map((p) => (
+            <ToggleGroupItem key={p.value} value={String(p.value)} className="text-xs px-3">{p.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </div>
+
+      {loading && <Skeleton className="h-96 w-full" />}
+
+      {!loading && !fetchedData && (
+        <EmptyState
+          message="Выберите ИП, период анализа и нажмите «Рассчитать»"
+          icon={<Truck className="h-12 w-12" />}
+        />
+      )}
+
+      {!loading && fetchedData && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-muted-foreground mb-1">Артикулов</div>
+                <div className="text-xl font-bold">{formatNumber(fetchedData.totalArticles)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-muted-foreground mb-1">Дней в периоде</div>
+                <div className="text-xl font-bold">{fetchedData.daysInRange}</div>
+              </CardContent>
+            </Card>
+            <Card className="border-emerald-200 dark:border-emerald-800">
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-emerald-700 dark:text-emerald-400 mb-1">Итого к поставке</div>
+                <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(fetchedData.totalSupplyQty)} шт</div>
+              </CardContent>
+            </Card>
+            <Card className="border-amber-200 dark:border-amber-800">
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">Коэффициент FBO</div>
+                <div className="text-xl font-bold text-amber-700 dark:text-amber-400">×{fetchedData.coefficient}</div>
+                <div className="text-[10px] text-muted-foreground">учитывает рост продаж на FBO</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Formula explanation */}
+          <Card className="border-dashed">
+            <CardContent className="py-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Package className="h-4 w-4" />
+                <span>Формула: <strong>Шт к поставке</strong> = (заказов / {fetchedData.daysInRange} дней) × {fetchedData.supplyDays} дней × {fetchedData.coefficient}</span>
+                <span className="text-xs">| Период: {formatDateShort(fetchedData.dateFrom)} — {formatDateShort(fetchedData.dateTo)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Sort controls */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Сортировка:</span>
+            <ToggleGroup type="single" value={sortBy} onValueChange={(v) => { if (v) setSortBy(v as 'supplyQty' | 'avgDaily' | 'article') }} className="border rounded-md">
+              <ToggleGroupItem value="supplyQty" className="text-xs px-3">К поставке</ToggleGroupItem>
+              <ToggleGroupItem value="avgDaily" className="text-xs px-3">Среднее/день</ToggleGroupItem>
+              <ToggleGroupItem value="article" className="text-xs px-3">Артикул</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
+          {/* Articles table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                Расчёт поставки по артикулам
+                <Badge variant="secondary" className="text-xs">{fetchedData.totalArticles} артикулов</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="w-full max-h-[600px]">
+                <table className="text-sm w-full">
+                  <thead className="sticky top-0 bg-background z-10">
+                    <tr className="bg-muted/50 border-b">
+                      <th className="text-left px-3 py-2 font-medium min-w-[160px]">Артикул поставщика</th>
+                      <th className="text-left px-3 py-2 font-medium min-w-[140px]">Категория</th>
+                      <th className="text-right px-3 py-2 font-medium min-w-[80px]">Всего заказов</th>
+                      <th className="text-right px-3 py-2 font-medium min-w-[70px]">FBS</th>
+                      <th className="text-right px-3 py-2 font-medium min-w-[70px]">FBO</th>
+                      <th className="text-right px-3 py-2 font-medium min-w-[80px]">Среднее/день</th>
+                      <th className="text-right px-3 py-2 font-medium min-w-[100px]">Шт к поставке</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Totals row */}
+                    <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold">
+                      <td className="px-3 py-2" colSpan={2}>ИТОГО</td>
+                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.totalOrders, 0))}</td>
+                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fbsOrders, 0))}</td>
+                      <td className="text-right px-3 py-2">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fboOrders, 0))}</td>
+                      <td className="text-right px-3 py-2">—</td>
+                      <td className="text-right px-3 py-2 font-bold">{formatNumber(fetchedData.totalSupplyQty)}</td>
+                    </tr>
+                    {sortedArticles.map((a, i) => (
+                      <tr key={`${a.article}-${i}`} className="border-b hover:bg-muted/30 transition-colors">
+                        <td className="px-3 py-2 font-medium font-mono text-xs">{a.article}</td>
+                        <td className="px-3 py-2 text-muted-foreground text-xs max-w-[200px] truncate" title={a.subject}>{a.subject}</td>
+                        <td className="text-right px-3 py-2">{formatNumber(a.totalOrders)}</td>
+                        <td className="text-right px-3 py-2 text-amber-600 dark:text-amber-400">{a.fbsOrders}</td>
+                        <td className="text-right px-3 py-2 text-sky-600 dark:text-sky-400">{a.fboOrders}</td>
+                        <td className="text-right px-3 py-2">{a.avgDaily.toFixed(2)}</td>
+                        <td className="text-right px-3 py-2 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(a.supplyQty)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 // --- Ad Spend Tab ---
 function AdSpendTab() {
   const [data, setData] = useState<AdSpendData | null>(null)
@@ -2064,6 +2314,10 @@ export default function Home() {
               <Thermometer className="h-4 w-4" />
               <span className="hidden sm:inline">Нагрузка</span>
             </TabsTrigger>
+            <TabsTrigger value="supply" className="gap-2">
+              <Truck className="h-4 w-4" />
+              <span className="hidden sm:inline">Поставки</span>
+            </TabsTrigger>
             <TabsTrigger value="monthly" className="gap-2">
               <Calendar className="h-4 w-4" />
               <span className="hidden sm:inline">По месяцам</span>
@@ -2099,6 +2353,9 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="production">
             <ProductionLoadTab entrepreneurs={entrepreneurs} />
+          </TabsContent>
+          <TabsContent value="supply">
+            <SupplyTab entrepreneurs={entrepreneurs} />
           </TabsContent>
           <TabsContent value="monthly">
             <MonthlyTab entrepreneurs={entrepreneurs} />
