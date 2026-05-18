@@ -1222,20 +1222,20 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
             </ToggleGroup>
           </div>
 
-          {/* Daily load table */}
+          {/* Daily load table — last 7 days, newest first */}
           {viewMode === 'day' && fetchedData.dates.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  Нагрузка по дням
-                  <Badge variant="secondary" className="text-xs">{fetchedData.dates.length} дней</Badge>
+                  Нагрузка по дням (7 дней)
+                  <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <div className="overflow-x-auto">
                   <table className="text-sm w-full">
                     <thead>
-                      <tr className="bg-muted/50 border-b sticky top-0 z-10">
+                      <tr className="bg-muted/50 border-b">
                         <th className="text-left px-4 py-2.5 font-medium">Дата</th>
                         <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Заказов</th>
                         <th className="text-right px-3 py-2.5 font-medium min-w-[80px]">Изделий</th>
@@ -1244,28 +1244,32 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedData.dates.map((date, i) => {
-                        const loadPct = fetchedData.dateLoadPct[i]
-                        const colors = getLoadColorClasses(loadPct)
-                        return (
-                          <tr key={date} className="border-b hover:bg-muted/30 transition-colors">
-                            <td className="px-4 py-2 font-medium">{formatDateFull(date)}</td>
-                            <td className="text-right px-3 py-2">{formatNumber(fetchedData.dateOrders[i])}</td>
-                            <td className="text-right px-3 py-2 font-medium">{formatNumber(fetchedData.dateItems[i])}</td>
-                            <td className={`text-right px-3 py-2 font-bold ${colors.text}`}>
-                              {loadPct.toFixed(1)}%
-                            </td>
-                            <td className="px-4 py-2">
-                              <div className="h-2.5 bg-muted rounded-full overflow-hidden w-full">
-                                <div
-                                  className={`h-full ${colors.bar} rounded-full transition-all duration-500`}
-                                  style={{ width: `${Math.min(loadPct, 100)}%` }}
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
+                      {[...fetchedData.dates]
+                        .map((date, i) => ({ date, i }))
+                        .slice(-7)
+                        .reverse()
+                        .map(({ date, i }) => {
+                          const loadPct = fetchedData.dateLoadPct[i]
+                          const colors = getLoadColorClasses(loadPct)
+                          return (
+                            <tr key={date} className="border-b hover:bg-muted/30 transition-colors">
+                              <td className="px-4 py-2 font-medium">{formatDateFull(date)}</td>
+                              <td className="text-right px-3 py-2">{formatNumber(fetchedData.dateOrders[i])}</td>
+                              <td className="text-right px-3 py-2 font-medium">{formatNumber(fetchedData.dateItems[i])}</td>
+                              <td className={`text-right px-3 py-2 font-bold ${colors.text}`}>
+                                {loadPct.toFixed(1)}%
+                              </td>
+                              <td className="px-4 py-2">
+                                <div className="h-2.5 bg-muted rounded-full overflow-hidden w-full">
+                                  <div
+                                    className={`h-full ${colors.bar} rounded-full transition-all duration-500`}
+                                    style={{ width: `${Math.min(loadPct, 100)}%` }}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
                     </tbody>
                   </table>
                 </div>
