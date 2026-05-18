@@ -610,7 +610,8 @@ export async function GET(request: NextRequest) {
       // Number of days in the analysis period
       const daysInRange = allOrderDates.size || 1
 
-      // Build supply table
+      // Build supply table (filter out articles with supplyQty < 9)
+      const MIN_SUPPLY_QTY = 9
       const supplyTable = Object.values(articleStats)
         .map(stat => {
           const avgDaily = stat.totalOrders / daysInRange
@@ -626,6 +627,7 @@ export async function GET(request: NextRequest) {
             supplyQty,
           }
         })
+        .filter(r => r.supplyQty >= MIN_SUPPLY_QTY)
         .sort((a, b) => b.supplyQty - a.supplyQty)
 
       response.supply = {
