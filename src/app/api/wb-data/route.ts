@@ -624,7 +624,11 @@ export async function GET(request: NextRequest) {
         }
 
         try {
-          const stocksUrl = 'https://suppliers-api.wildberries.ru/api/v2/stocks'
+          // WB Stocks API: statistics-api.wildberries.ru/api/v1/supplier/stocks
+          // Returns stock levels at WB warehouses (FBO) per article per warehouse
+          // Use yesterday's date — the API requires dateFrom and returns stock snapshot
+          const stockDate = dateTo || new Date().toISOString().split('T')[0]
+          const stocksUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=${stockDate}`
           const stocksRes = await fetch(stocksUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
           if (stocksRes.ok) {
@@ -633,7 +637,8 @@ export async function GET(request: NextRequest) {
               for (const item of stocksData) {
                 const article = item.supplierArticle || ''
                 if (!article) continue
-                // quantityFull = total stock at FBO warehouse (free + reserved)
+                // quantityFull = total stock at warehouse (free + reserved)
+                // One article may appear multiple times (different warehouses) — sum them up
                 const qty = item.quantityFull || 0
                 if (!fboStock[article]) fboStock[article] = 0
                 fboStock[article] += qty
