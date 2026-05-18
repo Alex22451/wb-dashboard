@@ -1,0 +1,82 @@
+{
+  "entrepreneurs": [
+    {"id": 1, "name": "Бураго Т.В.", "apiKey": ""},
+    {"id": 2, "name": "Боев Ф.В.", "apiKey": ""},
+    {"id": 3, "name": "Масляков Л.А.", "apiKey": ""},
+    {"id": 4, "name": "Масляков В.А.", "apiKey": ""},
+    {"id": 5, "name": "Масляков А.А.", "apiKey": ""},
+    {"id": 6, "name": "Зубахин А.В.", "apiKey": ""},
+    {"id": 7, "name": "Зубахина Н.В.", "apiKey": ""}
+  ],
+  "adSpends": {
+    "1": [
+      {"year": 2025, "month": 1, "budget": 90000, "actual": 87640},
+      {"year": 2025, "month": 2, "budget": 90000, "actual": 129395},
+      {"year": 2025, "month": 3, "budget": 90000, "actual": 149720},
+      {"year": 2025, "month": 4, "budget": 90000, "actual": 110486},
+      {"year": 2025, "month": 5, "budget": 90000, "actual": 83067},
+      {"year": 2025, "month": 6, "budget": 90000, "actual": 86472},
+      {"year": 2025, "month": 7, "budget": 90000, "actual": 140419},
+      {"year": 2025, "month": 8, "budget": 90000, "actual": 157000},
+      {"year": 2025, "month": 9, "budget": 90000, "actual": 29753},
+      {"year": 2025, "month": 10, "budget": 90000, "actual": 56804},
+      {"year": 2025, "month": 11, "budget": 90000, "actual": 92028}
+    ],
+    "3": [
+      {"year": 2025, "month": 1, "budget": 30000, "actual": 27775},
+      {"year": 2025, "month": 2, "budget": 30000, "actual": 43301},
+      {"year": 2025, "month": 3, "budget": 30000, "actual": 16420},
+      {"year": 2025, "month": 4, "budget": 30000, "actual": 15624},
+      {"year": 2025, "month": 5, "budget": 30000, "actual": 41627},
+      {"year": 2025, "month": 6, "budget": 30000, "actual": 20961},
+      {"year": 2025, "month": 7, "budget": 30000, "actual": 30132},
+      {"year": 2025, "month": 8, "budget": 30000, "actual": 2000},
+      {"year": 2025, "month": 10, "budget": 30000, "actual": 3000},
+      {"year": 2025, "month": 11, "budget": 30000, "actual": 2000}
+    ],
+    "4": [
+      {"year": 2025, "month": 1, "budget": 40000, "actual": 34472},
+      {"year": 2025, "month": 2, "budget": 40000, "actual": 60466},
+      {"year": 2025, "month": 3, "budget": 40000, "actual": 57115},
+      {"year": 2025, "month": 4, "budget": 40000, "actual": 10837},
+      {"year": 2025, "month": 5, "budget": 40000, "actual": 21977},
+      {"year": 2025, "month": 6, "budget": 40000, "actual": 27023},
+      {"year": 2025, "month": 7, "budget": 40000, "actual": 41000},
+      {"year": 2025, "month": 8, "budget": 40000, "actual": 73359},
+      {"year": 2025, "month": 9, "budget": 40000, "actual": 30000},
+      {"year": 2025, "month": 10, "budget": 40000, "actual": 12000}
+    ],
+    "5": [
+      {"year": 2025, "month": 1, "budget": 105000, "actual": 32858},
+      {"year": 2025, "month": 2, "budget": 105000, "actual": 36278},
+      {"year": 2025, "month": 3, "budget": 105000, "actual": 38289},
+      {"year": 2025, "month": 4, "budget": 105000, "actual": 58034},
+      {"year": 2025, "month": 5, "budget": 105000, "actual": 133121},
+      {"year": 2025, "month": 6, "budget": 105000, "actual": 86316},
+      {"year": 2025, "month": 7, "budget": 105000, "actual": 91967},
+      {"year": 2025, "month": 8, "budget": 105000, "actual": 86662},
+      {"year": 2025, "month": 9, "budget": 105000, "actual": 75428},
+      {"year": 2025, "month": 10, "budget": 105000, "actual": 62700},
+      {"year": 2025, "month": 11, "budget": 105000, "actual": 85838}
+    ],
+    "6": [
+      {"year": 2025, "month": 3, "budget": 105000, "actual": 75486},
+      {"year": 2025, "month": 4, "budget": 105000, "actual": 86589},
+      {"year": 2025, "month": 5, "budget": 105000, "actual": 94217},
+      {"year": 2025, "month": 6, "budget": 105000, "actual": 117656},
+      {"year": 2025, "month": 7, "budget": 105000, "actual": 114735},
+      {"year": 2025, "month": 8, "budget": 105000, "actual": 147372},
+      {"year": 2025, "month": 9, "budget": 105000, "actual": 38261},
+      {"year": 2025, "month": 10, "budget": 105000, "actual": 116735},
+      {"year": 2025, "month": 11, "budget": 105000, "actual": 77178}
+    ],
+    "7": [
+      {"year": 2025, "month": 3, "budget": 30000, "actual": 1033},
+      {"year": 2025, "month": 4, "budget": 30000, "actual": 2970},
+      {"year": 2025, "month": 6, "budget": 30000, "actual": 15056},
+      {"year": 2025, "month": 7, "budget": 30000, "actual": 5532},
+      {"year": 2025, "month": 8, "budget": 30000, "actual": 6200},
+      {"year": 2025, "month": 9, "budget": 30000, "actual": 1291}
+    ]
+  }
+}
