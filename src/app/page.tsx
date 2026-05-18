@@ -174,6 +174,7 @@ interface SupplyData {
   coefficient: number
   totalArticles: number
   totalSupplyQty: number
+  totalFboStock: number
   articles: Array<{
     article: string
     subject: string
@@ -182,6 +183,7 @@ interface SupplyData {
     fbsOrders: number
     fboOrders: number
     avgDaily: number
+    fboStock: number
     supplyQty: number
   }>
 }
@@ -1537,7 +1539,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       {!loading && fetchedData && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Card>
               <CardContent className="pt-4 pb-4">
                 <div className="text-xs text-muted-foreground mb-1">Артикулов</div>
@@ -1548,6 +1550,12 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               <CardContent className="pt-4 pb-4">
                 <div className="text-xs text-muted-foreground mb-1">Дней в периоде</div>
                 <div className="text-xl font-bold">{fetchedData.daysInRange}</div>
+              </CardContent>
+            </Card>
+            <Card className="border-sky-200 dark:border-sky-800">
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">Остаток на ФБО</div>
+                <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(fetchedData.totalFboStock)} шт</div>
               </CardContent>
             </Card>
             <Card className="border-emerald-200 dark:border-emerald-800">
@@ -1570,7 +1578,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
             <CardContent className="py-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Формула: <strong>Шт к поставке</strong> = (заказов / {fetchedData.daysInRange} дней) × {fetchedData.supplyDays} дней × {fetchedData.coefficient}</span>
+                <span>Формула: <strong>Шт к поставке</strong> = (заказов / {fetchedData.daysInRange} дней) × {fetchedData.supplyDays} дней × {fetchedData.coefficient} − остаток ФБО</span>
                 <span className="text-xs">| Период: {formatDateShort(fetchedData.dateFrom)} — {formatDateShort(fetchedData.dateTo)}</span>
               </div>
             </CardContent>
@@ -1616,6 +1624,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                       <th className="text-right px-3 py-2.5 font-medium min-w-[70px]">FBS</th>
                       <th className="text-right px-3 py-2.5 font-medium min-w-[70px]">FBO</th>
                       <th className="text-right px-3 py-2.5 font-medium min-w-[90px]">Среднее/день</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[100px]">Остаток ФБО</th>
                       <th className="text-right px-4 py-2.5 font-medium min-w-[110px]">Шт к поставке</th>
                     </tr>
                   </thead>
@@ -1627,7 +1636,8 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                       <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fbsOrders, 0))}</td>
                       <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fboOrders, 0))}</td>
                       <td className="text-right px-3 py-2.5">—</td>
-                      <td className="text-right px-4 py-2.5 font-bold">{formatNumber(fetchedData.totalSupplyQty)}</td>
+                      <td className="text-right px-3 py-2.5 text-sky-700 dark:text-sky-400">{formatNumber(fetchedData.totalFboStock)}</td>
+                      <td className="text-right px-4 py-2.5 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(fetchedData.totalSupplyQty)}</td>
                     </tr>
                     {paginatedArticles.map((a, i) => (
                       <tr key={`${a.article}-${i}`} className="border-b hover:bg-muted/30 transition-colors">
@@ -1637,6 +1647,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                         <td className="text-right px-3 py-2 text-amber-600 dark:text-amber-400">{a.fbsOrders}</td>
                         <td className="text-right px-3 py-2 text-sky-600 dark:text-sky-400">{a.fboOrders}</td>
                         <td className="text-right px-3 py-2">{a.avgDaily.toFixed(2)}</td>
+                        <td className="text-right px-3 py-2 text-sky-700 dark:text-sky-400 font-medium">{formatNumber(a.fboStock)}</td>
                         <td className="text-right px-4 py-2 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(a.supplyQty)}</td>
                       </tr>
                     ))}

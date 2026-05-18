@@ -610,12 +610,52 @@ export async function GET(request: NextRequest) {
       // Number of days in the analysis period
       const daysInRange = allOrderDates.size || 1
 
-      // Build supply table (filter out articles with supplyQty < 9)
+      // ─── Fetch FBO stock from WB API ───
+      // Get current stock levels at WB warehouses to subtract from supply calculation
+      const fboStock: Record<string, number> = {}  // supplierArticle -> total FBO quantity
+
+      for (let i = 0; i < targets.length; i++) {
+        const ent = targets[i]
+        const apiHeaders = { 'Authorization': `Bearer ${ent.wbApiKey}`, 'Content-Type': 'application/json' }
+
+        // Delay between entrepreneurs
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+
+        try {
+          const stocksUrl = 'https://suppliers-api.wildberries.ru/api/v2/stocks'
+          const stocksRes = await fetch(stocksUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+
+          if (stocksRes.ok) {
+            const stocksData = await stocksRes.json()
+            if (Array.isArray(stocksData)) {
+              for (const item of stocksData) {
+                const article = item.supplierArticle || ''
+                if (!article) continue
+                // quantityFull = total stock at FBO warehouse (free + reserved)
+                const qty = item.quantityFull || 0
+                if (!fboStock[article]) fboStock[article] = 0
+                fboStock[article] += qty
+              }
+            }
+          } else {
+            console.log(`WB Stocks API error for ${ent.name}: ${stocksRes.status}`)
+          }
+        } catch (e) {
+          console.log(`WB Stocks API network error for ${ent.name}`)
+        }
+      }
+
+      // Build supply table — subtract FBO stock from calculated supply
+      // supplyQty = max(0, avgDaily × supplyDays × coefficient - fboStock)
       const MIN_SUPPLY_QTY = 9
       const supplyTable = Object.values(articleStats)
         .map(stat => {
           const avgDaily = stat.totalOrders / daysInRange
-          const supplyQty = Math.ceil(avgDaily * supplyDays * coefficient)
+          const rawSupply = Math.ceil(avgDaily * supplyDays * coefficient)
+          const currentFboStock = fboStock[stat.article] || 0
+          const supplyQty = Math.max(0, rawSupply - currentFboStock)
           return {
             article: stat.article,
             subject: stat.subject,
@@ -624,6 +664,7 @@ export async function GET(request: NextRequest) {
             fbsOrders: stat.fbsOrders,
             fboOrders: stat.fboOrders,
             avgDaily: Math.round(avgDaily * 100) / 100,
+            fboStock: currentFboStock,
             supplyQty,
           }
         })
@@ -638,6 +679,7 @@ export async function GET(request: NextRequest) {
         coefficient,
         totalArticles: supplyTable.length,
         totalSupplyQty: supplyTable.reduce((s, r) => s + r.supplyQty, 0),
+        totalFboStock: supplyTable.reduce((s, r) => s + r.fboStock, 0),
         articles: supplyTable,
       }
     }
