@@ -567,7 +567,7 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Supply Calculation ───
     if (needSupply) {
-      const FBO_COEFFICIENT = 1.2  // FBO sells more than FBS
+      const coefficient = Math.min(1.5, Math.max(1, Number(searchParams.get('coefficient')) || 1))  // 1.0 – 1.5, default 1
       const supplyDays = Number(searchParams.get('supplyDays')) || 14  // default 2 weeks
 
       // Count orders per supplierArticle in the selected period
@@ -615,7 +615,7 @@ export async function GET(request: NextRequest) {
       const supplyTable = Object.values(articleStats)
         .map(stat => {
           const avgDaily = stat.totalOrders / daysInRange
-          const supplyQty = Math.ceil(avgDaily * supplyDays * FBO_COEFFICIENT)
+          const supplyQty = Math.ceil(avgDaily * supplyDays * coefficient)
           return {
             article: stat.article,
             subject: stat.subject,
@@ -635,7 +635,7 @@ export async function GET(request: NextRequest) {
         dateTo,
         daysInRange,
         supplyDays,
-        coefficient: FBO_COEFFICIENT,
+        coefficient,
         totalArticles: supplyTable.length,
         totalSupplyQty: supplyTable.reduce((s, r) => s + r.supplyQty, 0),
         articles: supplyTable,

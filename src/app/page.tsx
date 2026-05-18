@@ -1385,6 +1385,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [selectedEnt, setSelectedEnt] = useState<string>('all')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [supplyDays, setSupplyDays] = useState<number>(14)
+  const [coefficient, setCoefficient] = useState<number>(1)
   const [sortBy, setSortBy] = useState<'supplyQty' | 'avgDaily' | 'article'>('supplyQty')
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [page, setPage] = useState(0)
@@ -1413,6 +1414,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       params.set('dateFrom', dateFrom)
       params.set('dateTo', dateTo)
       params.set('supplyDays', String(supplyDays))
+      params.set('coefficient', String(coefficient))
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.supply) setFetchedData(json.supply)
@@ -1422,7 +1424,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateFrom, dateTo, supplyDays])
+  }, [selectedEnt, dateFrom, dateTo, supplyDays, coefficient])
 
   const supplyPeriods = [
     { label: '7 дней', value: 7 },
@@ -1495,14 +1497,32 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
         </Button>
       </div>
 
-      {/* Controls row 2: Supply period */}
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-medium text-muted-foreground">Загрузить склад на:</span>
-        <ToggleGroup type="single" value={String(supplyDays)} onValueChange={(v) => { if (v) setSupplyDays(Number(v)) }} className="border rounded-md">
-          {supplyPeriods.map((p) => (
-            <ToggleGroupItem key={p.value} value={String(p.value)} className="text-xs px-3">{p.label}</ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+      {/* Controls row 2: Supply period + Coefficient */}
+      <div className="flex flex-wrap items-center gap-6">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-muted-foreground">Загрузить склад на:</span>
+          <ToggleGroup type="single" value={String(supplyDays)} onValueChange={(v) => { if (v) setSupplyDays(Number(v)) }} className="border rounded-md">
+            {supplyPeriods.map((p) => (
+              <ToggleGroupItem key={p.value} value={String(p.value)} className="text-xs px-3">{p.label}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-muted-foreground">Коэффициент:</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={1}
+              max={1.5}
+              step={0.05}
+              value={coefficient}
+              onChange={(e) => setCoefficient(Number(e.target.value))}
+              className="w-32 h-2 accent-amber-500 cursor-pointer"
+            />
+            <span className="text-sm font-bold text-amber-700 dark:text-amber-400 min-w-[40px] text-center">{coefficient.toFixed(2)}</span>
+          </div>
+        </div>
       </div>
 
       {loading && <Skeleton className="h-96 w-full" />}
@@ -1538,9 +1558,9 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
             </Card>
             <Card className="border-amber-200 dark:border-amber-800">
               <CardContent className="pt-4 pb-4">
-                <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">Коэффициент FBO</div>
+                <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">Коэффициент</div>
                 <div className="text-xl font-bold text-amber-700 dark:text-amber-400">×{fetchedData.coefficient}</div>
-                <div className="text-[10px] text-muted-foreground">учитывает рост продаж на FBO</div>
+                <div className="text-[10px] text-muted-foreground">увеличение для учёта FBO продаж</div>
               </CardContent>
             </Card>
           </div>
