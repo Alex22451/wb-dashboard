@@ -1037,9 +1037,18 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     setLoading(true)
     setRateLimitErrors([])
     try {
+      // Calculate date range based on viewMode: day=2 days, week=8 days, month=31 days (all ending yesterday)
+      const mskOffset = 3 * 60 * 60 * 1000
+      const nowMsk = new Date(Date.now() + mskOffset)
+      const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+      const daysBack = viewMode === 'day' ? 2 : viewMode === 'week' ? 8 : 31
+      const from = new Date(nowMsk.getTime() - daysBack * 86400000).toISOString().split('T')[0]
+
       const params = new URLSearchParams()
       params.set('entrepreneurId', selectedEnt)
       params.set('section', 'production')
+      params.set('dateFrom', from)
+      params.set('dateTo', yesterday)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.production) setFetchedData(json.production)
@@ -1049,7 +1058,40 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt])
+  }, [selectedEnt, viewMode])
+
+  // Auto-fetch when viewMode changes (if data was already loaded)
+  useEffect(() => {
+    if (fetchedData || viewMode) {
+      // Re-fetch with new date range when viewMode changes
+      const doFetch = async () => {
+        setLoading(true)
+        setRateLimitErrors([])
+        try {
+          const mskOffset = 3 * 60 * 60 * 1000
+          const nowMsk = new Date(Date.now() + mskOffset)
+          const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+          const daysBack = viewMode === 'day' ? 2 : viewMode === 'week' ? 8 : 31
+          const from = new Date(nowMsk.getTime() - daysBack * 86400000).toISOString().split('T')[0]
+
+          const params = new URLSearchParams()
+          params.set('entrepreneurId', selectedEnt)
+          params.set('section', 'production')
+          params.set('dateFrom', from)
+          params.set('dateTo', yesterday)
+          const res = await fetch(`/api/wb-data?${params.toString()}`)
+          const json = await res.json()
+          if (json.production) setFetchedData(json.production)
+          if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+        } catch (e) {
+          console.error(e)
+        } finally {
+          setLoading(false)
+        }
+      }
+      doFetch()
+    }
+  }, [viewMode])
 
   // Helper: get load color
   const getLoadColor = (pct: number) => {

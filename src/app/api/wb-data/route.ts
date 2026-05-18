@@ -68,8 +68,8 @@ export async function GET(request: NextRequest) {
       const threeDaysAgo = new Date(nowMsk.getTime() - 3 * 86400000)
       defaultDateFrom = threeDaysAgo.toISOString().split('T')[0]
     } else if (section === 'production') {
-      const tenDaysAgo = new Date(nowMsk.getTime() - 10 * 86400000)
-      defaultDateFrom = tenDaysAgo.toISOString().split('T')[0]
+      const thirtyOneDaysAgo = new Date(nowMsk.getTime() - 31 * 86400000)
+      defaultDateFrom = thirtyOneDaysAgo.toISOString().split('T')[0]
     } else if (section === 'supply') {
       const thirtyDaysAgo = new Date(nowMsk.getTime() - 30 * 86400000)
       defaultDateFrom = thirtyDaysAgo.toISOString().split('T')[0]
@@ -463,7 +463,7 @@ export async function GET(request: NextRequest) {
     // ─── Build Production Load ───
     if (needProduction) {
       // Maximum FBS production capacity per day
-      const DAILY_CAPACITY = 2300
+      const DAILY_CAPACITY = 2500
 
       // Only FBS orders matter for production load
       const fbsOrders = allMappedOrders.filter(o => o.isFbs)
