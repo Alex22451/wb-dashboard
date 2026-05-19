@@ -320,6 +320,40 @@ export async function GET(request: NextRequest) {
         weekEntStats[o.entrepreneurId].totalOrders++
       }
 
+      // FBS/FBO daily breakdown for chart (last 31 days ending yesterday)
+      const chartFromDate = new Date(mskNow.getTime() - 31 * 86400000).toISOString().split('T')[0]
+      const chartDates = [...new Set(
+        allMappedOrders
+          .filter(o => o.dateStr >= chartFromDate && o.dateStr <= yesterdayMsk)
+          .map(o => o.dateStr)
+          .filter(Boolean)
+      )].sort()
+      const chartFbs: Record<string, number> = {}
+      const chartFbo: Record<string, number> = {}
+      for (const d of chartDates) {
+        chartFbs[d] = 0
+        chartFbo[d] = 0
+      }
+      for (const o of allMappedOrders) {
+        if (o.dateStr && chartFbs.hasOwnProperty(o.dateStr)) {
+          if (o.isFbs) chartFbs[o.dateStr]++
+          else chartFbo[o.dateStr]++
+        }
+      }
+
+      // Period summary stats (total, fbs, fbo for different periods)
+      const calcPeriodStats = (days: number) => {
+        const from = new Date(mskNow.getTime() - days * 86400000).toISOString().split('T')[0]
+        const periodOrders = allMappedOrders.filter(o => o.dateStr >= from && o.dateStr <= yesterdayMsk)
+        return {
+          total: periodOrders.length,
+          fbs: periodOrders.filter(o => o.isFbs).length,
+          fbo: periodOrders.filter(o => !o.isFbs).length,
+          dateFrom: from,
+          dateTo: yesterdayMsk,
+        }
+      }
+
       response.dashboard = {
         totalOrders,
         yesterdayOrders,
@@ -340,6 +374,14 @@ export async function GET(request: NextRequest) {
         weekDateFrom: weekFromDate,
         weekDateTo: yesterdayMsk,
         productCount: productTypes.length,
+        chartDates,
+        chartFbs,
+        chartFbo,
+        periodStats: {
+          week: calcPeriodStats(7),
+          twoWeeks: calcPeriodStats(14),
+          month: calcPeriodStats(30),
+        },
       }
     }
 

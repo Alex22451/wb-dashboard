@@ -69,6 +69,14 @@ interface DashboardData {
   yesterdayFboOrders: number
   dayBeforeYesterdayFbsOrders: number
   dayBeforeYesterdayFboOrders: number
+  chartDates: string[]
+  chartFbs: Record<string, number>
+  chartFbo: Record<string, number>
+  periodStats: {
+    week: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+  }
 }
 
 interface DailyOrdersData {
@@ -252,6 +260,8 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 }) {
   const dayChange = data?.dayChange
   const monthChange = data?.monthChange
+  const [dashboardPeriod, setDashboardPeriod] = useState<'week' | 'twoWeeks' | 'month'>('week')
+  const [fboViewMode, setFboViewMode] = useState<'cards' | 'chart'>('cards')
 
   return (
     <div className="space-y-6">
@@ -370,52 +380,119 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             </Card>
           </div>
 
-          {/* FBS / FBO breakdown for yesterday and day before */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="border-amber-200 dark:border-amber-800">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-400">Вчера FBS</CardTitle>
-                <Package className="h-4 w-4 text-amber-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.yesterdayFbsOrders)}</div>
-                <p className="text-xs text-muted-foreground mt-1">со склада продавца</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-sky-200 dark:border-sky-800">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-sky-700 dark:text-sky-400">Вчера FBO</CardTitle>
-                <Package className="h-4 w-4 text-sky-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.yesterdayFboOrders)}</div>
-                <p className="text-xs text-muted-foreground mt-1">со склада WB</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-amber-200 dark:border-amber-800">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-400">Позавчера FBS</CardTitle>
-                <Package className="h-4 w-4 text-amber-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.dayBeforeYesterdayFbsOrders)}</div>
-                <p className="text-xs text-muted-foreground mt-1">со склада продавца</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-sky-200 dark:border-sky-800">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-sky-700 dark:text-sky-400">Позавчера FBO</CardTitle>
-                <Package className="h-4 w-4 text-sky-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.dayBeforeYesterdayFboOrders)}</div>
-                <p className="text-xs text-muted-foreground mt-1">со склада WB</p>
-              </CardContent>
-            </Card>
-          </div>
+          {/* FBS / FBO breakdown — period selector + chart/table toggle */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
+                <div className="flex items-center gap-3">
+                  <ToggleGroup type="single" value={dashboardPeriod} onValueChange={(v) => { if (v) setDashboardPeriod(v as 'week' | 'twoWeeks' | 'month') }} className="border rounded-md">
+                    <ToggleGroupItem value="week" className="text-xs px-3">Неделя</ToggleGroupItem>
+                    <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
+                    <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
+                  </ToggleGroup>
+                  <ToggleGroup type="single" value={fboViewMode} onValueChange={(v) => { if (v) setFboViewMode(v as 'cards' | 'chart') }} className="border rounded-md">
+                    <ToggleGroupItem value="cards" className="text-xs px-3">Карточки</ToggleGroupItem>
+                    <ToggleGroupItem value="chart" className="text-xs px-3">График</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              </div>
+              {data.periodStats && (
+                <span className="text-xs text-muted-foreground">
+                  {formatDateShort(data.periodStats[dashboardPeriod].dateFrom)} — {formatDateShort(data.periodStats[dashboardPeriod].dateTo)}
+                </span>
+              )}
+            </CardHeader>
+            <CardContent>
+              {fboViewMode === 'cards' ? (
+                /* Card view */
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Card className="border-border">
+                    <CardContent className="pt-4 pb-4">
+                      <div className="text-xs text-muted-foreground mb-1">Всего заказов</div>
+                      <div className="text-2xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-amber-200 dark:border-amber-800">
+                    <CardContent className="pt-4 pb-4">
+                      <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS (склад продавца)</div>
+                      <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.periodStats[dashboardPeriod].fbs)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {data.periodStats[dashboardPeriod].total > 0
+                                          ? (data.periodStats[dashboardPeriod].fbs / data.periodStats[dashboardPeriod].total * 100).toFixed(1)
+                                          : 0}% от общего
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-sky-200 dark:border-sky-800">
+                    <CardContent className="pt-4 pb-4">
+                      <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO (склад WB)</div>
+                      <div className="text-2xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.periodStats[dashboardPeriod].fbo)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {data.periodStats[dashboardPeriod].total > 0
+                                          ? (data.periodStats[dashboardPeriod].fbo / data.periodStats[dashboardPeriod].total * 100).toFixed(1)
+                                          : 0}% от общего
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                /* Chart view — stacked bar chart FBS vs FBO */
+                data.chartDates.length > 0 ? (
+                  <div className="space-y-2">
+                    {/* Chart legend */}
+                    <div className="flex items-center gap-4 text-xs">
+                      <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-amber-500" /> FBS</span>
+                      <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-sky-500" /> FBO</span>
+                    </div>
+                    {/* Chart */}
+                    <div className="overflow-x-auto">
+                      <div className="flex items-end gap-1 min-w-[600px]" style={{ height: '200px' }}>
+                        {data.chartDates
+                          .filter(d => {
+                            const days = dashboardPeriod === 'week' ? 7 : dashboardPeriod === 'twoWeeks' ? 14 : 30
+                            const from = data.periodStats[dashboardPeriod].dateFrom
+                            return d >= from
+                          })
+                          .map(date => {
+                            const fbs = data.chartFbs[date] || 0
+                            const fbo = data.chartFbo[date] || 0
+                            const total = fbs + fbo
+                            const maxTotal = Math.max(...data.chartDates
+                              .filter(d => d >= data.periodStats[dashboardPeriod].dateFrom)
+                              .map(d => (data.chartFbs[d] || 0) + (data.chartFbo[d] || 0)), 1)
+                            const heightPct = (total / maxTotal) * 100
+                            const fbsPct = total > 0 ? (fbs / total) * 100 : 0
+                            const fboPct = total > 0 ? (fbo / total) * 100 : 0
+                            return (
+                              <div key={date} className="flex-1 flex flex-col items-center group relative" style={{ height: `${heightPct}%` }}>
+                                {/* Tooltip */}
+                                <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-popover border rounded-md px-2 py-1 text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 pointer-events-none">
+                                  <div className="font-medium">{formatDateShort(date)}</div>
+                                  <div className="text-amber-600">FBS: {fbs}</div>
+                                  <div className="text-sky-600">FBO: {fbo}</div>
+                                </div>
+                                {/* Stacked bar */}
+                                <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
+                                  <div className="bg-sky-500 rounded-t-none" style={{ height: `${fboPct}%` }} />
+                                  <div className="bg-amber-500 rounded-t-sm" style={{ height: `${fbsPct}%` }} />
+                                </div>
+                                {/* Date label */}
+                                <div className="text-[9px] text-muted-foreground mt-1 whitespace-nowrap">
+                                  {date.slice(5)}
+                                </div>
+                              </div>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">Нет данных для графика</p>
+                )
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -761,10 +838,25 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
         {dateMode === 'single' ? (
           <Input type="date" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
             <span className="text-sm text-muted-foreground">—</span>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+            {/* Quick period buttons */}
+            <ToggleGroup type="single" onValueChange={(v) => {
+              if (!v) return
+              const mskOffset = 3 * 60 * 60 * 1000
+              const nowMsk = new Date(Date.now() + mskOffset)
+              const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+              const days = v === 'week' ? 7 : v === 'twoWeeks' ? 14 : 30
+              const from = new Date(nowMsk.getTime() - days * 86400000).toISOString().split('T')[0]
+              setDateFrom(from)
+              setDateTo(yesterday)
+            }} className="border rounded-md">
+              <ToggleGroupItem value="week" className="text-xs px-2">Неделя</ToggleGroupItem>
+              <ToggleGroupItem value="twoWeeks" className="text-xs px-2">2 недели</ToggleGroupItem>
+              <ToggleGroupItem value="month" className="text-xs px-2">Месяц</ToggleGroupItem>
+            </ToggleGroup>
           </div>
         )}
 
