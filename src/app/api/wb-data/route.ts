@@ -81,6 +81,15 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('dateFrom') || defaultDateFrom
     const dateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
 
+    // WB API `dateFrom` parameter filters by `lastChangeDate`, not by order `date`.
+    // To avoid missing orders that were created in our range but last changed earlier,
+    // we add a 2-day buffer to the API request and filter client-side by actual order date.
+    const apiDateFrom = (() => {
+      const d = new Date(dateFrom)
+      d.setDate(d.getDate() - 2)
+      return d.toISOString().split('T')[0]
+    })()
+
     // Get entrepreneurs with API keys
     const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
       `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
@@ -134,7 +143,7 @@ export async function GET(request: NextRequest) {
 
     for (let i = 0; i < targets.length; i++) {
       const ent = targets[i]
-      const cacheKey = getCacheKey(ent.id, dateFrom)
+      const cacheKey = getCacheKey(ent.id, apiDateFrom)
 
       // Check cache first
       const cached = getCached(cacheKey)
@@ -154,7 +163,9 @@ export async function GET(request: NextRequest) {
       let error: string | undefined
 
       try {
-        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=0`
+        // flag=1 — get ALL orders (including rejected), we filter client-side
+        // Use apiDateFrom (with buffer) instead of dateFrom to catch orders with older lastChangeDate
+        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=1&dateTo=${dateTo}T23:59:59Z`
         const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
         if (response.status === 429 || response.status === 461) {
@@ -166,7 +177,7 @@ export async function GET(request: NextRequest) {
         } else if (response.ok) {
           const allOrders = await response.json()
           if (Array.isArray(allOrders)) {
-            orders = filterToDateRange(allOrders, dateFrom, dateTo)
+            orders = filterToDateRange(allOrders, dateFrom, dateTo, true) // true = exclude cancelled
           }
         } else {
           console.log(`WB API error for ${ent.name}: ${response.status}`)
@@ -222,7 +233,17 @@ export async function GET(request: NextRequest) {
         const mappedType = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
         if (!mappedType) continue
 
-        const dateStr = order.date?.substring(0, 10) || ''
+        // Convert UTC date to Moscow date (UTC+3)
+        // WB API returns dates like "2026-05-18T01:30:00Z" (UTC)
+        // An order at 01:30 MSK is actually 2026-05-17T22:30:00Z — wrong date without conversion
+        const orderDate = order.date
+        let dateStr: string
+        if (orderDate && orderDate.includes('T')) {
+          const mskMs = new Date(orderDate).getTime() + 3 * 60 * 60 * 1000
+          dateStr = new Date(mskMs).toISOString().substring(0, 10)
+        } else {
+          dateStr = orderDate?.substring(0, 10) || ''
+        }
         const monthStr = dateStr.substring(0, 7)
         const isFbs = (order.warehouseType || '').includes('продавца') // "Склад продавца" = FBS
 

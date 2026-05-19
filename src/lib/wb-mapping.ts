@@ -274,12 +274,33 @@ export async function fetchWbApi(url: string, options: RequestInit, maxRetries =
   return response
 }
 
-// ─── Filter records to date range ──────────────────────────────────
-// Only filters by date, does NOT filter isCancel or saleID (we count ALL orders)
-export function filterToDateRange(records: any[], filterFrom: string, filterTo: string): any[] {
+// ─── Filter records to date range (Moscow timezone) ──────────────────
+// Converts UTC dates to Moscow time (UTC+3) before filtering,
+// so orders placed at 01:00 MSK (22:00 UTC prev day) are counted for the correct MSK date.
+// Also excludes cancelled orders (isCancel=true) when excludeCancelled=true.
+export function filterToDateRange(records: any[], filterFrom: string, filterTo: string, excludeCancelled = false): any[] {
+  const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
+
   return records.filter((o: any) => {
-    const d = o.date?.substring(0, 10)
-    if (!d || d < filterFrom || d > filterTo) return false
+    // Exclude cancelled orders (отмены и отказы)
+    if (excludeCancelled && o.isCancel === true) return false
+
+    // Convert UTC date to Moscow date
+    const dateStr = o.date
+    if (!dateStr) return false
+
+    let mskDate: string
+    if (dateStr.includes('T')) {
+      // Parse as ISO date and shift to Moscow timezone
+      const utcMs = new Date(dateStr).getTime()
+      const mskMs = utcMs + MSK_OFFSET_MS
+      mskDate = new Date(mskMs).toISOString().substring(0, 10)
+    } else {
+      // Already just a date string (YYYY-MM-DD) — assume it's already correct
+      mskDate = dateStr.substring(0, 10)
+    }
+
+    if (mskDate < filterFrom || mskDate > filterTo) return false
     return true
   })
 }
