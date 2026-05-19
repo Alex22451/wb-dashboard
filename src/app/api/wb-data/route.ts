@@ -162,10 +162,10 @@ export async function GET(request: NextRequest) {
       let error: string | undefined
 
       try {
-        // flag=0 — get only non-cancelled/non-rejected orders (excludes returns and cancellations)
-        // flag=1 returns a tiny subset filtered by order date, while flag=0 returns a complete
-        // dataset filtered by lastChangeDate — which is what we need for accurate counts.
-        // Also, user explicitly requested that returns/cancellations be excluded.
+        // flag=0 returns the complete dataset filtered by lastChangeDate (not order date).
+        // We use flag=0 instead of flag=1 because flag=1 returns a tiny broken subset.
+        // We do NOT filter out isCancel because Excel "Воронка продаж" counts ALL orders
+        // including cancelled ones. Matching Excel requires keeping cancelled orders.
         // NOTE: WB API dateFrom filters by lastChangeDate, not order date.
         // We add a 2-day buffer and filter client-side by actual order date.
         const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`

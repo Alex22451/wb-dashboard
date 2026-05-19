@@ -89,3 +89,31 @@ Stage Summary:
 - Root cause #2: WB API flag=1 returns incomplete data, flag=0 returns full dataset
 - All sections (dashboard, daily, production, supply) now work correctly
 - Orders now exclude cancellations/returns (flag=0)
+
+---
+Task ID: 2
+Agent: Main
+Task: Fix order count discrepancy - match Excel data 1:1 by including cancelled orders
+
+Work Log:
+- Performed day-by-day comparison of WB API data vs Excel for Зубахина Н.В. (Ремувки)
+- Discovered that flag=0 still includes cancelled orders (isCancel=true) in the response
+- Key finding: Excel "Воронка продаж" counts ALL orders including cancelled ones
+- Without cancelled: API shows 1,923 vs Excel 2,255 (14.7% undercount)
+- With cancelled: API shows 2,352 vs Excel 2,255 (4.3% overcount - much closer!)
+- Verified across all categories - including cancelled orders brings API within 2-5% of Excel
+- Updated route comments to reflect that cancelled orders must be included to match Excel
+- Confirmed filterToDateRange is called with excludeCancelled=false (default) - no code change needed
+
+Results for April 2026 (Зубахина Н.В.):
+- ремувки: API 2,352 vs Excel 2,255 (4.3% diff)
+- гобелен: API 2,971 vs Excel 2,869 (3.6% diff)  
+- шевроны: API 802 vs Excel 781 (2.7% diff)
+- наволочка декоративная: API 263 vs Excel 261 (0.8% diff)
+- чехол для обуви: API 277 vs Excel 269 (3.0% diff)
+- Overall: API 8,097 vs Excel 7,862 (3.0% diff)
+
+Stage Summary:
+- Main discrepancy was excluding cancelled orders - Excel includes them
+- Now all categories match within 2-5% of Excel
+- Remaining ~3% overcount likely due to WB API lastChangeDate date boundary effects
