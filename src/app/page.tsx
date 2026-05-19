@@ -767,20 +767,17 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
   const [dateFrom, setDateFrom] = useState<string>(getYesterday())
   const [dateTo, setDateTo] = useState<string>(getYesterday())
 
-  const fetchData = useCallback(async () => {
+  const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
     setLoading(true)
     setRateLimitErrors([])
     try {
       const params = new URLSearchParams()
       params.set('entrepreneurId', selectedEnt)
       params.set('section', 'daily')
-      if (dateMode === 'single' && singleDate) {
-        params.set('dateFrom', singleDate)
-        params.set('dateTo', singleDate)
-      } else if (dateMode === 'range') {
-        if (dateFrom) params.set('dateFrom', dateFrom)
-        if (dateTo) params.set('dateTo', dateTo)
-      }
+      const df = overrideFrom ?? (dateMode === 'single' ? singleDate : dateFrom)
+      const dt = overrideTo ?? (dateMode === 'single' ? singleDate : dateTo)
+      if (df) params.set('dateFrom', df)
+      if (dt) params.set('dateTo', dt)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.daily) setFetchedData(json.daily)
@@ -824,7 +821,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
             <span className="text-sm text-muted-foreground">—</span>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
-            {/* Quick period buttons */}
+            {/* Quick period buttons — auto-fetch on click */}
             <ToggleGroup type="single" onValueChange={(v) => {
               if (!v) return
               const mskOffset = 3 * 60 * 60 * 1000
@@ -834,6 +831,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
               const from = new Date(nowMsk.getTime() - days * 86400000).toISOString().split('T')[0]
               setDateFrom(from)
               setDateTo(yesterday)
+              fetchDailyData(from, yesterday)
             }} className="border rounded-md">
               <ToggleGroupItem value="week" className="text-xs px-2">Неделя</ToggleGroupItem>
               <ToggleGroupItem value="twoWeeks" className="text-xs px-2">2 недели</ToggleGroupItem>
@@ -842,7 +840,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
           </div>
         )}
 
-        <Button onClick={fetchData} disabled={loading} className="gap-2">
+        <Button onClick={() => fetchDailyData()} disabled={loading} className="gap-2">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
