@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
         } else if (response.ok) {
           const allOrders = await response.json()
           if (Array.isArray(allOrders)) {
-            orders = filterToDateRange(allOrders, dateFrom, dateTo, true) // true = exclude cancelled
+            orders = filterToDateRange(allOrders, dateFrom, dateTo) // не исключаем отмены — в Excel они тоже учтены
           }
         } else {
           console.log(`WB API error for ${ent.name}: ${response.status}`)
