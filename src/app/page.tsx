@@ -264,15 +264,10 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
   const [dashboardPeriod, setDashboardPeriod] = useState<'yesterday' | 'week' | 'twoWeeks' | 'month'>('yesterday')
   const [fboViewMode, setFboViewMode] = useState<'cards' | 'chart'>('cards')
 
-  // When period changes and data is already loaded, auto-reload
-  const handlePeriodChange = useCallback((v: string) => {
-    if (!v) return
-    const newPeriod = v as 'yesterday' | 'week' | 'twoWeeks' | 'month'
-    setDashboardPeriod(newPeriod)
-    if (data) {
-      onLoad()
-    }
-  }, [data, onLoad])
+  // Period change is purely client-side — periodStats for all periods are already in data
+  const handlePeriodChange = (v: string) => {
+    if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month')
+  }
 
   // Chart dates filtered by selected period
   const chartFilteredDates = data ? data.chartDates
@@ -287,10 +282,10 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 
   const periodToggle = (
     <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
-      <ToggleGroupItem value="yesterday" className="text-xs px-3">Вчера</ToggleGroupItem>
-      <ToggleGroupItem value="week" className="text-xs px-3">Неделя</ToggleGroupItem>
-      <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
-      <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
+      <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
+      <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
+      <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
+      <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
     </ToggleGroup>
   )
 
@@ -300,10 +295,9 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       <RateLimitAlert errors={rateLimitErrors} />
 
       {/* ИП Selector + Period + Load Button */}
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-medium text-muted-foreground">Показать:</span>
+      <div className="flex flex-wrap items-center gap-2">
         <Select value={selectedEnt} onValueChange={onSelectEnt}>
-          <SelectTrigger className="w-64">
+          <SelectTrigger className="w-56">
             <SelectValue placeholder="Выберите ИП" />
           </SelectTrigger>
           <SelectContent>
@@ -313,7 +307,6 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             ))}
           </SelectContent>
         </Select>
-        <span className="text-sm font-medium text-muted-foreground">Период:</span>
         {periodToggle}
         <Button onClick={onLoad} disabled={loading || !selectedEnt} className="gap-2">
           {loading ? (
@@ -330,13 +323,13 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
         </Button>
         {data && (
           <Badge variant={dataSource === 'wbapi' ? 'default' : 'secondary'} className={`text-xs ${dataSource === 'wbapi' ? 'bg-emerald-600' : ''}`}>
-            {dataSource === 'wbapi' ? '🔴 WB API (реальное время)' : '📊 Excel (кэш)'}
+            {dataSource === 'wbapi' ? 'WB API' : 'Excel'}
           </Badge>
         )}
       </div>
 
       {/* Loading skeleton */}
-      {loading && <DashboardSkeleton />}
+      {loading && !data && <DashboardSkeleton />}
 
       {/* Empty state when no data and not loading */}
       {!loading && !data && (
@@ -346,8 +339,8 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
         />
       )}
 
-      {/* Data display */}
-      {!loading && data && (
+      {/* Data display — keep visible even during re-fetch so period switch feels instant */}
+      {data && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
@@ -415,52 +408,43 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 
           {/* FBS / FBO breakdown — period selector + chart/table toggle */}
           <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   {periodToggle}
                   <ToggleGroup type="single" value={fboViewMode} onValueChange={(v) => { if (v) setFboViewMode(v as 'cards' | 'chart') }} className="border rounded-md">
-                    <ToggleGroupItem value="cards" className="text-xs px-3">Карточки</ToggleGroupItem>
-                    <ToggleGroupItem value="chart" className="text-xs px-3">График</ToggleGroupItem>
+                    <ToggleGroupItem value="cards" className="text-xs px-2 py-1">Таблица</ToggleGroupItem>
+                    <ToggleGroupItem value="chart" className="text-xs px-2 py-1">График</ToggleGroupItem>
                   </ToggleGroup>
                 </div>
               </div>
-              {data.periodStats && (
-                <span className="text-xs text-muted-foreground">
-                  {formatDateShort(data.periodStats[dashboardPeriod].dateFrom)} — {formatDateShort(data.periodStats[dashboardPeriod].dateTo)}
-                </span>
-              )}
             </CardHeader>
             <CardContent>
               {fboViewMode === 'cards' ? (
                 /* Card view */
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <Card className="border-border">
-                    <CardContent className="pt-4 pb-4">
-                      <div className="text-xs text-muted-foreground mb-1">Всего заказов</div>
-                      <div className="text-2xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
+                    <CardContent className="pt-3 pb-3">
+                      <div className="text-xs text-muted-foreground mb-1">Всего</div>
+                      <div className="text-xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
                     </CardContent>
                   </Card>
                   <Card className="border-amber-200 dark:border-amber-800">
-                    <CardContent className="pt-4 pb-4">
-                      <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS (склад продавца)</div>
-                      <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.periodStats[dashboardPeriod].fbs)}</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {data.periodStats[dashboardPeriod].total > 0
-                                          ? (data.periodStats[dashboardPeriod].fbs / data.periodStats[dashboardPeriod].total * 100).toFixed(1)
-                                          : 0}% от общего
+                    <CardContent className="pt-3 pb-3">
+                      <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS</div>
+                      <div className="text-xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.periodStats[dashboardPeriod].fbs)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {data.periodStats[dashboardPeriod].total > 0 ? (data.periodStats[dashboardPeriod].fbs / data.periodStats[dashboardPeriod].total * 100).toFixed(1) : 0}%
                       </div>
                     </CardContent>
                   </Card>
                   <Card className="border-sky-200 dark:border-sky-800">
-                    <CardContent className="pt-4 pb-4">
-                      <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO (склад WB)</div>
-                      <div className="text-2xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.periodStats[dashboardPeriod].fbo)}</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {data.periodStats[dashboardPeriod].total > 0
-                                          ? (data.periodStats[dashboardPeriod].fbo / data.periodStats[dashboardPeriod].total * 100).toFixed(1)
-                                          : 0}% от общего
+                    <CardContent className="pt-3 pb-3">
+                      <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO</div>
+                      <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.periodStats[dashboardPeriod].fbo)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {data.periodStats[dashboardPeriod].total > 0 ? (data.periodStats[dashboardPeriod].fbo / data.periodStats[dashboardPeriod].total * 100).toFixed(1) : 0}%
                       </div>
                     </CardContent>
                   </Card>
@@ -468,17 +452,20 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
               ) : (
                 /* Chart view — stacked bar chart FBS vs FBO */
                 chartFilteredDates.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="relative">
                     {/* Chart legend */}
-                    <div className="flex items-center gap-4 text-xs">
+                    <div className="flex items-center gap-4 text-xs mb-2">
                       <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-amber-500" /> FBS</span>
                       <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-sky-500" /> FBO</span>
                     </div>
-                    {/* Chart */}
-                    <div className="overflow-x-auto pb-6">
-                      <div className="flex items-end gap-1" style={{ height: '180px', minWidth: `${Math.max(chartFilteredDates.length * 30, 200)}px` }}>
-                        {chartFilteredDates
-                          .map((date, idx) => {
+                    {/* Chart container with overflow */}
+                    <div className="overflow-x-auto">
+                      <div className="relative" style={{ height: '220px', minWidth: `${Math.max(chartFilteredDates.length * 32, 200)}px` }}>
+                        {/* Y-axis line at bottom */}
+                        <div className="absolute bottom-6 left-0 right-0 border-b border-muted" />
+                        {/* Bars container */}
+                        <div className="absolute bottom-6 left-0 right-0 top-0 flex items-end gap-[2px]">
+                          {chartFilteredDates.map((date, idx) => {
                             const fbs = data.chartFbs[date] || 0
                             const fbo = data.chartFbo[date] || 0
                             const total = fbs + fbo
@@ -488,27 +475,28 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                             const fboPct = total > 0 ? (fbo / total) * 100 : 0
                             const showLabel = idx % labelStep === 0
                             return (
-                              <div key={date} className="flex-1 flex flex-col items-center group relative" style={{ height: `${heightPct}%` }}>
-                                {/* Tooltip */}
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-popover border rounded-md px-2 py-1 text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 pointer-events-none">
+                              <div key={date} className="flex-1 group relative" style={{ height: `${heightPct}%` }}>
+                                {/* Stacked bar */}
+                                <div className="w-full h-full flex flex-col justify-end">
+                                  <div className="bg-sky-500" style={{ height: `${fboPct}%` }} />
+                                  <div className="bg-amber-500 rounded-t-sm" style={{ height: `${fbsPct}%` }} />
+                                </div>
+                                {/* Date label */}
+                                {showLabel && (
+                                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap">
+                                    {date.slice(5)}
+                                  </div>
+                                )}
+                                {/* Tooltip — positioned above bar */}
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover text-popover-foreground border rounded-md px-2 py-1.5 text-xs shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-30 pointer-events-none">
                                   <div className="font-medium">{formatDateShort(date)}</div>
                                   <div className="text-amber-600">FBS: {fbs}</div>
                                   <div className="text-sky-600">FBO: {fbo}</div>
                                 </div>
-                                {/* Stacked bar */}
-                                <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
-                                  <div className="bg-sky-500 rounded-t-none" style={{ height: `${fboPct}%` }} />
-                                  <div className="bg-amber-500 rounded-t-sm" style={{ height: `${fbsPct}%` }} />
-                                </div>
-                                {/* Date label — show only every Nth to avoid overlap */}
-                                {showLabel && (
-                                  <div className="absolute top-full mt-1 text-[10px] text-muted-foreground whitespace-nowrap">
-                                    {date.slice(5)}
-                                  </div>
-                                )}
                               </div>
                             )
                           })}
+                        </div>
                       </div>
                     </div>
                   </div>
