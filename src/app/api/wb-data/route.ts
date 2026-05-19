@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
     const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
       `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
     )
+    console.log(`[DEBUG] Found ${entResult.length} entrepreneurs with API keys, entrepreneurId=${entrepreneurId}`)
 
     let targets: Array<{ id: number; name: string; wbApiKey: string }>
 
@@ -177,7 +178,9 @@ export async function GET(request: NextRequest) {
         } else if (response.ok) {
           const allOrders = await response.json()
           if (Array.isArray(allOrders)) {
+            console.log(`[DEBUG] ${ent.name}: WB API returned ${allOrders.length} orders, dateFrom=${dateFrom}, dateTo=${dateTo}`)
             orders = filterToDateRange(allOrders, dateFrom, dateTo) // не исключаем отмены — в Excel они тоже учтены
+            console.log(`[DEBUG] ${ent.name}: After filterToDateRange: ${orders.length} orders`)
           }
         } else {
           console.log(`WB API error for ${ent.name}: ${response.status}`)
@@ -231,7 +234,10 @@ export async function GET(request: NextRequest) {
         }
 
         const mappedType = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
-        if (!mappedType) continue
+        if (!mappedType) {
+          console.log(`[DEBUG] ${ent.name}: Unmapped order subject="${subject}" article="${article}" brand="${brand}"`)
+          continue
+        }
 
         // Convert UTC date to Moscow date (UTC+3)
         // WB API returns dates like "2026-05-18T01:30:00Z" (UTC)
@@ -258,6 +264,8 @@ export async function GET(request: NextRequest) {
         })
       }
     }
+
+    console.log(`[DEBUG] Total allMappedOrders: ${allMappedOrders.length}`)
 
     // Collect rate limit errors for UI display
     const rateLimitErrors = results

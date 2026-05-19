@@ -22,7 +22,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Брелоки', types: ['ремувки', 'брелоки'] },
   { subject: 'Гобелены', types: ['гобелен', 'фотофоны'] },
   { subject: 'Фотофоны', types: ['фотофоны', 'гобелен'] },
-  { subject: 'Мочалки', types: [] },
+  // Мочалки — исключена (в EXCLUDED_WB_SUBJECTS)
   { subject: 'Коврики для намаза', types: ['коврики для намаза'] },
   { subject: 'Сумки пляжные', types: ['сумки пляжные'] },
   { subject: 'Сумки хозяйственные', types: ['сумки хозяйственные (шоппер)'] },
@@ -319,9 +319,10 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
   // 1. Get possible types from subject mapping
   const possibleTypes = findSubjectTypes(subject)
   if (possibleTypes.length === 0) {
-    // Subject not in mapping — skip this order entirely
-    // Only categories explicitly listed in SUBJECT_TO_EXCEL_TYPES are allowed
-    return null
+    // Subject not in explicit mapping — fall back to raw subject name
+    // EXCLUDED subjects are already filtered BEFORE this function is called
+    // This ensures we don't lose valid orders just because they're not in the mapping table
+    return subject.toLowerCase()
   }
 
   // 3. Check article/brand keyword overrides (simplified - no Excel data needed)
