@@ -33,9 +33,12 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import {
+  LineChart,
+  Line,
   BarChart,
   Bar,
   XAxis,
@@ -262,32 +265,22 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
   const dayChange = data?.dayChange
   const monthChange = data?.monthChange
   const [dashboardPeriod, setDashboardPeriod] = useState<'yesterday' | 'week' | 'twoWeeks' | 'month'>('yesterday')
-  const [fboViewMode, setFboViewMode] = useState<'cards' | 'chart'>('cards')
+  const [showChart, setShowChart] = useState(false)
 
   // Period change is purely client-side — periodStats for all periods are already in data
   const handlePeriodChange = (v: string) => {
     if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month')
   }
 
-  // Chart dates filtered by selected period
-  const chartFilteredDates = data ? data.chartDates
+  // Chart data for recharts — filtered by selected period
+  const chartData = data ? data.chartDates
     .filter(d => d >= data.periodStats[dashboardPeriod].dateFrom && d <= data.periodStats[dashboardPeriod].dateTo)
+    .map(d => ({
+      date: d.slice(5),
+      fbs: data.chartFbs[d] || 0,
+      fbo: data.chartFbo[d] || 0,
+    }))
     : []
-
-  // Determine label step to avoid overlap (show every Nth label)
-  const labelStep = dashboardPeriod === 'yesterday' ? 1
-    : dashboardPeriod === 'week' ? 1
-    : dashboardPeriod === 'twoWeeks' ? 2
-    : 3 // month: every 3rd label
-
-  const periodToggle = (
-    <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
-      <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
-      <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
-      <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
-      <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
-    </ToggleGroup>
-  )
 
   return (
     <div className="space-y-6">
@@ -307,7 +300,12 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             ))}
           </SelectContent>
         </Select>
-        {periodToggle}
+        <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
+          <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
+          <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
+          <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
+          <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
+        </ToggleGroup>
         <Button onClick={onLoad} disabled={loading || !selectedEnt} className="gap-2">
           {loading ? (
             <>
@@ -406,22 +404,27 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             </Card>
           </div>
 
-          {/* FBS / FBO breakdown — period selector + chart/table toggle */}
+          {/* FBS / FBO breakdown */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
                 <div className="flex items-center gap-2">
-                  {periodToggle}
-                  <ToggleGroup type="single" value={fboViewMode} onValueChange={(v) => { if (v) setFboViewMode(v as 'cards' | 'chart') }} className="border rounded-md">
-                    <ToggleGroupItem value="cards" className="text-xs px-2 py-1">Таблица</ToggleGroupItem>
-                    <ToggleGroupItem value="chart" className="text-xs px-2 py-1">График</ToggleGroupItem>
+                  <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
+                  <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
+                    <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
+                    <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
+                    <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
+                    <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
                   </ToggleGroup>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="chart-toggle" className="text-xs text-muted-foreground cursor-pointer">График</Label>
+                  <Switch id="chart-toggle" checked={showChart} onCheckedChange={setShowChart} />
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {fboViewMode === 'cards' ? (
+              {!showChart ? (
                 /* Card view */
                 <div className="grid grid-cols-3 gap-3">
                   <Card className="border-border">
@@ -450,55 +453,27 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                   </Card>
                 </div>
               ) : (
-                /* Chart view — stacked bar chart FBS vs FBO */
-                chartFilteredDates.length > 0 ? (
-                  <div className="relative">
-                    {/* Chart legend */}
-                    <div className="flex items-center gap-4 text-xs mb-2">
-                      <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-amber-500" /> FBS</span>
-                      <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-sky-500" /> FBO</span>
-                    </div>
-                    {/* Chart container with overflow */}
-                    <div className="overflow-x-auto">
-                      <div className="relative" style={{ height: '220px', minWidth: `${Math.max(chartFilteredDates.length * 32, 200)}px` }}>
-                        {/* Y-axis line at bottom */}
-                        <div className="absolute bottom-6 left-0 right-0 border-b border-muted" />
-                        {/* Bars container */}
-                        <div className="absolute bottom-6 left-0 right-0 top-0 flex items-end gap-[2px]">
-                          {chartFilteredDates.map((date, idx) => {
-                            const fbs = data.chartFbs[date] || 0
-                            const fbo = data.chartFbo[date] || 0
-                            const total = fbs + fbo
-                            const maxTotal = Math.max(...chartFilteredDates.map(d => (data.chartFbs[d] || 0) + (data.chartFbo[d] || 0)), 1)
-                            const heightPct = (total / maxTotal) * 100
-                            const fbsPct = total > 0 ? (fbs / total) * 100 : 0
-                            const fboPct = total > 0 ? (fbo / total) * 100 : 0
-                            const showLabel = idx % labelStep === 0
-                            return (
-                              <div key={date} className="flex-1 group relative" style={{ height: `${heightPct}%` }}>
-                                {/* Stacked bar */}
-                                <div className="w-full h-full flex flex-col justify-end">
-                                  <div className="bg-sky-500" style={{ height: `${fboPct}%` }} />
-                                  <div className="bg-amber-500 rounded-t-sm" style={{ height: `${fbsPct}%` }} />
-                                </div>
-                                {/* Date label */}
-                                {showLabel && (
-                                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground whitespace-nowrap">
-                                    {date.slice(5)}
-                                  </div>
-                                )}
-                                {/* Tooltip — positioned above bar */}
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-popover text-popover-foreground border rounded-md px-2 py-1.5 text-xs shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-30 pointer-events-none">
-                                  <div className="font-medium">{formatDateShort(date)}</div>
-                                  <div className="text-amber-600">FBS: {fbs}</div>
-                                  <div className="text-sky-600">FBO: {fbo}</div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
+                /* Line chart FBS vs FBO using recharts */
+                chartData.length > 0 ? (
+                  <div className="w-full h-[250px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 11 }}
+                          interval={dashboardPeriod === 'month' ? 2 : dashboardPeriod === 'twoWeeks' ? 1 : 0}
+                        />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                          labelStyle={{ fontWeight: 600 }}
+                        />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="fbs" name="FBS" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                        <Line type="monotone" dataKey="fbo" name="FBO" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-8">Нет данных для графика</p>
