@@ -31,9 +31,8 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
-  { subject: 'Наборы для создания слепков', types: ['набор для слепков'] },
-  { subject: 'Наборы для рисования', types: ['набор для рисования'] },
-  { subject: 'Стаканы', types: [] },
+  // Исключены: Наборы для создания слепков, Наборы для рисования, Стаканы — нет в Excel
+  // Эти категории перенесены в EXCLUDED_WB_SUBJECTS
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
   { subject: 'Мягкие игрушки', types: ['мягкие игрушки', 'игрушки антистресс'] },
   { subject: 'Игрушки антистресс', types: ['игрушки антистресс', 'мягкие игрушки'] },
@@ -59,6 +58,11 @@ export const EXCLUDED_WB_SUBJECTS: string[] = [
   'Маски эротик',
   'Рюкзаки',
   'Дождевики',
+  // Нет в Excel — исключены по результатам аудита:
+  'Наборы для создания слепков',
+  'Наборы для рисования',
+  'Стаканы',
+  'Мочалки',
 ]
 
 // ─── Article/Brand Keyword Overrides ──────────────────────────────────
@@ -114,8 +118,7 @@ export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'игрушки антистресс', articlePattern: /./i, excelType: 'игрушки антистресс', priority: 20 },
   { subjectContains: 'мягкие игрушки', articlePattern: /./i, excelType: 'мягкие игрушки', priority: 20 },
 
-  { subjectContains: 'наборы для создания слепков', articlePattern: /./i, excelType: 'набор для слепков', priority: 50 },
-  { subjectContains: 'наборы для рисования', articlePattern: /./i, excelType: 'набор для рисования', priority: 50 },
+  // Убраны: 'набор для слепков' и 'набор для рисования' — этих категорий нет в Excel
 ]
 
 // ─── Find matching subject types ──────────────────────────────────
@@ -284,7 +287,7 @@ export function filterToDateRange(records: any[], filterFrom: string, filterTo: 
 // ─── Simplified mapping: WB order → product type name ──────────────
 // Given a WB order's subject, article, and brand,
 // return the mapped product type name (like "мешки для обуви", "шевроны", etc.)
-export function mapWbOrderToType(subject: string, article: string, brand: string): string {
+export function mapWbOrderToType(subject: string, article: string, brand: string): string | null {
   const subjectLower = subject.toLowerCase()
   const articleNorm = article.toLowerCase().replace(/_/g, '').replace(/\s/g, '')
   const brandLower = (brand || '').toLowerCase()
@@ -295,8 +298,9 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
   // 1. Get possible types from subject mapping
   const possibleTypes = findSubjectTypes(subject)
   if (possibleTypes.length === 0) {
-    // Subject not in mapping at all - return subject itself or 'Другое'
-    return subject || 'Другое'
+    // Subject not in mapping — skip this order entirely
+    // Only categories explicitly listed in SUBJECT_TO_EXCEL_TYPES are allowed
+    return null
   }
 
   // 3. Check article/brand keyword overrides (simplified - no Excel data needed)
@@ -317,8 +321,10 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
 // ─── Full mapping: WB order → product key with size ──────────────
 // Returns "type + size" like "подушка декоративная 45х45" or "шевроны 8х5"
 // If no size extracted, returns just the type (like "коврики для намаза")
-export function mapWbOrderToProductKey(subject: string, article: string, brand: string, techSize?: string): string {
+// Returns null if the subject is not in the allowed mapping
+export function mapWbOrderToProductKey(subject: string, article: string, brand: string, techSize?: string): string | null {
   const productType = mapWbOrderToType(subject, article, brand)
+  if (!productType) return null
 
   // Try to extract size from article first (most reliable)
   let size = extractWbSize(article, subject)

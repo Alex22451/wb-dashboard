@@ -139,9 +139,8 @@ const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
-  { subject: 'Наборы для создания слепков', types: ['набор'] },
-  { subject: 'Наборы для рисования', types: ['набор'] },
-  { subject: 'Стаканы', types: [] },
+  // Исключены: Наборы для создания слепков, Наборы для рисования, Стаканы — нет в Excel
+  // Эти категории перенесены в EXCLUDED_WB_SUBJECTS ниже
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
   { subject: 'Мягкие игрушки', types: ['мягкие игрушки', 'игрушки антистресс'] },
   { subject: 'Игрушки антистресс', types: ['игрушки антистресс', 'мягкие игрушки'] },
@@ -167,6 +166,11 @@ const EXCLUDED_WB_SUBJECTS: string[] = [
   'Маски эротик',
   'Рюкзаки',
   'Дождевики',
+  // Нет в Excel — исключены по результатам аудита:
+  'Наборы для создания слепков',
+  'Наборы для рисования',
+  'Стаканы',
+  'Мочалки',
 ]
 
 // ─── Article/Brand Keyword Overrides ──────────────────────────────────
@@ -258,9 +262,7 @@ const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'игрушки антистресс', articlePattern: /./i, excelType: 'игрушки антистресс', priority: 20 },
   { subjectContains: 'мягкие игрушки', articlePattern: /./i, excelType: 'мягкие игрушки', priority: 20 },
 
-  // ═══ "Наборы для создания слепков" / "Наборы для рисования" ═══
-  { subjectContains: 'наборы для создания слепков', articlePattern: /./i, excelType: 'набор', priority: 50 },
-  { subjectContains: 'наборы для рисования', articlePattern: /./i, excelType: 'набор', priority: 50 },
+  // Убраны: 'набор для слепков' и 'набор для рисования' — этих категорий нет в Excel
 ]
 
 // ─── Find matching subject types ──────────────────────────────────
