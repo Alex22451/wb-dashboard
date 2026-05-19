@@ -364,7 +364,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       {/* Data display — keep visible even during re-fetch so period switch feels instant */}
       {data && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">{periodLabel[dashboardPeriod]}</CardTitle>
@@ -394,36 +394,6 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">было: {formatNumber(prevPeriod?.total || 0)}</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">FBS за период</CardTitle>
-                <Package className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(currentPeriod?.fbs || 0)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {currentPeriod && currentPeriod.total > 0
-                    ? (currentPeriod.fbs / currentPeriod.total * 100).toFixed(1)
-                    : 0}% от общего
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">FBO за период</CardTitle>
-                <Package className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(currentPeriod?.fbo || 0)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {currentPeriod && currentPeriod.total > 0
-                    ? (currentPeriod.fbo / currentPeriod.total * 100).toFixed(1)
-                    : 0}% от общего
-                </p>
               </CardContent>
             </Card>
           </div>
@@ -555,8 +525,8 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {[1, 2].map((i) => (
           <Card key={i}>
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-24" />
