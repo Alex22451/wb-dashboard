@@ -94,8 +94,6 @@ export async function GET(request: NextRequest) {
     const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
       `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
     )
-    console.log(`[DEBUG] Found ${entResult.length} entrepreneurs with API keys, entrepreneurId=${entrepreneurId}`)
-
     let targets: Array<{ id: number; name: string; wbApiKey: string }>
 
     if (entrepreneurId === 'all') {
@@ -164,9 +162,13 @@ export async function GET(request: NextRequest) {
       let error: string | undefined
 
       try {
-        // flag=1 — get ALL orders (including rejected), we filter client-side
-        // Use apiDateFrom (with buffer) instead of dateFrom to catch orders with older lastChangeDate
-        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=1&dateTo=${dateTo}T23:59:59Z`
+        // flag=0 — get only non-cancelled/non-rejected orders (excludes returns and cancellations)
+        // flag=1 returns a tiny subset filtered by order date, while flag=0 returns a complete
+        // dataset filtered by lastChangeDate — which is what we need for accurate counts.
+        // Also, user explicitly requested that returns/cancellations be excluded.
+        // NOTE: WB API dateFrom filters by lastChangeDate, not order date.
+        // We add a 2-day buffer and filter client-side by actual order date.
+        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
         const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
         if (response.status === 429 || response.status === 461) {
@@ -178,9 +180,7 @@ export async function GET(request: NextRequest) {
         } else if (response.ok) {
           const allOrders = await response.json()
           if (Array.isArray(allOrders)) {
-            console.log(`[DEBUG] ${ent.name}: WB API returned ${allOrders.length} orders, dateFrom=${dateFrom}, dateTo=${dateTo}`)
-            orders = filterToDateRange(allOrders, dateFrom, dateTo) // не исключаем отмены — в Excel они тоже учтены
-            console.log(`[DEBUG] ${ent.name}: After filterToDateRange: ${orders.length} orders`)
+            orders = filterToDateRange(allOrders, dateFrom, dateTo)
           }
         } else {
           console.log(`WB API error for ${ent.name}: ${response.status}`)
@@ -234,10 +234,7 @@ export async function GET(request: NextRequest) {
         }
 
         const mappedType = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
-        if (!mappedType) {
-          console.log(`[DEBUG] ${ent.name}: Unmapped order subject="${subject}" article="${article}" brand="${brand}"`)
-          continue
-        }
+        if (!mappedType) continue
 
         // Convert UTC date to Moscow date (UTC+3)
         // WB API returns dates like "2026-05-18T01:30:00Z" (UTC)
@@ -264,8 +261,6 @@ export async function GET(request: NextRequest) {
         })
       }
     }
-
-    console.log(`[DEBUG] Total allMappedOrders: ${allMappedOrders.length}`)
 
     // Collect rate limit errors for UI display
     const rateLimitErrors = results

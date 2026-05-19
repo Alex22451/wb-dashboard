@@ -275,8 +275,10 @@ export async function fetchWbApi(url: string, options: RequestInit, maxRetries =
 }
 
 // ─── Filter records to date range (Moscow timezone) ──────────────────
-// Converts UTC dates to Moscow time (UTC+3) before filtering,
-// so orders placed at 01:00 MSK (22:00 UTC prev day) are counted for the correct MSK date.
+// WB API returns dates like "2026-05-18T01:30:00" (without "Z") in Moscow time.
+// On a UTC server, JavaScript parses these as UTC, so we add MSK_OFFSET (+3h)
+// to get the correct Moscow date. This ensures orders near midnight are counted
+// for the correct date.
 // Also excludes cancelled orders (isCancel=true) when excludeCancelled=true.
 export function filterToDateRange(records: any[], filterFrom: string, filterTo: string, excludeCancelled = false): any[] {
   const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
@@ -285,14 +287,17 @@ export function filterToDateRange(records: any[], filterFrom: string, filterTo: 
     // Exclude cancelled orders (отмены и отказы)
     if (excludeCancelled && o.isCancel === true) return false
 
-    // Convert UTC date to Moscow date
+    // Convert date to Moscow date
+    // WB API returns dates in MSK timezone like "2026-05-18T01:30:00" (no "Z")
+    // On a UTC server, new Date() parses this as UTC, so we add 3h to get MSK date
     const dateStr = o.date
     if (!dateStr) return false
 
     let mskDate: string
     if (dateStr.includes('T')) {
-      // Parse as ISO date and shift to Moscow timezone
+      // Parse and shift to Moscow timezone
       const utcMs = new Date(dateStr).getTime()
+      if (isNaN(utcMs)) return false
       const mskMs = utcMs + MSK_OFFSET_MS
       mskDate = new Date(mskMs).toISOString().substring(0, 10)
     } else {
