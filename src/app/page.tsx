@@ -73,6 +73,7 @@ interface DashboardData {
   chartFbs: Record<string, number>
   chartFbo: Record<string, number>
   periodStats: {
+    yesterday: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
     week: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
     twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
     month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
@@ -260,15 +261,26 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 }) {
   const dayChange = data?.dayChange
   const monthChange = data?.monthChange
-  const [dashboardPeriod, setDashboardPeriod] = useState<'week' | 'twoWeeks' | 'month'>('week')
+  const [dashboardPeriod, setDashboardPeriod] = useState<'yesterday' | 'week' | 'twoWeeks' | 'month'>('yesterday')
   const [fboViewMode, setFboViewMode] = useState<'cards' | 'chart'>('cards')
+
+  // Chart dates filtered by selected period
+  const chartFilteredDates = data ? data.chartDates
+    .filter(d => d >= data.periodStats[dashboardPeriod].dateFrom && d <= data.periodStats[dashboardPeriod].dateTo)
+    : []
+
+  // Determine label step to avoid overlap (show every Nth label)
+  const labelStep = dashboardPeriod === 'yesterday' ? 1
+    : dashboardPeriod === 'week' ? 1
+    : dashboardPeriod === 'twoWeeks' ? 2
+    : 3 // month: every 3rd label
 
   return (
     <div className="space-y-6">
       {/* Rate limit errors */}
       <RateLimitAlert errors={rateLimitErrors} />
 
-      {/* ИП Selector + Load Button + Data Source */}
+      {/* ИП Selector + Load Button + Data Source + Period Selector */}
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-muted-foreground">Показать:</span>
         <Select value={selectedEnt} onValueChange={onSelectEnt}>
@@ -301,6 +313,24 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
           </Badge>
         )}
       </div>
+
+      {/* Period selector at the top */}
+      {data && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-muted-foreground">Период:</span>
+          <ToggleGroup type="single" value={dashboardPeriod} onValueChange={(v) => { if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month') }} className="border rounded-md">
+            <ToggleGroupItem value="yesterday" className="text-xs px-3">Вчера</ToggleGroupItem>
+            <ToggleGroupItem value="week" className="text-xs px-3">Неделя</ToggleGroupItem>
+            <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
+            <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
+          </ToggleGroup>
+          {data.periodStats && (
+            <span className="text-xs text-muted-foreground">
+              {formatDateShort(data.periodStats[dashboardPeriod].dateFrom)} — {formatDateShort(data.periodStats[dashboardPeriod].dateTo)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Loading skeleton */}
       {loading && <DashboardSkeleton />}
@@ -380,28 +410,16 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             </Card>
           </div>
 
-          {/* FBS / FBO breakdown — period selector + chart/table toggle */}
+          {/* FBS / FBO breakdown — chart/table toggle only, period is selected at top */}
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
-                <div className="flex items-center gap-3">
-                  <ToggleGroup type="single" value={dashboardPeriod} onValueChange={(v) => { if (v) setDashboardPeriod(v as 'week' | 'twoWeeks' | 'month') }} className="border rounded-md">
-                    <ToggleGroupItem value="week" className="text-xs px-3">Неделя</ToggleGroupItem>
-                    <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
-                    <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
-                  </ToggleGroup>
-                  <ToggleGroup type="single" value={fboViewMode} onValueChange={(v) => { if (v) setFboViewMode(v as 'cards' | 'chart') }} className="border rounded-md">
-                    <ToggleGroupItem value="cards" className="text-xs px-3">Карточки</ToggleGroupItem>
-                    <ToggleGroupItem value="chart" className="text-xs px-3">График</ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
+                <ToggleGroup type="single" value={fboViewMode} onValueChange={(v) => { if (v) setFboViewMode(v as 'cards' | 'chart') }} className="border rounded-md">
+                  <ToggleGroupItem value="cards" className="text-xs px-3">Карточки</ToggleGroupItem>
+                  <ToggleGroupItem value="chart" className="text-xs px-3">График</ToggleGroupItem>
+                </ToggleGroup>
               </div>
-              {data.periodStats && (
-                <span className="text-xs text-muted-foreground">
-                  {formatDateShort(data.periodStats[dashboardPeriod].dateFrom)} — {formatDateShort(data.periodStats[dashboardPeriod].dateTo)}
-                </span>
-              )}
             </CardHeader>
             <CardContent>
               {fboViewMode === 'cards' ? (
@@ -438,7 +456,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                 </div>
               ) : (
                 /* Chart view — stacked bar chart FBS vs FBO */
-                data.chartDates.length > 0 ? (
+                chartFilteredDates.length > 0 ? (
                   <div className="space-y-2">
                     {/* Chart legend */}
                     <div className="flex items-center gap-4 text-xs">
@@ -447,23 +465,17 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                     </div>
                     {/* Chart */}
                     <div className="overflow-x-auto">
-                      <div className="flex items-end gap-1 min-w-[600px]" style={{ height: '200px' }}>
-                        {data.chartDates
-                          .filter(d => {
-                            const days = dashboardPeriod === 'week' ? 7 : dashboardPeriod === 'twoWeeks' ? 14 : 30
-                            const from = data.periodStats[dashboardPeriod].dateFrom
-                            return d >= from
-                          })
-                          .map(date => {
+                      <div className="flex items-end gap-1" style={{ height: '200px', minWidth: `${Math.max(chartFilteredDates.length * 28, 200)}px` }}>
+                        {chartFilteredDates
+                          .map((date, idx) => {
                             const fbs = data.chartFbs[date] || 0
                             const fbo = data.chartFbo[date] || 0
                             const total = fbs + fbo
-                            const maxTotal = Math.max(...data.chartDates
-                              .filter(d => d >= data.periodStats[dashboardPeriod].dateFrom)
-                              .map(d => (data.chartFbs[d] || 0) + (data.chartFbo[d] || 0)), 1)
+                            const maxTotal = Math.max(...chartFilteredDates.map(d => (data.chartFbs[d] || 0) + (data.chartFbo[d] || 0)), 1)
                             const heightPct = (total / maxTotal) * 100
                             const fbsPct = total > 0 ? (fbs / total) * 100 : 0
                             const fboPct = total > 0 ? (fbo / total) * 100 : 0
+                            const showLabel = idx % labelStep === 0
                             return (
                               <div key={date} className="flex-1 flex flex-col items-center group relative" style={{ height: `${heightPct}%` }}>
                                 {/* Tooltip */}
@@ -477,10 +489,12 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                                   <div className="bg-sky-500 rounded-t-none" style={{ height: `${fboPct}%` }} />
                                   <div className="bg-amber-500 rounded-t-sm" style={{ height: `${fbsPct}%` }} />
                                 </div>
-                                {/* Date label */}
-                                <div className="text-[9px] text-muted-foreground mt-1 whitespace-nowrap">
-                                  {date.slice(5)}
-                                </div>
+                                {/* Date label — show only every Nth to avoid overlap */}
+                                {showLabel && (
+                                  <div className="text-[9px] text-muted-foreground mt-1 whitespace-nowrap">
+                                    {date.slice(5)}
+                                  </div>
+                                )}
                               </div>
                             )
                           })}

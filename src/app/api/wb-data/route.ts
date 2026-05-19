@@ -378,6 +378,7 @@ export async function GET(request: NextRequest) {
         chartFbs,
         chartFbo,
         periodStats: {
+          yesterday: calcPeriodStats(1),
           week: calcPeriodStats(7),
           twoWeeks: calcPeriodStats(14),
           month: calcPeriodStats(30),
