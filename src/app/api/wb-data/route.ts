@@ -354,6 +354,20 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // Previous period stats (same length, just shifted back)
+      const calcPrevPeriodStats = (days: number) => {
+        const prevTo = new Date(mskNow.getTime() - (days + 1) * 86400000).toISOString().split('T')[0]
+        const prevFrom = new Date(mskNow.getTime() - (days * 2) * 86400000).toISOString().split('T')[0]
+        const periodOrders = allMappedOrders.filter(o => o.dateStr >= prevFrom && o.dateStr <= prevTo)
+        return {
+          total: periodOrders.length,
+          fbs: periodOrders.filter(o => o.isFbs).length,
+          fbo: periodOrders.filter(o => !o.isFbs).length,
+          dateFrom: prevFrom,
+          dateTo: prevTo,
+        }
+      }
+
       response.dashboard = {
         totalOrders,
         yesterdayOrders,
@@ -382,6 +396,12 @@ export async function GET(request: NextRequest) {
           week: calcPeriodStats(7),
           twoWeeks: calcPeriodStats(14),
           month: calcPeriodStats(30),
+        },
+        prevPeriodStats: {
+          yesterday: calcPrevPeriodStats(1),
+          week: calcPrevPeriodStats(7),
+          twoWeeks: calcPrevPeriodStats(14),
+          month: calcPrevPeriodStats(30),
         },
       }
     }

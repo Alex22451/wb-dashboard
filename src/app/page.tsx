@@ -81,6 +81,12 @@ interface DashboardData {
     twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
     month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
   }
+  prevPeriodStats: {
+    yesterday: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    week: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+  }
 }
 
 interface DailyOrdersData {
@@ -262,8 +268,6 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
   loading: boolean
   rateLimitErrors: RateLimitError[]
 }) {
-  const dayChange = data?.dayChange
-  const monthChange = data?.monthChange
   const [dashboardPeriod, setDashboardPeriod] = useState<'yesterday' | 'week' | 'twoWeeks' | 'month'>('yesterday')
   const [showChart, setShowChart] = useState(false)
 
@@ -271,6 +275,26 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
   const handlePeriodChange = (v: string) => {
     if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month')
   }
+
+  // Current period stats
+  const periodLabel: Record<string, string> = {
+    yesterday: 'Вчера',
+    week: 'Неделя',
+    twoWeeks: '2 недели',
+    month: 'Месяц',
+  }
+  const prevPeriodLabel: Record<string, string> = {
+    yesterday: 'Позавчера',
+    week: 'Пред. неделя',
+    twoWeeks: 'Пред. 2 нед',
+    month: 'Пред. месяц',
+  }
+
+  const currentPeriod = data ? data.periodStats[dashboardPeriod] : null
+  const prevPeriod = data ? data.prevPeriodStats[dashboardPeriod] : null
+  const periodChange = currentPeriod && prevPeriod && prevPeriod.total > 0
+    ? ((currentPeriod.total - prevPeriod.total) / prevPeriod.total * 100).toFixed(1)
+    : null
 
   // Chart data for recharts — filtered by selected period
   const chartData = data ? data.chartDates
@@ -343,63 +367,63 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Вчера</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">{periodLabel[dashboardPeriod]}</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(data.yesterdayOrders)}</div>
-                {data.yesterdayDate && (
-                  <p className="text-xs text-muted-foreground mt-1">{formatDateFull(data.yesterdayDate)}</p>
-                )}
+                <div className="text-2xl font-bold">{formatNumber(currentPeriod?.total || 0)}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatDateShort(currentPeriod?.dateFrom || '')} — {formatDateShort(currentPeriod?.dateTo || '')}
+                </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">К позавчера</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">{prevPeriodLabel[dashboardPeriod]}</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {dayChange !== null ? (
-                    <span className={Number(dayChange) >= 0 ? 'text-emerald-600' : 'text-red-600'}>
-                      {Number(dayChange) >= 0 ? '+' : ''}{dayChange}%
+                  {periodChange !== null ? (
+                    <span className={Number(periodChange) >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                      {Number(periodChange) >= 0 ? '+' : ''}{periodChange}%
                     </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">было: {formatNumber(data.dayBeforeYesterdayOrders)}</p>
+                <p className="text-xs text-muted-foreground mt-1">было: {formatNumber(prevPeriod?.total || 0)}</p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">За текущий месяц</CardTitle>
-                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">FBS за период</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(data.monthOrders)}</div>
-                <p className="text-xs text-muted-foreground mt-1">заказов</p>
+                <div className="text-2xl font-bold">{formatNumber(currentPeriod?.fbs || 0)}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {currentPeriod && currentPeriod.total > 0
+                    ? (currentPeriod.fbs / currentPeriod.total * 100).toFixed(1)
+                    : 0}% от общего
+                </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">К предыдущему месяцу</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">FBO за период</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {monthChange !== null ? (
-                    <span className={Number(monthChange) >= 0 ? 'text-emerald-600' : 'text-red-600'}>
-                      {Number(monthChange) >= 0 ? '+' : ''}{monthChange}%
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">было: {formatNumber(data.prevMonthOrders)}</p>
+                <div className="text-2xl font-bold">{formatNumber(currentPeriod?.fbo || 0)}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {currentPeriod && currentPeriod.total > 0
+                    ? (currentPeriod.fbo / currentPeriod.total * 100).toFixed(1)
+                    : 0}% от общего
+                </p>
               </CardContent>
             </Card>
           </div>
