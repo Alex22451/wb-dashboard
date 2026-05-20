@@ -76,55 +76,41 @@ function parseEntrepreneurIds(value: string | null, rows: EntrepreneurRow[]): En
   return rows.filter((row) => ids.has(row.id))
 }
 
-async function fetchWbApi(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const response = await fetch(url, options)
-    if (response.status === 429 || response.status === 461) {
-      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 5000))
-      continue
-    }
-    return response
-  }
+async function fetchWbApi(url: string, options: RequestInit): Promise<Response> {
   return fetch(url, options)
 }
 
 async function fetchFunnel(apiKey: string, dateFrom: string, dateTo: string): Promise<FunnelProduct[]> {
   const products = new Map<number, FunnelProduct>()
-  let page = 1
 
-  while (page <= 3) {
-    const response = await fetchWbApi(API_BASE, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        page,
-        pageSize: 100,
-        selectedPeriod: { start: dateFrom, end: dateTo },
-        orderBy: { field: 'openCount', mode: 'asc' },
-      }),
-    })
+  const response = await fetchWbApi(API_BASE, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      page: 1,
+      pageSize: 100,
+      selectedPeriod: { start: dateFrom, end: dateTo },
+      orderBy: { field: 'openCount', mode: 'asc' },
+    }),
+  })
 
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}))
-      const message = body.detail || body.title || body.message || 'ошибка'
-      if (response.status === 429 || response.status === 461) {
-        throw new Error('Превышен лимит WB Sales Funnel API. Подождите 2-3 минуты или выберите один ИП.')
-      }
-      throw new Error(`WB Sales Funnel API ${response.status}: ${message}`)
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const message = body.detail || body.title || body.message || 'ошибка'
+    if (response.status === 429 || response.status === 461) {
+      throw new Error('Превышен лимит WB Sales Funnel API. Подождите 2-3 минуты и загрузите одно ИП.')
     }
+    throw new Error(`WB Sales Funnel API ${response.status}: ${message}`)
+  }
 
-    const data = await response.json()
-    const pageProducts: FunnelProduct[] = data?.data?.products || []
-    for (const product of pageProducts) {
-      const nmId = product.product?.nmId
-      if (nmId && !products.has(nmId)) products.set(nmId, product)
-    }
-    if (pageProducts.length < 100) break
-    page += 1
-    await new Promise(resolve => setTimeout(resolve, 2000))
+  const data = await response.json()
+  const pageProducts: FunnelProduct[] = data?.data?.products || []
+  for (const product of pageProducts) {
+    const nmId = product.product?.nmId
+    if (nmId && !products.has(nmId)) products.set(nmId, product)
   }
 
   return [...products.values()]

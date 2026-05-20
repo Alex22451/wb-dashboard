@@ -326,6 +326,8 @@ function MultiEntrepreneurSelect({
   className = '',
   onlyWithApi = false,
   placeholder = 'Выберите ИП',
+  allowAll = true,
+  maxSelected,
 }: {
   entrepreneurs: EntrepreneurInfo[]
   selectedIds: string[]
@@ -333,19 +335,23 @@ function MultiEntrepreneurSelect({
   className?: string
   onlyWithApi?: boolean
   placeholder?: string
+  allowAll?: boolean
+  maxSelected?: number
 }) {
   const options = onlyWithApi ? entrepreneurs.filter((e) => e.hasApiKey) : entrepreneurs
   const hasAll = selectedIds.includes(ALL_ENTREPRENEURS)
 
   const toggleId = (id: string) => {
     if (id === ALL_ENTREPRENEURS) {
+      if (!allowAll) return
       onChange([ALL_ENTREPRENEURS])
       return
     }
 
     const current = selectedIds.filter((v) => v !== ALL_ENTREPRENEURS)
-    const next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id]
-    onChange(next.length > 0 ? next : [ALL_ENTREPRENEURS])
+    let next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id]
+    if (maxSelected && next.length > maxSelected) next = [id]
+    onChange(next.length > 0 ? next : (allowAll ? [ALL_ENTREPRENEURS] : []))
   }
 
   return (
@@ -360,17 +366,21 @@ function MultiEntrepreneurSelect({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(92vw,320px)] p-2">
         <div className="space-y-1">
-          <div
-            role="button"
-            tabIndex={0}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
-            onClick={() => toggleId(ALL_ENTREPRENEURS)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleId(ALL_ENTREPRENEURS) }}
-          >
-            <Checkbox checked={hasAll} />
-            <span className="font-medium">Все ИП</span>
-          </div>
-          <div className="my-1 h-px bg-border" />
+          {allowAll && (
+            <>
+              <div
+                role="button"
+                tabIndex={0}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+                onClick={() => toggleId(ALL_ENTREPRENEURS)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleId(ALL_ENTREPRENEURS) }}
+              >
+                <Checkbox checked={hasAll} />
+                <span className="font-medium">Все ИП</span>
+              </div>
+              <div className="my-1 h-px bg-border" />
+            </>
+          )}
           <ScrollArea className="max-h-64">
             <div className="space-y-1 pr-2">
               {options.map((e) => {
@@ -2013,6 +2023,8 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
             onChange={setSelectedEnt}
             onlyWithApi
             placeholder="Выберите ИП"
+            allowAll={false}
+            maxSelected={1}
             className="w-full sm:w-64"
           />
         </div>
