@@ -43,6 +43,7 @@ interface GrowthItem {
   daysUntilOos: number | null
   potentialScore: number
   recommendation: string
+  dataSource: 'funnel' | 'orders-fallback'
 }
 
 const API_BASE = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
@@ -138,6 +139,67 @@ async function fetchFboStocks(apiKey: string, dateTo: string): Promise<Map<numbe
   return stocks
 }
 
+function toMskDate(rawDate: string): string {
+  if (!rawDate) return ''
+  if (!rawDate.includes('T')) return rawDate.substring(0, 10)
+  const parsed = new Date(rawDate).getTime()
+  if (Number.isNaN(parsed)) return rawDate.substring(0, 10)
+  return new Date(parsed + 3 * 60 * 60 * 1000).toISOString().substring(0, 10)
+}
+
+async function fetchOrdersFallback(apiKey: string, dateFrom: string, dateTo: string): Promise<Map<number, {
+  nmId: number
+  article: string
+  title: string
+  subject: string
+  orders: number
+  orderSum: number
+}>> {
+  const apiDate = new Date(`${dateFrom}T00:00:00`)
+  apiDate.setDate(apiDate.getDate() - 2)
+  const apiDateFrom = apiDate.toISOString().split('T')[0]
+  const response = await fetchWbApi(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(`WB Orders API ${response.status}: ${body.detail || body.title || body.message || 'ошибка'}`)
+  }
+
+  const data = await response.json()
+  const rows = new Map<number, {
+    nmId: number
+    article: string
+    title: string
+    subject: string
+    orders: number
+    orderSum: number
+  }>()
+  if (!Array.isArray(data)) return rows
+
+  for (const order of data) {
+    const date = toMskDate(order.date || '')
+    if (!date || date < dateFrom || date > dateTo) continue
+    const nmId = Number(order.nmId) || 0
+    if (!nmId) continue
+    const existing = rows.get(nmId)
+    rows.set(nmId, {
+      nmId,
+      article: existing?.article || order.supplierArticle || '',
+      title: existing?.title || order.subject || order.supplierArticle || '',
+      subject: existing?.subject || order.subject || '',
+      orders: (existing?.orders || 0) + 1,
+      orderSum: (existing?.orderSum || 0) + (Number(order.totalPrice) || 0),
+    })
+  }
+
+  return rows
+}
+
 function median(values: number[]): number {
   const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
   if (sorted.length === 0) return 0
@@ -166,6 +228,7 @@ export async function GET(request: NextRequest) {
     )
     const targets = parseEntrepreneurIds(entrepreneurId, rows)
     const errors: Array<{ id: number; name: string; error: string }> = []
+    const notices: string[] = []
     const items: GrowthItem[] = []
 
     for (let i = 0; i < targets.length; i++) {
@@ -173,10 +236,52 @@ export async function GET(request: NextRequest) {
       if (i > 0) await new Promise(resolve => setTimeout(resolve, 1200))
 
       try {
-        const [funnel, fboStocks] = await Promise.all([
-          fetchFunnel(ent.wbApiKey, dateFrom, dateTo),
-          fetchFboStocks(ent.wbApiKey, dateTo),
-        ])
+        const fboStocks = await fetchFboStocks(ent.wbApiKey, dateTo)
+        let funnel: FunnelProduct[] = []
+        let useOrdersFallback = false
+
+        try {
+          funnel = await fetchFunnel(ent.wbApiKey, dateFrom, dateTo)
+        } catch (_funnelError: any) {
+          useOrdersFallback = true
+          notices.push(`${ent.name}: WB ограничил воронку продаж, расчет выполнен по заказам и ФБО-остаткам без показателя трафика.`)
+        }
+
+        if (useOrdersFallback) {
+          const fallbackOrders = await fetchOrdersFallback(ent.wbApiKey, dateFrom, dateTo)
+          const periodDays = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1)
+          const orderMedian = median([...fallbackOrders.values()].map((item) => item.orders)) || 1
+
+          for (const item of fallbackOrders.values()) {
+            const fboStock = fboStocks.get(item.nmId) || 0
+            if (item.orders <= 0 || fboStock <= 0) continue
+            const avgDailyOrders = item.orders / periodDays
+            const daysUntilOos = avgDailyOrders > 0 ? Math.round((fboStock / avgDailyOrders) * 10) / 10 : null
+            const demandScore = Math.min(2, item.orders / orderMedian)
+            const stockScore = daysUntilOos === null ? 0 : Math.max(0, Math.min(1, daysUntilOos / 21))
+            const potentialScore = Math.round(demandScore * stockScore * 45)
+            items.push({
+              entrepreneurId: ent.id,
+              entrepreneurName: ent.name,
+              nmId: item.nmId,
+              article: item.article,
+              title: item.title,
+              subject: item.subject,
+              opens: 0,
+              carts: 0,
+              orders: item.orders,
+              orderSum: item.orderSum,
+              ctrToCart: 0,
+              conversion: 0,
+              fboStock,
+              daysUntilOos,
+              potentialScore,
+              recommendation: daysUntilOos !== null && daysUntilOos < 10 ? 'Сначала довезти ФБО' : 'Проверить воронку позже',
+              dataSource: 'orders-fallback',
+            })
+          }
+          continue
+        }
 
         const prepared = funnel.map((product) => {
           const selected = product.statistic?.selected || {}
@@ -229,10 +334,11 @@ export async function GET(request: NextRequest) {
             daysUntilOos,
             potentialScore,
             recommendation,
+            dataSource: 'funnel',
           })
         }
-      } catch (error: any) {
-        errors.push({ id: ent.id, name: ent.name, error: error.message || 'Ошибка WB API' })
+      } catch (_error: any) {
+        notices.push(`${ent.name}: не удалось получить данные WB для рейтинга роста.`)
       }
     }
 
@@ -243,6 +349,7 @@ export async function GET(request: NextRequest) {
       source: 'wb-sales-funnel-and-fbo-stocks',
       items: items.sort((a, b) => b.potentialScore - a.potentialScore).slice(0, 100),
       errors,
+      notices,
     }
     setCached(cacheKey, response)
     return NextResponse.json(response)

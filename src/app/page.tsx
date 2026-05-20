@@ -245,8 +245,10 @@ interface GrowthPotentialData {
     daysUntilOos: number | null
     potentialScore: number
     recommendation: string
+    dataSource: 'funnel' | 'orders-fallback'
   }>
   errors?: RateLimitError[]
+  notices?: string[]
 }
 
 const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
@@ -2013,6 +2015,13 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
   return (
     <div className="space-y-4">
       {data?.errors && data.errors.length > 0 && <RateLimitAlert errors={data.errors} />}
+      {data?.notices && data.notices.length > 0 && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Расчет выполнен в резервном режиме</AlertTitle>
+          <AlertDescription>{data.notices.join(' ')}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <div className="w-full sm:w-auto">
@@ -2103,7 +2112,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
             <CardHeader className="pb-3">
               <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                 Рейтинг товаров по потенциалу роста
-                <Badge variant="secondary" className="text-xs">WB Sales Funnel + ФБО</Badge>
+                <Badge variant="secondary" className="text-xs">WB Sales Funnel / Orders + ФБО</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -2137,10 +2146,10 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
                             </div>
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">{item.entrepreneurName}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(item.opens)}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(item.carts)}</td>
+                          <td className="px-3 py-2 text-right">{item.dataSource === 'funnel' ? formatNumber(item.opens) : '-'}</td>
+                          <td className="px-3 py-2 text-right">{item.dataSource === 'funnel' ? formatNumber(item.carts) : '-'}</td>
                           <td className="px-3 py-2 text-right font-medium">{formatNumber(item.orders)}</td>
-                          <td className="px-3 py-2 text-right font-semibold">{formatPct(item.conversion)}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{item.dataSource === 'funnel' ? formatPct(item.conversion) : '-'}</td>
                           <td className="px-3 py-2 text-right text-sky-700 dark:text-sky-400">{formatNumber(item.fboStock)}</td>
                           <td className={`px-3 py-2 text-right ${item.daysUntilOos !== null && item.daysUntilOos < 10 ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
                             {item.daysUntilOos === null ? '-' : `${item.daysUntilOos} дн.`}
