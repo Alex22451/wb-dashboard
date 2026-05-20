@@ -18,8 +18,12 @@ interface CacheEntry {
 
 const apiCache = new Map<string, CacheEntry>()
 
-function getCacheKey(entId: number, dateFrom: string): string {
-  return `${entId}:${dateFrom}`
+function getCacheKey(entId: number, dateFrom: string, dateTo: string): string {
+  return `${entId}:orders:${dateFrom}:${dateTo}`
+}
+
+function getStockCacheKey(entId: number, stockDate: string): string {
+  return `${entId}:stocks:${stockDate}`
 }
 
 function getCached(key: string): any | null {
@@ -35,7 +39,7 @@ function getCached(key: string): any | null {
 function setCache(key: string, data: any, ttlMs: number): void {
   apiCache.set(key, { data, timestamp: Date.now(), ttl: ttlMs })
   // Prune old entries
-  if (apiCache.size > 50) {
+  if (apiCache.size > 200) {
     const now = Date.now()
     for (const [k, v] of apiCache) {
       if (now - v.timestamp > v.ttl) apiCache.delete(k)
@@ -46,6 +50,7 @@ function setCache(key: string, data: any, ttlMs: number): void {
 const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
 const CACHE_TTL_DAILY = 2 * 60 * 1000       // 2 min
 const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
+const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 
 export async function GET(request: NextRequest) {
   try {
@@ -150,7 +155,7 @@ export async function GET(request: NextRequest) {
 
     for (let i = 0; i < targets.length; i++) {
       const ent = targets[i]
-      const cacheKey = getCacheKey(ent.id, apiDateFrom)
+      const cacheKey = getCacheKey(ent.id, apiDateFrom, dateTo)
 
       // Check cache first
       const cached = getCached(cacheKey)
@@ -670,6 +675,7 @@ export async function GET(request: NextRequest) {
         totalOrders: number
         fbsOrders: number
         fboOrders: number
+        warehouses: Record<string, number>
       }> = {}
 
       // Calculate number of unique days in the date range that have orders
@@ -688,9 +694,12 @@ export async function GET(request: NextRequest) {
             totalOrders: 0,
             fbsOrders: 0,
             fboOrders: 0,
+            warehouses: {},
           }
         }
         articleStats[article].totalOrders++
+        const warehouseName = o.order.warehouseName || 'Не указан'
+        articleStats[article].warehouses[warehouseName] = (articleStats[article].warehouses[warehouseName] || 0) + 1
         if (o.isFbs) {
           articleStats[article].fbsOrders++
         } else {
@@ -704,21 +713,35 @@ export async function GET(request: NextRequest) {
       // ─── Fetch FBO stock from WB API ───
       // Get current stock levels at WB warehouses to subtract from supply calculation
       const fboStock: Record<string, number> = {}  // supplierArticle -> total FBO quantity
+      const fboStockByWarehouse: Record<string, Record<string, number>> = {}  // supplierArticle -> warehouse -> qty
 
       for (let i = 0; i < targets.length; i++) {
         const ent = targets[i]
         const apiHeaders = { 'Authorization': `Bearer ${ent.wbApiKey}`, 'Content-Type': 'application/json' }
+        const stockDate = dateTo || new Date().toISOString().split('T')[0]
+        const stockCacheKey = getStockCacheKey(ent.id, stockDate)
+
+        const cachedStocks = getCached(stockCacheKey)
+        if (cachedStocks) {
+          for (const item of cachedStocks) {
+            const article = item.supplierArticle || ''
+            if (!article) continue
+            const qty = item.quantityFull || 0
+            const warehouseName = item.warehouseName || 'Не указан'
+            fboStock[article] = (fboStock[article] || 0) + qty
+            if (!fboStockByWarehouse[article]) fboStockByWarehouse[article] = {}
+            fboStockByWarehouse[article][warehouseName] = (fboStockByWarehouse[article][warehouseName] || 0) + qty
+          }
+          continue
+        }
 
         // Delay between entrepreneurs
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 500))
-        }
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 500))
 
         try {
           // WB Stocks API: statistics-api.wildberries.ru/api/v1/supplier/stocks
           // Returns stock levels at WB warehouses (FBO) per article per warehouse
           // Use yesterday's date — the API requires dateFrom and returns stock snapshot
-          const stockDate = dateTo || new Date().toISOString().split('T')[0]
           const stocksUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=${stockDate}`
           const stocksRes = await fetch(stocksUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
@@ -731,9 +754,12 @@ export async function GET(request: NextRequest) {
                 // quantityFull = total stock at warehouse (free + reserved)
                 // One article may appear multiple times (different warehouses) — sum them up
                 const qty = item.quantityFull || 0
-                if (!fboStock[article]) fboStock[article] = 0
-                fboStock[article] += qty
+                const warehouseName = item.warehouseName || 'Не указан'
+                fboStock[article] = (fboStock[article] || 0) + qty
+                if (!fboStockByWarehouse[article]) fboStockByWarehouse[article] = {}
+                fboStockByWarehouse[article][warehouseName] = (fboStockByWarehouse[article][warehouseName] || 0) + qty
               }
+              setCache(stockCacheKey, stocksData, CACHE_TTL_STOCKS)
             }
           } else {
             console.log(`WB Stocks API error for ${ent.name}: ${stocksRes.status}`)
@@ -752,6 +778,24 @@ export async function GET(request: NextRequest) {
           const rawSupply = Math.ceil(avgDaily * supplyDays * coefficient)
           const currentFboStock = fboStock[stat.article] || 0
           const supplyQty = Math.max(0, rawSupply - currentFboStock)
+          const daysUntilOos = avgDaily > 0 ? Math.round((currentFboStock / avgDaily) * 10) / 10 : null
+          const warehouseRows = Object.entries(stat.warehouses)
+            .map(([warehouse, orders]) => {
+              const warehouseAvgDaily = orders / daysInRange
+              const stock = fboStockByWarehouse[stat.article]?.[warehouse] || 0
+              const targetStock = Math.ceil(warehouseAvgDaily * supplyDays * coefficient)
+              const recommendedQty = Math.max(0, targetStock - stock)
+              return {
+                warehouse,
+                orders,
+                avgDaily: Math.round(warehouseAvgDaily * 100) / 100,
+                stock,
+                recommendedQty,
+                daysUntilOos: warehouseAvgDaily > 0 ? Math.round((stock / warehouseAvgDaily) * 10) / 10 : null,
+              }
+            })
+            .filter(row => row.recommendedQty > 0)
+            .sort((a, b) => b.recommendedQty - a.recommendedQty)
           return {
             article: stat.article,
             subject: stat.subject,
@@ -761,6 +805,8 @@ export async function GET(request: NextRequest) {
             fboOrders: stat.fboOrders,
             avgDaily: Math.round(avgDaily * 100) / 100,
             fboStock: currentFboStock,
+            daysUntilOos,
+            warehouses: warehouseRows.slice(0, 5),
             supplyQty,
           }
         })
@@ -776,6 +822,7 @@ export async function GET(request: NextRequest) {
         totalArticles: supplyTable.length,
         totalSupplyQty: supplyTable.reduce((s, r) => s + r.supplyQty, 0),
         totalFboStock: supplyTable.reduce((s, r) => s + r.fboStock, 0),
+        criticalArticles: supplyTable.filter((r) => r.daysUntilOos !== null && r.daysUntilOos <= 7).length,
         articles: supplyTable,
       }
     }

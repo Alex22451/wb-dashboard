@@ -22,6 +22,7 @@ import {
   Thermometer,
   Truck,
   RefreshCw,
+  MapPin,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -199,6 +200,7 @@ interface SupplyData {
   totalArticles: number
   totalSupplyQty: number
   totalFboStock: number
+  criticalArticles: number
   articles: Array<{
     article: string
     subject: string
@@ -208,6 +210,15 @@ interface SupplyData {
     fboOrders: number
     avgDaily: number
     fboStock: number
+    daysUntilOos: number | null
+    warehouses: Array<{
+      warehouse: string
+      orders: number
+      avgDaily: number
+      stock: number
+      recommendedQty: number
+      daysUntilOos: number | null
+    }>
     supplyQty: number
   }>
 }
@@ -1569,7 +1580,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [supplyDays, setSupplyDays] = useState<number>(14)
   const [coefficient, setCoefficient] = useState<number>(1)
-  const [sortBy, setSortBy] = useState<'supplyQty' | 'avgDaily' | 'article'>('supplyQty')
+  const [sortBy, setSortBy] = useState<'supplyQty' | 'avgDaily' | 'oos' | 'article'>('supplyQty')
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 50
@@ -1621,6 +1632,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     ? [...fetchedData.articles].sort((a, b) => {
         if (sortBy === 'supplyQty') return b.supplyQty - a.supplyQty
         if (sortBy === 'avgDaily') return b.avgDaily - a.avgDaily
+        if (sortBy === 'oos') return (a.daysUntilOos ?? 9999) - (b.daysUntilOos ?? 9999)
         return a.article.localeCompare(b.article)
       })
     : []
@@ -1715,7 +1727,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       {!loading && fetchedData && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
             <Card>
               <CardContent className="pt-4 pb-4">
                 <div className="text-xs text-muted-foreground mb-1">Артикулов</div>
@@ -1738,6 +1750,12 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               <CardContent className="pt-4 pb-4">
                 <div className="text-xs text-emerald-700 dark:text-emerald-400 mb-1">Итого к поставке</div>
                 <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(fetchedData.totalSupplyQty)} шт</div>
+              </CardContent>
+            </Card>
+            <Card className="border-red-200 dark:border-red-900">
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-red-700 dark:text-red-400 mb-1">Риск OOS ≤ 7 дней</div>
+                <div className="text-xl font-bold text-red-700 dark:text-red-400">{formatNumber(fetchedData.criticalArticles)}</div>
               </CardContent>
             </Card>
             <Card className="border-amber-200 dark:border-amber-800">
@@ -1769,9 +1787,10 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               className="w-72"
             />
             <span className="text-sm font-medium text-muted-foreground">Сортировка:</span>
-            <ToggleGroup type="single" value={sortBy} onValueChange={(v) => { if (v) setSortBy(v as 'supplyQty' | 'avgDaily' | 'article') }} className="border rounded-md">
+            <ToggleGroup type="single" value={sortBy} onValueChange={(v) => { if (v) setSortBy(v as 'supplyQty' | 'avgDaily' | 'oos' | 'article') }} className="border rounded-md">
               <ToggleGroupItem value="supplyQty" className="text-xs px-3">К поставке</ToggleGroupItem>
               <ToggleGroupItem value="avgDaily" className="text-xs px-3">Среднее/день</ToggleGroupItem>
+              <ToggleGroupItem value="oos" className="text-xs px-3">OOS</ToggleGroupItem>
               <ToggleGroupItem value="article" className="text-xs px-3">Артикул</ToggleGroupItem>
             </ToggleGroup>
             {searchQuery && (
@@ -1801,6 +1820,8 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                       <th className="text-right px-3 py-2.5 font-medium min-w-[70px]">FBO</th>
                       <th className="text-right px-3 py-2.5 font-medium min-w-[90px]">Среднее/день</th>
                       <th className="text-right px-3 py-2.5 font-medium min-w-[100px]">Остаток ФБО</th>
+                      <th className="text-right px-3 py-2.5 font-medium min-w-[90px]">До OOS</th>
+                      <th className="text-left px-3 py-2.5 font-medium min-w-[240px]">Склады к поставке</th>
                       <th className="text-right px-4 py-2.5 font-medium min-w-[110px]">Шт к поставке</th>
                     </tr>
                   </thead>
@@ -1813,6 +1834,8 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                       <td className="text-right px-3 py-2.5">{formatNumber(fetchedData.articles.reduce((s, a) => s + a.fboOrders, 0))}</td>
                       <td className="text-right px-3 py-2.5">—</td>
                       <td className="text-right px-3 py-2.5 text-sky-700 dark:text-sky-400">{formatNumber(fetchedData.totalFboStock)}</td>
+                      <td className="text-right px-3 py-2.5">—</td>
+                      <td className="px-3 py-2.5">—</td>
                       <td className="text-right px-4 py-2.5 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(fetchedData.totalSupplyQty)}</td>
                     </tr>
                     {paginatedArticles.map((a, i) => (
@@ -1824,6 +1847,24 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                         <td className="text-right px-3 py-2 text-sky-600 dark:text-sky-400">{a.fboOrders}</td>
                         <td className="text-right px-3 py-2">{a.avgDaily.toFixed(2)}</td>
                         <td className="text-right px-3 py-2 text-sky-700 dark:text-sky-400 font-medium">{formatNumber(a.fboStock)}</td>
+                        <td className={`text-right px-3 py-2 font-medium ${a.daysUntilOos !== null && a.daysUntilOos <= 7 ? 'text-red-700 dark:text-red-400' : 'text-muted-foreground'}`}>
+                          {a.daysUntilOos === null ? '-' : `${a.daysUntilOos} дн.`}
+                        </td>
+                        <td className="px-3 py-2">
+                          {a.warehouses.length > 0 ? (
+                            <div className="flex max-w-[320px] flex-wrap gap-1">
+                              {a.warehouses.slice(0, 3).map((w) => (
+                                <Badge key={w.warehouse} variant="outline" className="max-w-full gap-1 text-[10px] font-normal">
+                                  <MapPin className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">{w.warehouse}</span>
+                                  <span className="font-semibold">+{formatNumber(w.recommendedQty)}</span>
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Запаса хватает</span>
+                          )}
+                        </td>
                         <td className="text-right px-4 py-2 font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(a.supplyQty)}</td>
                       </tr>
                     ))}
