@@ -136,7 +136,17 @@ interface MonthlyData {
   products: { id: number; name: string }[]
   months: string[]
   monthlyData: Record<string, Record<number, number>>
+  monthlyRevenue: Record<string, Record<number, number>>
   productMonthlyData: Record<string, Record<number, number>>
+  productMonthlyRevenue: Record<string, Record<number, number>>
+  adSpendByMonth: Record<string, Record<number, number>>
+  entrepreneurMonthly: Record<string, Record<number, { orders: number; revenue: number; adSpend: number; drr: number | null }>>
+  monthStats: { month: string; orders: number; revenue: number; adSpend: number; drr: number | null; momOrdersPct: number | null; yoyOrdersPct: number | null }[]
+  productDynamics: {
+    growth: { id: number; name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+    decline: { id: number; name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+  }
+  seasonality: { id: number; name: string; peakMonth: string; peakOrders: number; avgOrders: number; uplift: number }[]
 }
 
 interface AdSpendData {
@@ -278,6 +288,11 @@ interface GrowthPotentialData {
 }
 
 const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+
+function formatMonthLabel(month: string): string {
+  const [year, monthNum] = month.split('-')
+  return `${MONTH_SHORT[Number(monthNum) - 1] || monthNum} ${year?.slice(2) || ''}`
+}
 
 function formatNumber(n: number): string {
   return n.toLocaleString('ru-RU')
@@ -1406,19 +1421,28 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
 function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [fetchedData, setFetchedData] = useState<MonthlyData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState<'entrepreneurs' | 'products'>('entrepreneurs')
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
 
-  // Use fetchedData
   const data = fetchedData
-
-  // Compute sorted entrepreneur table data when data is available
-  const entTableData = data ? data.entrepreneurs.map((e) => {
-    const row: Record<string, number> = {}
-    data.months.forEach((m) => { row[m] = data.monthlyData[m]?.[e.id] || 0 })
-    const total = data.months.reduce((s, m) => s + (data.monthlyData[m]?.[e.id] || 0), 0)
-    return { ...e, data: row, total }
+  const latestMonth = data?.monthStats[data.monthStats.length - 1]
+  const previousMonth = data?.monthStats[data.monthStats.length - 2]
+  const totalOrders = data?.monthStats.reduce((sum, month) => sum + month.orders, 0) || 0
+  const totalRevenue = data?.monthStats.reduce((sum, month) => sum + month.revenue, 0) || 0
+  const totalAdSpend = data?.monthStats.reduce((sum, month) => sum + month.adSpend, 0) || 0
+  const totalDrr = totalRevenue > 0 ? (totalAdSpend / totalRevenue) * 100 : null
+  const trendData = data ? data.monthStats.map((month) => ({
+    month: formatMonthLabel(month.month),
+    orders: month.orders,
+    revenue: Math.round(month.revenue),
+    adSpend: Math.round(month.adSpend),
+    drr: month.drr,
+  })) : []
+  const entTableData = data ? data.entrepreneurs.map((ent) => {
+    const total = data.months.reduce((sum, month) => sum + (data.monthlyData[month]?.[ent.id] || 0), 0)
+    const revenue = data.months.reduce((sum, month) => sum + (data.monthlyRevenue[month]?.[ent.id] || 0), 0)
+    const adSpend = data.months.reduce((sum, month) => sum + (data.adSpendByMonth[month]?.[ent.id] || 0), 0)
+    return { ...ent, total, revenue, adSpend, drr: revenue > 0 ? (adSpend / revenue) * 100 : null }
   }).sort((a, b) => b.total - a.total) : []
 
   const fetchData = useCallback(async () => {
@@ -1443,7 +1467,6 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
   return (
     <div className="space-y-6">
-      {/* Rate limit errors */}
       <RateLimitAlert errors={rateLimitErrors} />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -1453,16 +1476,6 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
           onChange={setSelectedEnt}
           className="w-full sm:w-64"
         />
-
-        <Select value={view} onValueChange={(v) => setView(v as 'entrepreneurs' | 'products')}>
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="entrepreneurs">По ИП</SelectItem>
-            <SelectItem value="products">По продуктам (Топ-10)</SelectItem>
-          </SelectContent>
-        </Select>
 
         <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
@@ -1490,107 +1503,165 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
       {!loading && data && (
         <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">Заказы за период</div>
+                <div className="mt-1 text-2xl font-bold">{formatNumber(totalOrders)}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Последний месяц: {latestMonth ? formatNumber(latestMonth.orders) : '—'}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">Выручка заказов</div>
+                <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(totalRevenue))} ₽</div>
+                <div className="mt-1 text-xs text-muted-foreground">по заказам WB</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">ДРР за период</div>
+                <div className="mt-1 text-2xl font-bold">{totalDrr === null ? '—' : `${totalDrr.toFixed(1)}%`}</div>
+                <div className="mt-1 text-xs text-muted-foreground">реклама / заказы</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">MoM / YoY</div>
+                <div className="mt-1 text-2xl font-bold">
+                  {latestMonth?.momOrdersPct === null || latestMonth?.momOrdersPct === undefined ? '—' : `${latestMonth.momOrdersPct > 0 ? '+' : ''}${latestMonth.momOrdersPct.toFixed(1)}%`}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  YoY: {latestMonth?.yoyOrdersPct === null || latestMonth?.yoyOrdersPct === undefined ? '—' : `${latestMonth.yoyOrdersPct > 0 ? '+' : ''}${latestMonth.yoyOrdersPct.toFixed(1)}%`}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">
-                {view === 'entrepreneurs' ? 'Заказы по ИП по месяцам' : 'Топ-10 продуктов по месяцам'}
-              </CardTitle>
+              <CardTitle className="text-base">Месячная динамика</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-[300px] sm:h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthsChartData(data, view)} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
+                  <BarChart data={trendData} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip formatter={(value: number) => formatNumber(value)} contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+                    <Tooltip formatter={(value: number, name: string) => name === 'ДРР' ? `${value.toFixed(1)}%` : formatNumber(value)} contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
                     <Legend wrapperStyle={{ fontSize: '12px' }} />
-                    {(view === 'entrepreneurs' ? data.entrepreneurs : data.products.slice(0, 10)).map((item, i) => (
-                      <Bar key={item.id} dataKey={item.name.length > 20 ? item.name.slice(0, 20) + '…' : item.name} fill={COLORS[i % COLORS.length]} radius={[2, 2, 0, 0]} />
-                    ))}
+                    <Bar dataKey="orders" name="Заказы" fill="#10b981" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="adSpend" name="Реклама, ₽" fill="#f59e0b" radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
           </Card>
 
-          {view === 'entrepreneurs' && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">Помесячная сводка по ИП <Badge variant="secondary" className="text-xs">WB API</Badge></CardTitle>
+                <CardTitle className="text-base">Товары дали рост</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {previousMonth && latestMonth ? `${formatMonthLabel(latestMonth.month)} vs ${formatMonthLabel(previousMonth.month)}` : ''}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {data.productDynamics.growth.length === 0 && <div className="text-sm text-muted-foreground">Нет заметного роста</div>}
+                {data.productDynamics.growth.map((row) => (
+                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{row.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatNumber(row.previousOrders)} → {formatNumber(row.currentOrders)}</div>
+                    </div>
+                    <div className="text-right text-sm font-semibold text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Товары просели</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {previousMonth && latestMonth ? `${formatMonthLabel(latestMonth.month)} vs ${formatMonthLabel(previousMonth.month)}` : ''}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {data.productDynamics.decline.length === 0 && <div className="text-sm text-muted-foreground">Нет заметной просадки</div>}
+                {data.productDynamics.decline.map((row) => (
+                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{row.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatNumber(row.previousOrders)} → {formatNumber(row.currentOrders)}</div>
+                    </div>
+                    <div className="text-right text-sm font-semibold text-red-700 dark:text-red-400">{formatNumber(row.diff)}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+
+          {data.seasonality.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Сезонность по месяцам</CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {data.seasonality.map((row) => (
+                    <div key={row.id} className="rounded-md border p-3">
+                      <div className="truncate text-sm font-medium">{row.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Пик: {formatMonthLabel(row.peakMonth)}, {formatNumber(row.peakOrders)} заказов
+                      </div>
+                      <Badge variant="secondary" className="mt-2">x{row.uplift.toFixed(1)} к среднему</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Accordion type="single" collapsible className="rounded-md border px-4">
+            <AccordionItem value="details">
+              <AccordionTrigger>Детализация по ИП и месяцам</AccordionTrigger>
+              <AccordionContent>
                 <ScrollArea className="w-full">
                   <table className="text-sm">
                     <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">ИП</th>
-                        {data.months.map((m) => {
-                          const [y, mo] = m.split('-')
-                          return <th key={m} className="text-right px-3 py-2 font-medium min-w-[80px]">{MONTH_SHORT[Number(mo) - 1]} {y.slice(2)}</th>
-                        })}
-                        <th className="text-right px-3 py-2 font-medium min-w-[80px] bg-muted/50">Итого</th>
+                      <tr className="border-b bg-muted/50">
+                        <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
+                        <th className="px-3 py-2 text-right font-medium">Заказы</th>
+                        <th className="px-3 py-2 text-right font-medium">Выручка</th>
+                        <th className="px-3 py-2 text-right font-medium">Реклама</th>
+                        <th className="px-3 py-2 text-right font-medium">ДРР</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(() => {
-                        const entTableData = data.entrepreneurs.map((e) => {
-                          const row: Record<string, number> = {}
-                          data.months.forEach((m) => { row[m] = data.monthlyData[m]?.[e.id] || 0 })
-                          const total = data.months.reduce((s, m) => s + (data.monthlyData[m]?.[e.id] || 0), 0)
-                          return { ...e, data: row, total }
-                        }).sort((a, b) => b.total - a.total)
-                        return entTableData.map((e) => (
-                          <tr key={e.id} className="border-b hover:bg-muted/30 transition-colors">
-                            <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">{e.name}</td>
-                            {data.months.map((m) => (<td key={m} className="text-right px-3 py-2">{formatNumber(e.data[m])}</td>))}
-                            <td className="text-right px-3 py-2 font-semibold bg-muted/30">{formatNumber(e.total)}</td>
-                          </tr>
-                        ))
-                      })()}
-                      <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
-                        <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
-                        {data.months.map((m) => {
-                          const total = data.entrepreneurs.reduce((s, e) => s + (data.monthlyData[m]?.[e.id] || 0), 0)
-                          return <td key={m} className="text-right px-3 py-2">{formatNumber(total)}</td>
-                        })}
-                        <td className="text-right px-3 py-2 font-bold bg-emerald-50 dark:bg-emerald-950/20">
-                          {formatNumber(data.entrepreneurs.reduce((s, e) => s + data.months.reduce((ss, m) => ss + (data.monthlyData[m]?.[e.id] || 0), 0), 0))}
-                        </td>
-                      </tr>
+                      {entTableData.map((ent) => (
+                        <tr key={ent.id} className="border-b">
+                          <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{ent.name}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(ent.total)}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(ent.revenue))} ₽</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(ent.adSpend))} ₽</td>
+                          <td className="px-3 py-2 text-right">{ent.drr === null ? '—' : `${ent.drr.toFixed(1)}%`}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                   <ScrollBar orientation="horizontal" />
                 </ScrollArea>
-              </CardContent>
-            </Card>
-          )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </>
       )}
     </div>
   )
-}
-
-const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#64748b', '#ec4899', '#14b8a6', '#a855f7']
-
-function monthsChartData(data: MonthlyData, view: 'entrepreneurs' | 'products') {
-  return data.months.map((m) => {
-    const entry: Record<string, any> = { month: m }
-    if (view === 'entrepreneurs') {
-      data.entrepreneurs.forEach((e) => {
-        entry[e.name] = data.monthlyData[m]?.[e.id] || 0
-      })
-    } else {
-      const productTotals = data.products.map((p) => ({
-        ...p,
-        total: Object.values(data.productMonthlyData).reduce((s, monthData) => s + (monthData[p.id] || 0), 0),
-      })).sort((a, b) => b.total - a.total).slice(0, 10)
-      productTotals.forEach((p) => {
-        entry[p.name.length > 20 ? p.name.slice(0, 20) + '…' : p.name] = data.productMonthlyData[m]?.[p.id] || 0
-      })
-    }
-    return entry
-  })
 }
 
 // --- Production Load Tab ---
@@ -3657,7 +3728,7 @@ export default function Home() {
             </TabsTrigger>
             <TabsTrigger value="monthly" className="h-9 gap-2 px-3">
               <Calendar className="h-4 w-4" />
-              <span className="hidden sm:inline">По месяцам</span>
+              <span className="hidden sm:inline">Динамика</span>
             </TabsTrigger>
             <TabsTrigger value="ads" className="h-9 gap-2 px-3">
               <Megaphone className="h-4 w-4" />

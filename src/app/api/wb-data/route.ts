@@ -167,8 +167,10 @@ export async function GET(request: NextRequest) {
       const twoMonthsAgo = new Date(nowMsk.getTime() - 60 * 86400000)
       defaultDateFrom = twoMonthsAgo.toISOString().split('T')[0]
     } else if (section === 'monthly') {
-      const sixMonthsAgo = new Date(nowMsk.getTime() - 180 * 86400000)
-      defaultDateFrom = sixMonthsAgo.toISOString().split('T')[0]
+      const thirteenMonthsAgo = new Date(nowMsk)
+      thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
+      thirteenMonthsAgo.setDate(1)
+      defaultDateFrom = thirteenMonthsAgo.toISOString().split('T')[0]
     } else if (section === 'daily') {
       const threeDaysAgo = new Date(nowMsk.getTime() - 3 * 86400000)
       defaultDateFrom = threeDaysAgo.toISOString().split('T')[0]
@@ -241,7 +243,7 @@ export async function GET(request: NextRequest) {
           productCount: 0,
         },
         daily: { dates: [], products: [], pivot: {}, dateTotals: [], productTotals: {}, fbsPivot: {}, fbsDateTotals: [], fbsProductTotals: {}, fboPivot: {}, fboDateTotals: [], fboProductTotals: {} },
-        monthly: { entrepreneurs: [], products: [], months: [], monthlyData: {}, productMonthlyData: {} },
+        monthly: { entrepreneurs: [], products: [], months: [], monthlyData: {}, productMonthlyData: {}, monthStats: [], entrepreneurMonthly: {}, productDynamics: { growth: [], decline: [] }, seasonality: [] },
         rateLimitErrors: [],
       })
     }
@@ -760,21 +762,27 @@ export async function GET(request: NextRequest) {
       const monthlyEntrepreneurs = targets.map(e => ({ id: e.id, name: e.name }))
 
       const monthlyData: Record<string, Record<number, number>> = {}
+      const monthlyRevenue: Record<string, Record<number, number>> = {}
       const productMonthlyData: Record<string, Record<number, number>> = {}
+      const productMonthlyRevenue: Record<string, Record<number, number>> = {}
 
       const dailyProductMap = new Map(productTypes.map((name, i) => [name, i]))
 
       // Initialize all months with zeros
       for (const m of months) {
         monthlyData[m] = {}
+        monthlyRevenue[m] = {}
         productMonthlyData[m] = {}
+        productMonthlyRevenue[m] = {}
         for (const ent of monthlyEntrepreneurs) {
           monthlyData[m][ent.id] = 0
+          monthlyRevenue[m][ent.id] = 0
         }
         for (const pt of productTypes) {
           const pid = dailyProductMap.get(pt)
           if (pid !== undefined) {
             productMonthlyData[m][pid] = 0
+            productMonthlyRevenue[m][pid] = 0
           }
         }
       }
@@ -783,21 +791,117 @@ export async function GET(request: NextRequest) {
         if (!o.monthStr || !monthlyData[o.monthStr]) continue
 
         monthlyData[o.monthStr][o.entrepreneurId] = (monthlyData[o.monthStr][o.entrepreneurId] || 0) + 1
+        monthlyRevenue[o.monthStr][o.entrepreneurId] = (monthlyRevenue[o.monthStr][o.entrepreneurId] || 0) + getOrderRevenue(o.order)
 
         const productId = dailyProductMap.get(o.mappedType)
         if (productId !== undefined) {
           productMonthlyData[o.monthStr][productId] = (productMonthlyData[o.monthStr][productId] || 0) + 1
+          productMonthlyRevenue[o.monthStr][productId] = (productMonthlyRevenue[o.monthStr][productId] || 0) + getOrderRevenue(o.order)
         }
       }
 
       const dailyProducts = productTypes.map((name, i) => ({ id: i, name }))
+      const monthRanges = months.map((month) => {
+        const [year, monthNum] = month.split('-').map(Number)
+        const from = `${month}-01`
+        const to = new Date(Date.UTC(year, monthNum, 0)).toISOString().split('T')[0]
+        return { month, from, to }
+      })
+      const adSpendByMonth: Record<string, Record<number, number>> = {}
+      for (const { month, from, to } of monthRanges) {
+        adSpendByMonth[month] = {}
+        await Promise.all(targets.map(async (ent) => {
+          adSpendByMonth[month][ent.id] = await fetchAdSpend(ent.wbApiKey, from, to)
+        }))
+      }
+      const monthTotals = (month: string) => {
+        const orders = monthlyEntrepreneurs.reduce((sum, ent) => sum + (monthlyData[month]?.[ent.id] || 0), 0)
+        const revenue = monthlyEntrepreneurs.reduce((sum, ent) => sum + (monthlyRevenue[month]?.[ent.id] || 0), 0)
+        const adSpend = monthlyEntrepreneurs.reduce((sum, ent) => sum + (adSpendByMonth[month]?.[ent.id] || 0), 0)
+        return { orders, revenue, adSpend }
+      }
+      const monthStats = months.map((month, index) => {
+        const current = monthTotals(month)
+        const prevMonth = index > 0 ? monthTotals(months[index - 1]) : null
+        const prevYearMonth = `${Number(month.slice(0, 4)) - 1}-${month.slice(5, 7)}`
+        const prevYear = months.includes(prevYearMonth) ? monthTotals(prevYearMonth) : null
+        const drr = current.revenue > 0 ? (current.adSpend / current.revenue) * 100 : null
+        return {
+          month,
+          ...current,
+          drr,
+          momOrdersPct: prevMonth && prevMonth.orders > 0 ? ((current.orders - prevMonth.orders) / prevMonth.orders) * 100 : null,
+          yoyOrdersPct: prevYear && prevYear.orders > 0 ? ((current.orders - prevYear.orders) / prevYear.orders) * 100 : null,
+        }
+      })
+      const entrepreneurMonthly: Record<string, Record<number, { orders: number; revenue: number; adSpend: number; drr: number | null }>> = {}
+      for (const month of months) {
+        entrepreneurMonthly[month] = {}
+        for (const ent of monthlyEntrepreneurs) {
+          const orders = monthlyData[month]?.[ent.id] || 0
+          const revenue = monthlyRevenue[month]?.[ent.id] || 0
+          const adSpend = adSpendByMonth[month]?.[ent.id] || 0
+          entrepreneurMonthly[month][ent.id] = {
+            orders,
+            revenue,
+            adSpend,
+            drr: revenue > 0 ? (adSpend / revenue) * 100 : null,
+          }
+        }
+      }
+      const currentMonth = months[months.length - 1]
+      const previousMonth = months[months.length - 2]
+      const productDynamics = (() => {
+        if (!currentMonth || !previousMonth) return { growth: [], decline: [] }
+        const rows = dailyProducts.map((product) => {
+          const currentOrders = productMonthlyData[currentMonth]?.[product.id] || 0
+          const previousOrders = productMonthlyData[previousMonth]?.[product.id] || 0
+          const diff = currentOrders - previousOrders
+          return {
+            id: product.id,
+            name: product.name,
+            currentOrders,
+            previousOrders,
+            diff,
+            diffPercent: previousOrders > 0 ? (diff / previousOrders) * 100 : null,
+          }
+        }).filter(row => row.currentOrders > 0 || row.previousOrders > 0)
+        return {
+          growth: rows.filter(row => row.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 10),
+          decline: rows.filter(row => row.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 10),
+        }
+      })()
+      const seasonality = dailyProducts.map((product) => {
+        const values = months.map(month => ({ month, orders: productMonthlyData[month]?.[product.id] || 0 }))
+        const total = values.reduce((sum, row) => sum + row.orders, 0)
+        const avg = values.length ? total / values.length : 0
+        const peak = values.slice().sort((a, b) => b.orders - a.orders)[0]
+        return {
+          id: product.id,
+          name: product.name,
+          peakMonth: peak?.month || '',
+          peakOrders: peak?.orders || 0,
+          avgOrders: avg,
+          uplift: avg > 0 ? (peak?.orders || 0) / avg : 0,
+        }
+      })
+        .filter(row => row.peakOrders >= 20 && row.uplift >= 1.5)
+        .sort((a, b) => b.uplift - a.uplift)
+        .slice(0, 10)
 
       response.monthly = {
         entrepreneurs: monthlyEntrepreneurs,
         products: dailyProducts,
         months,
         monthlyData,
+        monthlyRevenue,
         productMonthlyData,
+        productMonthlyRevenue,
+        adSpendByMonth,
+        entrepreneurMonthly,
+        monthStats,
+        productDynamics,
+        seasonality,
       }
     }
 
