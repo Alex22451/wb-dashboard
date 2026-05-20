@@ -39,6 +39,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
   LineChart,
   Line,
@@ -79,17 +80,26 @@ interface DashboardData {
   chartFbs: Record<string, number>
   chartFbo: Record<string, number>
   periodStats: {
-    yesterday: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    week: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    yesterday: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    week: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    twoWeeks: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    month: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
   }
   prevPeriodStats: {
-    yesterday: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    week: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    twoWeeks: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
-    month: { total: number; fbs: number; fbo: number; dateFrom: string; dateTo: string }
+    yesterday: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    week: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    twoWeeks: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
+    month: { total: number; fbs: number; fbo: number; revenue: number; dateFrom: string; dateTo: string }
   }
+  adSpendByPeriod: Record<'yesterday' | 'week' | 'twoWeeks' | 'month', {
+    totalSpend: number
+    drr: number | null
+    entrepreneurs: { id: number; name: string; spend: number; revenue: number; drr: number | null }[]
+  }>
+  productDynamics: Record<'yesterday' | 'week' | 'twoWeeks' | 'month', {
+    growth: { name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+    decline: { name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+  }>
 }
 
 interface DailyOrdersData {
@@ -450,6 +460,8 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 
   const currentPeriod = data ? data.periodStats[dashboardPeriod] : null
   const prevPeriod = data ? data.prevPeriodStats[dashboardPeriod] : null
+  const currentAd = data ? data.adSpendByPeriod[dashboardPeriod] : null
+  const currentDynamics = data ? data.productDynamics[dashboardPeriod] : null
   const periodChange = currentPeriod && prevPeriod && prevPeriod.total > 0
     ? ((currentPeriod.total - prevPeriod.total) / prevPeriod.total * 100).toFixed(1)
     : null
@@ -463,6 +475,21 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       fbo: data.chartFbo[d] || 0,
     }))
     : []
+
+  const comparisonChartData = data && currentPeriod && prevPeriod ? (() => {
+    const currentDates = data.chartDates.filter(d => d >= currentPeriod.dateFrom && d <= currentPeriod.dateTo)
+    const previousDates = data.chartDates.filter(d => d >= prevPeriod.dateFrom && d <= prevPeriod.dateTo)
+    const len = Math.max(currentDates.length, previousDates.length)
+    return Array.from({ length: len }, (_, index) => {
+      const currentDate = currentDates[index]
+      const previousDate = previousDates[index]
+      return {
+        date: currentDate ? currentDate.slice(5) : String(index + 1),
+        current: currentDate ? (data.chartFbs[currentDate] || 0) + (data.chartFbo[currentDate] || 0) : 0,
+        previous: previousDate ? (data.chartFbs[previousDate] || 0) + (data.chartFbo[previousDate] || 0) : 0,
+      }
+    })
+  })() : []
 
   return (
     <div className="space-y-6">
@@ -518,7 +545,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       {/* Data display — keep visible even during re-fetch so period switch feels instant */}
       {data && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">{periodLabel[dashboardPeriod]}</CardTitle>
@@ -550,7 +577,68 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                 <p className="text-xs text-muted-foreground mt-1">было: {formatNumber(prevPeriod?.total || 0)}</p>
               </CardContent>
             </Card>
+
+            <Card className="border-violet-200 dark:border-violet-900">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-400">ДРР</CardTitle>
+                <Megaphone className="h-4 w-4 text-violet-700 dark:text-violet-400" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">
+                  {currentAd?.drr === null || currentAd?.drr === undefined ? '—' : `${currentAd.drr}%`}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  реклама {formatNumber(currentAd?.totalSpend || 0)} ₽ / заказы {formatNumber(currentPeriod?.revenue || 0)} ₽
+                </p>
+              </CardContent>
+            </Card>
           </div>
+
+          {currentAd && currentAd.entrepreneurs.length > 1 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">ДРР по кабинетам</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {currentAd.entrepreneurs.map((row) => (
+                    <div key={row.id} className="rounded-md border p-3">
+                      <div className="truncate text-sm font-medium">{row.name}</div>
+                      <div className="mt-1 flex items-end justify-between gap-2">
+                        <span className="text-lg font-bold">{row.drr === null ? '—' : `${row.drr}%`}</span>
+                        <span className="text-xs text-muted-foreground">{formatNumber(row.spend)} ₽</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Динамика заказов: {periodLabel[dashboardPeriod]} vs {prevPeriodLabel[dashboardPeriod]}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {comparisonChartData.length > 0 ? (
+                <div className="h-[260px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={comparisonChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                      <Line type="monotone" dataKey="current" name={periodLabel[dashboardPeriod]} stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                      <Line type="monotone" dataKey="previous" name={prevPeriodLabel[dashboardPeriod]} stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="py-8 text-center text-sm text-muted-foreground">Нет данных для графика</p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* FBS / FBO breakdown */}
           <Card>
@@ -668,6 +756,71 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                     )
                   })}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">Товары: рост и просадка</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Accordion type="single" collapsible>
+                <AccordionItem value="product-dynamics">
+                  <AccordionTrigger>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span>Показать детализацию</span>
+                      <Badge variant="secondary" className="text-xs">
+                        рост {currentDynamics?.growth.length || 0}
+                      </Badge>
+                      <Badge variant="outline" className="text-xs">
+                        просадка {currentDynamics?.decline.length || 0}
+                      </Badge>
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div>
+                        <div className="mb-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">Какие товары дали рост</div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <table className="w-full text-xs sm:text-sm">
+                            <tbody>
+                              {(currentDynamics?.growth || []).map((row) => (
+                                <tr key={row.name} className="border-b last:border-b-0">
+                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2 text-right font-medium text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? 'новый' : `+${row.diffPercent}%`}</td>
+                                </tr>
+                              ))}
+                              {(!currentDynamics || currentDynamics.growth.length === 0) && (
+                                <tr><td className="px-3 py-4 text-center text-muted-foreground">Нет товаров с ростом</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-2 text-sm font-medium text-red-700 dark:text-red-400">Антирейтинг / просадка</div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <table className="w-full text-xs sm:text-sm">
+                            <tbody>
+                              {(currentDynamics?.decline || []).map((row) => (
+                                <tr key={row.name} className="border-b last:border-b-0">
+                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2 text-right font-medium text-red-700 dark:text-red-400">{formatNumber(row.diff)}</td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? '—' : `${row.diffPercent}%`}</td>
+                                </tr>
+                              ))}
+                              {(!currentDynamics || currentDynamics.decline.length === 0) && (
+                                <tr><td className="px-3 py-4 text-center text-muted-foreground">Нет товаров с просадкой</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </CardContent>
           </Card>
         </>

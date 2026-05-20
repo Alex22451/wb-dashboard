@@ -51,6 +51,7 @@ const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
 const CACHE_TTL_DAILY = 2 * 60 * 1000       // 2 min
 const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
+const AD_API_BASE = 'https://advert-api.wildberries.ru'
 
 function isSortCenterWarehouse(warehouseName: string): boolean {
   return /\bсц\b/i.test(warehouseName)
@@ -87,6 +88,27 @@ function distributeSupplyQty<T extends { recommendedQtyRaw: number }>(
       const { remainder: _remainder, ...cleanRow } = row
       return cleanRow as T & { recommendedQty: number }
     })
+}
+
+function getOrderRevenue(order: any): number {
+  return Number(order.finishedPrice)
+    || Number(order.priceWithDisc)
+    || Number(order.totalPrice)
+    || Number(order.forPay)
+    || 0
+}
+
+async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
+  const url = `${AD_API_BASE}/adv/v1/upd?from=${from}&to=${to}`
+  const response = await fetch(url, {
+    headers: { Authorization: apiKey },
+    signal: AbortSignal.timeout(20000),
+  })
+  if (response.status === 204) return 0
+  if (!response.ok) return 0
+  const data = await response.json()
+  if (!Array.isArray(data)) return 0
+  return data.reduce((sum, row) => sum + (Number(row.updSum) || 0), 0)
 }
 
 export async function GET(request: NextRequest) {
@@ -394,8 +416,8 @@ export async function GET(request: NextRequest) {
         weekEntStats[o.entrepreneurId].totalOrders++
       }
 
-      // FBS/FBO daily breakdown for chart (last 31 days ending yesterday)
-      const chartFromDate = new Date(mskNow.getTime() - 31 * 86400000).toISOString().split('T')[0]
+      // FBS/FBO daily breakdown for chart (last 60 days ending yesterday)
+      const chartFromDate = new Date(mskNow.getTime() - 60 * 86400000).toISOString().split('T')[0]
       const chartDates = [...new Set(
         allMappedOrders
           .filter(o => o.dateStr >= chartFromDate && o.dateStr <= yesterdayMsk)
@@ -423,6 +445,7 @@ export async function GET(request: NextRequest) {
           total: periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
+          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: from,
           dateTo: yesterdayMsk,
         }
@@ -437,9 +460,88 @@ export async function GET(request: NextRequest) {
           total: periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
+          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: prevFrom,
           dateTo: prevTo,
         }
+      }
+
+      const dashboardPeriodStats = {
+        yesterday: calcPeriodStats(1),
+        week: calcPeriodStats(7),
+        twoWeeks: calcPeriodStats(14),
+        month: calcPeriodStats(30),
+      }
+      const dashboardPrevPeriodStats = {
+        yesterday: calcPrevPeriodStats(1),
+        week: calcPrevPeriodStats(7),
+        twoWeeks: calcPrevPeriodStats(14),
+        month: calcPrevPeriodStats(30),
+      }
+
+      const calcProductDynamics = (period: keyof typeof dashboardPeriodStats) => {
+        const current = dashboardPeriodStats[period]
+        const previous = dashboardPrevPeriodStats[period]
+        const currentByProduct: Record<string, number> = {}
+        const previousByProduct: Record<string, number> = {}
+
+        for (const o of allMappedOrders) {
+          if (o.dateStr >= current.dateFrom && o.dateStr <= current.dateTo) {
+            currentByProduct[o.mappedType] = (currentByProduct[o.mappedType] || 0) + 1
+          } else if (o.dateStr >= previous.dateFrom && o.dateStr <= previous.dateTo) {
+            previousByProduct[o.mappedType] = (previousByProduct[o.mappedType] || 0) + 1
+          }
+        }
+
+        const names = [...new Set([...Object.keys(currentByProduct), ...Object.keys(previousByProduct)])]
+        const rows = names.map((name) => {
+          const currentOrders = currentByProduct[name] || 0
+          const previousOrders = previousByProduct[name] || 0
+          const diff = currentOrders - previousOrders
+          const diffPercent = previousOrders > 0 ? Math.round((diff / previousOrders) * 1000) / 10 : null
+          return { name, currentOrders, previousOrders, diff, diffPercent }
+        })
+
+        return {
+          growth: rows.filter((row) => row.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 10),
+          decline: rows.filter((row) => row.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 10),
+        }
+      }
+
+      const adSpendByPeriod: Record<string, {
+        totalSpend: number
+        drr: number | null
+        entrepreneurs: Array<{ id: number; name: string; spend: number; revenue: number; drr: number | null }>
+      }> = {}
+
+      for (const [period, stats] of Object.entries(dashboardPeriodStats)) {
+        const entRows: Array<{ id: number; name: string; spend: number; revenue: number; drr: number | null }> = []
+        for (const ent of targets) {
+          const entOrders = allMappedOrders.filter(o => o.entrepreneurId === ent.id && o.dateStr >= stats.dateFrom && o.dateStr <= stats.dateTo)
+          const revenue = Math.round(entOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0))
+          const spend = await fetchAdSpend(ent.wbApiKey, stats.dateFrom, stats.dateTo)
+          entRows.push({
+            id: ent.id,
+            name: ent.name,
+            spend: Math.round(spend),
+            revenue,
+            drr: revenue > 0 ? Math.round((spend / revenue) * 1000) / 10 : null,
+          })
+          await new Promise(resolve => setTimeout(resolve, 250))
+        }
+        const totalSpend = entRows.reduce((sum, row) => sum + row.spend, 0)
+        adSpendByPeriod[period] = {
+          totalSpend,
+          drr: stats.revenue > 0 ? Math.round((totalSpend / stats.revenue) * 1000) / 10 : null,
+          entrepreneurs: entRows,
+        }
+      }
+
+      const productDynamics = {
+        yesterday: calcProductDynamics('yesterday'),
+        week: calcProductDynamics('week'),
+        twoWeeks: calcProductDynamics('twoWeeks'),
+        month: calcProductDynamics('month'),
       }
 
       response.dashboard = {
@@ -465,18 +567,10 @@ export async function GET(request: NextRequest) {
         chartDates,
         chartFbs,
         chartFbo,
-        periodStats: {
-          yesterday: calcPeriodStats(1),
-          week: calcPeriodStats(7),
-          twoWeeks: calcPeriodStats(14),
-          month: calcPeriodStats(30),
-        },
-        prevPeriodStats: {
-          yesterday: calcPrevPeriodStats(1),
-          week: calcPrevPeriodStats(7),
-          twoWeeks: calcPrevPeriodStats(14),
-          month: calcPrevPeriodStats(30),
-        },
+        periodStats: dashboardPeriodStats,
+        prevPeriodStats: dashboardPrevPeriodStats,
+        adSpendByPeriod,
+        productDynamics,
       }
     }
 
