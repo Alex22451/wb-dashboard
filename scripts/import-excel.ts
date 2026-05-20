@@ -5,13 +5,12 @@ import * as path from 'path'
 const db = new PrismaClient({ log: ['warn', 'error'] })
 
 const ENTREPRENEUR_SHEETS = [
-  'Бураго Т.В.',
-  'Боев Ф.В.',
-  'Масляков Л.А.',
-  'Масляков В.А.',
-  'Масляков А.А.',
-  'Зубахин А.В.',
-  'Зубахина Н.В.',
+  { id: 1, name: 'Бураго Т.В.' },
+  { id: 3, name: 'Масляков Л.А.' },
+  { id: 4, name: 'Масляков В.А.' },
+  { id: 5, name: 'Масляков А.А.' },
+  { id: 6, name: 'Зубахин А.В.' },
+  { id: 7, name: 'Зубахина Н.В.' },
 ]
 
 function parseDate(val: any, XLSX: any): Date | null {
@@ -44,7 +43,7 @@ async function main() {
   const allProductNames = new Set<string>()
   const sheetData: Record<string, { dates: Date[]; products: { name: string; quantities: (number | null)[] }[] }> = {}
   
-  for (const sheetName of ENTREPRENEUR_SHEETS) {
+  for (const { name: sheetName } of ENTREPRENEUR_SHEETS) {
     console.log(`Parsing: ${sheetName}`)
     const ws = wb.Sheets[sheetName]
     if (!ws) continue
@@ -116,16 +115,16 @@ async function main() {
   // Seed entrepreneurs using raw SQL
   console.log('Seeding entrepreneurs...')
   const entrepreneurMap: Record<string, number> = {}
-  for (let i = 0; i < ENTREPRENEUR_SHEETS.length; i++) {
-    const name = ENTREPRENEUR_SHEETS[i]
+  for (const entrepreneur of ENTREPRENEUR_SHEETS) {
+    const { id, name } = entrepreneur
     const apiKey = apiKeyByName.get(name)
     const promotionApiKey = promotionApiKeyByName.get(name)
     if (apiKey || promotionApiKey) {
-      await db.$executeRaw`INSERT INTO Entrepreneur (id, name, wbApiKey, wbPromotionApiKey) VALUES (${i + 1}, ${name}, ${apiKey || null}, ${promotionApiKey || null})`
+      await db.$executeRaw`INSERT INTO Entrepreneur (id, name, wbApiKey, wbPromotionApiKey) VALUES (${id}, ${name}, ${apiKey || null}, ${promotionApiKey || null})`
     } else {
-      await db.$executeRaw`INSERT INTO Entrepreneur (id, name) VALUES (${i + 1}, ${name})`
+      await db.$executeRaw`INSERT INTO Entrepreneur (id, name) VALUES (${id}, ${name})`
     }
-    entrepreneurMap[name] = i + 1
+    entrepreneurMap[name] = id
   }
   
   // Seed products using raw SQL
@@ -144,7 +143,7 @@ async function main() {
   const BATCH_SIZE = 5000
   let values: string[] = []
   
-  for (const sheetName of ENTREPRENEUR_SHEETS) {
+  for (const { name: sheetName } of ENTREPRENEUR_SHEETS) {
     const sData = sheetData[sheetName]
     if (!sData) continue
     const entId = entrepreneurMap[sheetName]

@@ -1,7 +1,6 @@
 {
   "entrepreneurs": [
     {"id": 1, "name": "Бураго Т.В.", "apiKey": ""},
-    {"id": 2, "name": "Боев Ф.В.", "apiKey": ""},
     {"id": 3, "name": "Масляков Л.А.", "apiKey": ""},
     {"id": 4, "name": "Масляков В.А.", "apiKey": ""},
     {"id": 5, "name": "Масляков А.А.", "apiKey": ""},

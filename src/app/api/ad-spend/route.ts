@@ -56,10 +56,14 @@ async function fetchWbAdCosts(apiKey: string, from: string, to: string): Promise
 
 async function getLocalEntrepreneurs(): Promise<EntrepreneurWithPromotionKey[]> {
   try {
-    const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; promotionApiKey: string | null }>>(
-      `SELECT id, name, wbPromotionApiKey as promotionApiKey FROM Entrepreneur ORDER BY id`
+    const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string | null; wbPromotionApiKey: string | null }>>(
+      `SELECT id, name, wbApiKey, wbPromotionApiKey FROM Entrepreneur ORDER BY id`
     )
-    return rows
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      promotionApiKey: row.wbPromotionApiKey || row.wbApiKey,
+    }))
   } catch {
     const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string | null }>>(
       `SELECT id, name, wbApiKey FROM Entrepreneur ORDER BY id`

@@ -16,14 +16,12 @@ Work Log:
   - Масляков В.А. (id=4) → key added
   - Масляков А.А. (id=5) → key added
   - Зубахина Н.В. (id=7) → key added
-- Боев Ф.В. (id=2) has no API key (user didn't provide one)
 - Зубахин А.В. (id=6) already had an API key
 
 Stage Summary:
 - Dev server running persistently via double-fork daemon at port 3000
 - All API endpoints responding with HTTP 200
-- 6 out of 7 entrepreneurs now have WB API keys
-- Only Боев Ф.В. remains without an API key
+- Active entrepreneurs have WB API keys; obsolete entrepreneur records are removed from the app
 
 ---
 Task ID: 2
