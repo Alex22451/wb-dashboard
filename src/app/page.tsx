@@ -1963,7 +1963,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [data, setData] = useState<GrowthPotentialData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([])
   const [periodDays, setPeriodDays] = useState(30)
   const [minOpens, setMinOpens] = useState(20)
 
@@ -1976,6 +1976,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
   }, [periodDays])
 
   const fetchData = useCallback(async () => {
+    if (selectedEnt.length === 0) return
     setLoading(true)
     try {
       const dates = getDates()
@@ -2011,6 +2012,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
             selectedIds={selectedEnt}
             onChange={setSelectedEnt}
             onlyWithApi
+            placeholder="Выберите ИП"
             className="w-full sm:w-64"
           />
         </div>
@@ -2032,7 +2034,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
             className="w-full sm:w-32"
           />
         </div>
-        <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
+        <Button onClick={fetchData} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />

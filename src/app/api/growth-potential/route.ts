@@ -48,7 +48,7 @@ interface GrowthItem {
 const API_BASE = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 const STATS_BASE = 'https://statistics-api.wildberries.ru/api/v1/supplier/stocks'
 const growthCache = new Map<string, { data: unknown; timestamp: number }>()
-const CACHE_TTL = 10 * 60 * 1000
+const CACHE_TTL = 30 * 60 * 1000
 
 function getCached(key: string): unknown | null {
   const cached = growthCache.get(key)
@@ -76,11 +76,11 @@ function parseEntrepreneurIds(value: string | null, rows: EntrepreneurRow[]): En
   return rows.filter((row) => ids.has(row.id))
 }
 
-async function fetchWbApi(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
+async function fetchWbApi(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const response = await fetch(url, options)
     if (response.status === 429 || response.status === 461) {
-      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2500))
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 5000))
       continue
     }
     return response
@@ -90,47 +90,41 @@ async function fetchWbApi(url: string, options: RequestInit, maxRetries = 3): Pr
 
 async function fetchFunnel(apiKey: string, dateFrom: string, dateTo: string): Promise<FunnelProduct[]> {
   const products = new Map<number, FunnelProduct>()
-  const sortOrders = [
-    { field: 'openCount', mode: 'asc' },
-    { field: 'openCount', mode: 'desc' },
-    { field: 'orderCount', mode: 'desc' },
-  ]
+  let page = 1
 
-  for (let sortIndex = 0; sortIndex < sortOrders.length; sortIndex++) {
-    if (sortIndex > 0) await new Promise(resolve => setTimeout(resolve, 1200))
-    const orderBy = sortOrders[sortIndex]
-    let page = 1
+  while (page <= 3) {
+    const response = await fetchWbApi(API_BASE, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        page,
+        pageSize: 100,
+        selectedPeriod: { start: dateFrom, end: dateTo },
+        orderBy: { field: 'openCount', mode: 'asc' },
+      }),
+    })
 
-    while (page <= 5) {
-      const response = await fetchWbApi(API_BASE, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          page,
-          pageSize: 100,
-          selectedPeriod: { start: dateFrom, end: dateTo },
-          orderBy,
-        }),
-      })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        throw new Error(`WB Sales Funnel API ${response.status}: ${body.detail || body.title || body.message || 'ошибка'}`)
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      const message = body.detail || body.title || body.message || 'ошибка'
+      if (response.status === 429 || response.status === 461) {
+        throw new Error('Превышен лимит WB Sales Funnel API. Подождите 2-3 минуты или выберите один ИП.')
       }
-
-      const data = await response.json()
-      const pageProducts: FunnelProduct[] = data?.data?.products || []
-      for (const product of pageProducts) {
-        const nmId = product.product?.nmId
-        if (nmId && !products.has(nmId)) products.set(nmId, product)
-      }
-      if (pageProducts.length < 100) break
-      page += 1
-      await new Promise(resolve => setTimeout(resolve, 1200))
+      throw new Error(`WB Sales Funnel API ${response.status}: ${message}`)
     }
+
+    const data = await response.json()
+    const pageProducts: FunnelProduct[] = data?.data?.products || []
+    for (const product of pageProducts) {
+      const nmId = product.product?.nmId
+      if (nmId && !products.has(nmId)) products.set(nmId, product)
+    }
+    if (pageProducts.length < 100) break
+    page += 1
+    await new Promise(resolve => setTimeout(resolve, 2000))
   }
 
   return [...products.values()]
