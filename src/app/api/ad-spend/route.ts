@@ -1,82 +1,156 @@
 import { db } from '@/lib/db'
-import { isVercel, getEntrepreneurs, getAdSpends } from '@/lib/entrepreneurs-config'
-import { NextResponse } from 'next/server'
+import { getEntrepreneurs } from '@/lib/entrepreneurs-config'
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET() {
+interface EntrepreneurWithPromotionKey {
+  id: number
+  name: string
+  promotionApiKey: string | null
+}
+
+interface WbAdCostRow {
+  updTime: string | null
+  updSum: number
+  advertId: number
+  campName: string
+}
+
+interface CampaignSpend {
+  advertId: number
+  name: string
+  spend: number
+}
+
+const AD_API_BASE = 'https://advert-api.wildberries.ru'
+
+function getMonthEnd(year: number, month: number): string {
+  return new Date(year, month, 0).toISOString().slice(0, 10)
+}
+
+function getAvailableMonths(year: number): number[] {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+  const maxMonth = year < currentYear ? 12 : year === currentYear ? currentMonth : 0
+  return Array.from({ length: maxMonth }, (_, i) => i + 1)
+}
+
+async function fetchWbAdCosts(apiKey: string, from: string, to: string): Promise<WbAdCostRow[]> {
+  const url = `${AD_API_BASE}/adv/v1/upd?from=${from}&to=${to}`
+  const response = await fetch(url, {
+    headers: { Authorization: apiKey },
+    signal: AbortSignal.timeout(30000),
+  })
+
+  if (response.status === 204) return []
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    const detail = body ? body.slice(0, 180).replace(/\s+/g, ' ') : 'unknown error'
+    throw new Error(`${response.status}: ${detail}`)
+  }
+
+  const data = await response.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function getLocalEntrepreneurs(): Promise<EntrepreneurWithPromotionKey[]> {
   try {
-    // On Vercel, use config-based data directly (no DB)
-    if (isVercel()) {
-      const entrepreneurs = getEntrepreneurs().map((e) => ({ id: e.id, name: e.name }))
-      const adSpendsData = getAdSpends()
-      const years = Object.values(adSpendsData)
-        .flat()
-        .map((entry) => entry.year)
-        .filter((year) => Number.isFinite(year))
-      const selectedYear = years.length > 0 ? Math.max(...years) : new Date().getFullYear()
+    const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; promotionApiKey: string | null }>>(
+      `SELECT id, name, wbPromotionApiKey as promotionApiKey FROM Entrepreneur ORDER BY id`
+    )
+    return rows
+  } catch {
+    const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string | null }>>(
+      `SELECT id, name, wbApiKey FROM Entrepreneur ORDER BY id`
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      promotionApiKey: row.wbApiKey,
+    }))
+  }
+}
 
-      // Flatten and filter for the latest year available
-      const grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number }[] }> = {}
-      for (const [entIdStr, entries] of Object.entries(adSpendsData)) {
-        const entId = Number(entIdStr)
-        const ent = entrepreneurs.find((e) => e.id === entId)
-        if (!ent) continue
+function getVercelEntrepreneurs(): EntrepreneurWithPromotionKey[] {
+  return getEntrepreneurs().map((e) => ({
+    id: e.id,
+    name: e.name,
+    promotionApiKey: e.promotionApiKey || e.apiKey || null,
+  }))
+}
 
-        const yearEntries = (entries as Array<{ year: number; month: number; budget: number; actual: number }>).filter((e) => e.year === selectedYear)
-        if (yearEntries.length === 0) continue
+export async function GET(request: NextRequest) {
+  try {
+    const year = Number(request.nextUrl.searchParams.get('year')) || 2026
+    const isVercel = !!process.env.VERCEL
+    const entrepreneurs = isVercel ? getVercelEntrepreneurs() : await getLocalEntrepreneurs()
+    const months = getAvailableMonths(year)
 
-        grouped[entId] = {
+    const grouped: Record<number, {
+      entrepreneur: string
+      budget: number
+      months: Array<{ month: number; actual: number; topCampaigns: CampaignSpend[] }>
+    }> = {}
+    const errors: Array<{ id: number; name: string; error: string }> = []
+
+    await Promise.all(entrepreneurs.map(async (ent) => {
+      if (!ent.promotionApiKey || ent.promotionApiKey.trim() === '') {
+        errors.push({ id: ent.id, name: ent.name, error: 'Нет WB токена категории Продвижение' })
+        return
+      }
+
+      const monthRows: Array<{ month: number; actual: number; topCampaigns: CampaignSpend[] }> = []
+
+      for (const month of months) {
+        const from = `${year}-${String(month).padStart(2, '0')}-01`
+        const to = getMonthEnd(year, month)
+
+        try {
+          const costs = await fetchWbAdCosts(ent.promotionApiKey, from, to)
+          const campaignTotals = new Map<number, CampaignSpend>()
+
+          for (const cost of costs) {
+            const spend = Number(cost.updSum) || 0
+            if (spend <= 0) continue
+            const advertId = Number(cost.advertId) || 0
+            const existing = campaignTotals.get(advertId)
+            campaignTotals.set(advertId, {
+              advertId,
+              name: existing?.name || cost.campName || `Кампания ${advertId}`,
+              spend: (existing?.spend || 0) + spend,
+            })
+          }
+
+          const campaigns = [...campaignTotals.values()].sort((a, b) => b.spend - a.spend)
+          const topCampaigns = campaigns.slice(0, 3)
+          const actual = campaigns.reduce((sum, campaign) => sum + campaign.spend, 0)
+
+          monthRows.push({ month, actual, topCampaigns })
+        } catch (error: any) {
+          errors.push({ id: ent.id, name: ent.name, error: error.message || 'Ошибка WB Promotion API' })
+          break
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1100))
+      }
+
+      if (monthRows.some((row) => row.actual > 0)) {
+        grouped[ent.id] = {
           entrepreneur: ent.name,
-          budget: yearEntries[0]?.budget || 0,
-          months: yearEntries
-            .filter((e) => e.actual && e.actual > 0)
-            .map((e) => ({ month: e.month, actual: e.actual })),
+          budget: 0,
+          months: monthRows.filter((row) => row.actual > 0),
         }
       }
+    }))
 
-      return NextResponse.json({ entrepreneurs, grouped, year: selectedYear })
-    }
-
-    // Local development: use Prisma SQLite
-    const yearRows = await db.$queryRawUnsafe<Array<{ year: number | null }>>(
-      `SELECT MAX(year) as year FROM AdSpend`
-    )
-    const selectedYear = Number(yearRows[0]?.year) || new Date().getFullYear()
-
-    const adSpends = await db.$queryRawUnsafe<Array<{
-      entrepreneurId: number
-      entrepreneurName: string
-      year: number
-      month: number
-      budget: number | null
-      actual: number | null
-    }>>(`
-      SELECT a.entrepreneurId, e.name as entrepreneurName, a.year, a.month, a.budget, a.actual
-      FROM AdSpend a
-      JOIN Entrepreneur e ON a.entrepreneurId = e.id
-      WHERE a.year = ${selectedYear}
-      ORDER BY a.year, a.month
-    `)
-
-    const entrepreneurs = await db.$queryRawUnsafe<Array<{ id: number; name: string }>>(
-      `SELECT id, name FROM Entrepreneur ORDER BY id`
-    )
-
-    // Group by entrepreneur
-    const grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number }[] }> = {}
-    adSpends.forEach((a) => {
-      if (!grouped[a.entrepreneurId]) {
-        grouped[a.entrepreneurId] = {
-          entrepreneur: a.entrepreneurName,
-          budget: a.budget || 0,
-          months: [],
-        }
-      }
-      if (a.actual && a.actual > 0) {
-        grouped[a.entrepreneurId].months.push({ month: a.month, actual: a.actual })
-      }
+    return NextResponse.json({
+      entrepreneurs: entrepreneurs.map((e) => ({ id: e.id, name: e.name })),
+      grouped,
+      year,
+      source: 'wb-promotion-api',
+      errors,
     })
-
-    return NextResponse.json({ entrepreneurs, grouped, year: selectedYear })
   } catch (error) {
     console.error('Ad spend API error:', error)
     return NextResponse.json({ error: 'Failed to load ad spend data' }, { status: 500 })

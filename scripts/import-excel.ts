@@ -87,10 +87,21 @@ async function main() {
   
   console.log(`Total unique products: ${allProductNames.size}`)
 
-  const existingKeys = await db.$queryRaw<Array<{ name: string; wbApiKey: string | null }>>`
-    SELECT name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''
-  `
+  await db.$executeRawUnsafe(`ALTER TABLE Entrepreneur ADD COLUMN wbPromotionApiKey TEXT`).catch(() => null)
+
+  let existingKeys: Array<{ name: string; wbApiKey: string | null; wbPromotionApiKey: string | null }>
+  try {
+    existingKeys = await db.$queryRaw<Array<{ name: string; wbApiKey: string | null; wbPromotionApiKey: string | null }>>`
+      SELECT name, wbApiKey, wbPromotionApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL OR wbPromotionApiKey IS NOT NULL
+    `
+  } catch {
+    const legacyKeys = await db.$queryRaw<Array<{ name: string; wbApiKey: string | null }>>`
+      SELECT name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''
+    `
+    existingKeys = legacyKeys.map((row) => ({ ...row, wbPromotionApiKey: null }))
+  }
   const apiKeyByName = new Map(existingKeys.map((row) => [row.name, row.wbApiKey]))
+  const promotionApiKeyByName = new Map(existingKeys.map((row) => [row.name, row.wbPromotionApiKey]))
   
   // Clear existing data using raw SQL (fast)
   console.log('Clearing existing data...')
@@ -108,8 +119,9 @@ async function main() {
   for (let i = 0; i < ENTREPRENEUR_SHEETS.length; i++) {
     const name = ENTREPRENEUR_SHEETS[i]
     const apiKey = apiKeyByName.get(name)
-    if (apiKey) {
-      await db.$executeRaw`INSERT INTO Entrepreneur (id, name, wbApiKey) VALUES (${i + 1}, ${name}, ${apiKey})`
+    const promotionApiKey = promotionApiKeyByName.get(name)
+    if (apiKey || promotionApiKey) {
+      await db.$executeRaw`INSERT INTO Entrepreneur (id, name, wbApiKey, wbPromotionApiKey) VALUES (${i + 1}, ${name}, ${apiKey || null}, ${promotionApiKey || null})`
     } else {
       await db.$executeRaw`INSERT INTO Entrepreneur (id, name) VALUES (${i + 1}, ${name})`
     }

@@ -11,6 +11,7 @@ model Entrepreneur {
   id       Int          @id @default(autoincrement())
   name     String       @unique
   wbApiKey String?
+  wbPromotionApiKey String?
   orders   DailyOrder[]
   adSpends AdSpend[]
 }

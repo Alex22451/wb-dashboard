@@ -9,6 +9,7 @@ export interface EntrepreneurConfig {
   id: number
   name: string
   apiKey: string
+  promotionApiKey?: string
 }
 
 export interface AdSpendEntry {

@@ -123,8 +123,10 @@ interface MonthlyData {
 
 interface AdSpendData {
   year?: number
+  source?: string
   entrepreneurs: { id: number; name: string }[]
-  grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number }[] }>
+  grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number; topCampaigns?: { advertId: number; name: string; spend: number }[] }[] }>
+  errors?: RateLimitError[]
 }
 
 interface CompareData {
@@ -1908,15 +1910,32 @@ function AdSpendTab() {
 
   return (
     <div className="space-y-6">
+      {data.errors && data.errors.length > 0 && (
+        <Alert variant={entries.length > 0 ? 'default' : 'destructive'}>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>WB Promotion API</AlertTitle>
+          <AlertDescription>
+            {entries.length > 0
+              ? `Часть ИП не загрузилась: ${data.errors.map(e => e.name).join(', ')}`
+              : 'Нет доступных данных рекламы. Нужны WB API токены с категорией «Продвижение».'}
+          </AlertDescription>
+        </Alert>
+      )}
+
         <Card>
-          <CardHeader><CardTitle className="text-base">Расходы на рекламу по месяцам ({data.year || new Date().getFullYear()})</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              Расходы на рекламу по месяцам ({data.year || 2026})
+              <Badge variant="secondary" className="text-xs">WB Promotion API</Badge>
+            </CardTitle>
+          </CardHeader>
         <CardContent>
           {entries.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за {data.year || new Date().getFullYear()} год</p>
+            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за {data.year || 2026} год</p>
           ) : (
-            <div className="h-80">
+            <div className="h-[300px] sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
                   <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}к`} />
@@ -1931,14 +1950,13 @@ function AdSpendTab() {
       </Card>
       {entries.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация ({data.year || new Date().getFullYear()})</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация ({data.year || 2026})</CardTitle></CardHeader>
           <CardContent>
             <ScrollArea className="w-full">
-              <table className="text-sm">
+              <table className="min-w-full text-xs sm:text-sm">
                 <thead>
                   <tr className="bg-muted/50 border-b">
                     <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">ИП</th>
-                    <th className="text-right px-3 py-2 font-medium min-w-[90px] bg-muted/50">Бюджет/мес</th>
                     {MONTH_SHORT.map((m) => (<th key={m} className="text-right px-3 py-2 font-medium min-w-[80px]">{m}</th>))}
                     <th className="text-right px-3 py-2 font-medium min-w-[90px] bg-muted/50">Итого</th>
                   </tr>
@@ -1949,7 +1967,6 @@ function AdSpendTab() {
                     return (
                       <tr key={idx} className="border-b hover:bg-muted/30 transition-colors">
                         <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">{e.entrepreneur}</td>
-                        <td className="text-right px-3 py-2 text-muted-foreground">{formatNumber(e.budget)}</td>
                         {Array.from({ length: 12 }, (_, i) => { const monthData = e.months.find((m) => m.month === i + 1); return (<td key={i} className={`text-right px-3 py-2 ${monthData ? '' : 'text-muted-foreground'}`}>{monthData ? formatNumber(monthData.actual) : '—'}</td>); })}
                         <td className="text-right px-3 py-2 font-semibold bg-muted/30">{formatNumber(total)}</td>
                       </tr>
@@ -1957,10 +1974,46 @@ function AdSpendTab() {
                   })}
                   <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
                     <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
-                    <td className="text-right px-3 py-2 bg-emerald-50 dark:bg-emerald-950/20">{formatNumber(entries.reduce((s, e) => s + e.budget, 0))}</td>
                     {Array.from({ length: 12 }, (_, i) => { const monthTotal = entries.reduce((s, e) => { const md = e.months.find((m) => m.month === i + 1); return s + (md?.actual || 0) }, 0); return (<td key={i} className="text-right px-3 py-2">{monthTotal ? formatNumber(monthTotal) : '—'}</td>); })}
                     <td className="text-right px-3 py-2 font-bold bg-emerald-50 dark:bg-emerald-950/20">{formatNumber(entries.reduce((s, e) => s + e.months.reduce((ss, m) => ss + m.actual, 0), 0))}</td>
                   </tr>
+                </tbody>
+              </table>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
+      {entries.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Топ-3 кампании по затратам за месяц</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="w-full">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="sticky left-0 z-10 min-w-[150px] bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
+                    <th className="min-w-[90px] px-3 py-2 text-left font-medium">Месяц</th>
+                    <th className="min-w-[260px] px-3 py-2 text-left font-medium">Кампания</th>
+                    <th className="min-w-[90px] px-3 py-2 text-right font-medium">ID</th>
+                    <th className="min-w-[120px] px-3 py-2 text-right font-medium">Затраты</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.flatMap((entry) => entry.months.flatMap((month) =>
+                    (month.topCampaigns || []).map((campaign, index) => (
+                      <tr key={`${entry.entrepreneur}-${month.month}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
+                        <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{entry.entrepreneur}</td>
+                        <td className="px-3 py-2">{MONTH_SHORT[month.month - 1]}</td>
+                        <td className="px-3 py-2">{campaign.name}</td>
+                        <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '—'}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
+                      </tr>
+                    ))
+                  ))}
                 </tbody>
               </table>
               <ScrollBar orientation="horizontal" />
