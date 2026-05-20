@@ -7,25 +7,6 @@ interface EntrepreneurRow {
   wbApiKey: string
 }
 
-interface FunnelProduct {
-  product: {
-    nmId: number
-    title: string
-    vendorCode: string
-    brandName: string
-    subjectName: string
-  }
-  statistic: {
-    selected: {
-      openCount: number
-      cartCount: number
-      orderCount: number
-      orderSum: number
-      buyoutCount?: number
-    }
-  }
-}
-
 interface GrowthItem {
   entrepreneurId: number
   entrepreneurName: string
@@ -43,13 +24,29 @@ interface GrowthItem {
   daysUntilOos: number | null
   potentialScore: number
   recommendation: string
-  dataSource: 'funnel' | 'orders-fallback'
+  dataSource: 'promotion'
+  spend: number
+  views: number
+  ctr: number
+  cpc: number
 }
 
-const API_BASE = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
+interface PromotionProductStats {
+  nmId: number
+  name: string
+  views: number
+  clicks: number
+  atbs: number
+  orders: number
+  spend: number
+  orderSum: number
+}
+
+const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const STATS_BASE = 'https://statistics-api.wildberries.ru/api/v1/supplier/stocks'
 const growthCache = new Map<string, { data: unknown; timestamp: number }>()
 const CACHE_TTL = 30 * 60 * 1000
+const ACTIVE_PROMOTION_STATUSES = new Set([7, 9, 11])
 
 function getCached(key: string): unknown | null {
   const cached = growthCache.get(key)
@@ -81,40 +78,83 @@ async function fetchWbApi(url: string, options: RequestInit): Promise<Response> 
   return fetch(url, options)
 }
 
-async function fetchFunnel(apiKey: string, dateFrom: string, dateTo: string): Promise<FunnelProduct[]> {
-  const products = new Map<number, FunnelProduct>()
+function collectAdvertIds(node: unknown, ids: Set<number>, parentStatus?: number) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectAdvertIds(item, ids, parentStatus))
+    return
+  }
 
-  const response = await fetchWbApi(API_BASE, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      page: 1,
-      pageSize: 100,
-      selectedPeriod: { start: dateFrom, end: dateTo },
-      orderBy: { field: 'openCount', mode: 'asc' },
-    }),
+  const record = node as Record<string, unknown>
+  const status = Number(record.status ?? parentStatus)
+  const advertId = Number(record.advertId ?? record.advert_id ?? record.id)
+  if (advertId && (!status || ACTIVE_PROMOTION_STATUSES.has(status))) ids.add(advertId)
+
+  for (const value of Object.values(record)) {
+    collectAdvertIds(value, ids, Number.isFinite(status) ? status : parentStatus)
+  }
+}
+
+async function fetchPromotionCampaignIds(apiKey: string): Promise<number[]> {
+  const response = await fetchWbApi(`${AD_API_BASE}/adv/v1/promotion/count`, {
+    headers: { Authorization: apiKey },
   })
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    const message = body.detail || body.title || body.message || 'ошибка'
-    if (response.status === 429 || response.status === 461) {
-      throw new Error('Превышен лимит WB Sales Funnel API. Подождите 2-3 минуты и загрузите одно ИП.')
-    }
-    throw new Error(`WB Sales Funnel API ${response.status}: ${message}`)
+    const body = await response.text().catch(() => '')
+    throw new Error(`WB Promotion campaigns ${response.status}: ${body.slice(0, 120) || 'ошибка'}`)
   }
 
   const data = await response.json()
-  const pageProducts: FunnelProduct[] = data?.data?.products || []
-  for (const product of pageProducts) {
-    const nmId = product.product?.nmId
-    if (nmId && !products.has(nmId)) products.set(nmId, product)
+  const ids = new Set<number>()
+  collectAdvertIds(data, ids)
+  return [...ids].slice(0, 50)
+}
+
+function aggregatePromotionNode(node: unknown, rows: Map<number, PromotionProductStats>) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    node.forEach((item) => aggregatePromotionNode(item, rows))
+    return
   }
 
-  return [...products.values()]
+  const record = node as Record<string, unknown>
+  const nmId = Number(record.nmId ?? record.nm_id ?? record.nm)
+  if (nmId) {
+    const existing = rows.get(nmId)
+    rows.set(nmId, {
+      nmId,
+      name: existing?.name || String(record.name || record.title || ''),
+      views: (existing?.views || 0) + (Number(record.views) || 0),
+      clicks: (existing?.clicks || 0) + (Number(record.clicks) || 0),
+      atbs: (existing?.atbs || 0) + (Number(record.atbs) || 0),
+      orders: (existing?.orders || 0) + (Number(record.orders) || 0),
+      spend: (existing?.spend || 0) + (Number(record.sum ?? record.spend ?? record.expenses) || 0),
+      orderSum: (existing?.orderSum || 0) + (Number(record.sum_price ?? record.price) || 0),
+    })
+  }
+
+  for (const value of Object.values(record)) aggregatePromotionNode(value, rows)
+}
+
+async function fetchPromotionStats(apiKey: string, dateFrom: string, dateTo: string): Promise<PromotionProductStats[]> {
+  const campaignIds = await fetchPromotionCampaignIds(apiKey)
+  if (campaignIds.length === 0) return []
+
+  const response = await fetchWbApi(
+    `${AD_API_BASE}/adv/v3/fullstats?ids=${campaignIds.join(',')}&beginDate=${dateFrom}&endDate=${dateTo}`,
+    { headers: { Authorization: apiKey } }
+  )
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`WB Promotion fullstats ${response.status}: ${body.slice(0, 120) || 'ошибка'}`)
+  }
+
+  const data = await response.json()
+  const rows = new Map<number, PromotionProductStats>()
+  aggregatePromotionNode(data, rows)
+  return [...rows.values()].filter((row) => row.clicks > 0 || row.atbs > 0 || row.orders > 0 || row.spend > 0)
 }
 
 async function fetchFboStocks(apiKey: string, dateTo: string): Promise<Map<number, number>> {
@@ -139,67 +179,6 @@ async function fetchFboStocks(apiKey: string, dateTo: string): Promise<Map<numbe
   return stocks
 }
 
-function toMskDate(rawDate: string): string {
-  if (!rawDate) return ''
-  if (!rawDate.includes('T')) return rawDate.substring(0, 10)
-  const parsed = new Date(rawDate).getTime()
-  if (Number.isNaN(parsed)) return rawDate.substring(0, 10)
-  return new Date(parsed + 3 * 60 * 60 * 1000).toISOString().substring(0, 10)
-}
-
-async function fetchOrdersFallback(apiKey: string, dateFrom: string, dateTo: string): Promise<Map<number, {
-  nmId: number
-  article: string
-  title: string
-  subject: string
-  orders: number
-  orderSum: number
-}>> {
-  const apiDate = new Date(`${dateFrom}T00:00:00`)
-  apiDate.setDate(apiDate.getDate() - 2)
-  const apiDateFrom = apiDate.toISOString().split('T')[0]
-  const response = await fetchWbApi(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new Error(`WB Orders API ${response.status}: ${body.detail || body.title || body.message || 'ошибка'}`)
-  }
-
-  const data = await response.json()
-  const rows = new Map<number, {
-    nmId: number
-    article: string
-    title: string
-    subject: string
-    orders: number
-    orderSum: number
-  }>()
-  if (!Array.isArray(data)) return rows
-
-  for (const order of data) {
-    const date = toMskDate(order.date || '')
-    if (!date || date < dateFrom || date > dateTo) continue
-    const nmId = Number(order.nmId) || 0
-    if (!nmId) continue
-    const existing = rows.get(nmId)
-    rows.set(nmId, {
-      nmId,
-      article: existing?.article || order.supplierArticle || '',
-      title: existing?.title || order.subject || order.supplierArticle || '',
-      subject: existing?.subject || order.subject || '',
-      orders: (existing?.orders || 0) + 1,
-      orderSum: (existing?.orderSum || 0) + (Number(order.totalPrice) || 0),
-    })
-  }
-
-  return rows
-}
-
 function median(values: number[]): number {
   const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
   if (sorted.length === 0) return 0
@@ -217,136 +196,86 @@ export async function GET(request: NextRequest) {
       d.setDate(d.getDate() - 30)
       return d.toISOString().split('T')[0]
     })()
-    const minOpens = Number(searchParams.get('minOpens')) || 20
+    const minClicks = Number(searchParams.get('minOpens')) || 20
 
-    const cacheKey = `${entrepreneurId || 'all'}:${dateFrom}:${dateTo}:${minOpens}`
+    const cacheKey = `promotion:${entrepreneurId || 'all'}:${dateFrom}:${dateTo}:${minClicks}`
     const cached = getCached(cacheKey)
     if (cached) return NextResponse.json(cached)
 
     const rows = await db.$queryRawUnsafe<EntrepreneurRow[]>(
       `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
     )
-    const targets = parseEntrepreneurIds(entrepreneurId, rows)
+    const targets = parseEntrepreneurIds(entrepreneurId, rows).slice(0, 1)
     const errors: Array<{ id: number; name: string; error: string }> = []
     const notices: string[] = []
     const items: GrowthItem[] = []
 
-    for (let i = 0; i < targets.length; i++) {
-      const ent = targets[i]
-      if (i > 0) await new Promise(resolve => setTimeout(resolve, 1200))
-
+    for (const ent of targets) {
       try {
+        const promotionRows = await fetchPromotionStats(ent.wbApiKey, dateFrom, dateTo)
         const fboStocks = await fetchFboStocks(ent.wbApiKey, dateTo)
-        let funnel: FunnelProduct[] = []
-        let useOrdersFallback = false
 
-        try {
-          funnel = await fetchFunnel(ent.wbApiKey, dateFrom, dateTo)
-        } catch (_funnelError: any) {
-          useOrdersFallback = true
-          notices.push(`${ent.name}: WB ограничил воронку продаж, расчет выполнен по заказам и ФБО-остаткам без показателя трафика.`)
-        }
-
-        if (useOrdersFallback) {
-          const fallbackOrders = await fetchOrdersFallback(ent.wbApiKey, dateFrom, dateTo)
-          const periodDays = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1)
-          const orderMedian = median([...fallbackOrders.values()].map((item) => item.orders)) || 1
-
-          for (const item of fallbackOrders.values()) {
-            const fboStock = fboStocks.get(item.nmId) || 0
-            if (item.orders <= 0 || fboStock <= 0) continue
-            const avgDailyOrders = item.orders / periodDays
-            const daysUntilOos = avgDailyOrders > 0 ? Math.round((fboStock / avgDailyOrders) * 10) / 10 : null
-            const demandScore = Math.min(2, item.orders / orderMedian)
-            const stockScore = daysUntilOos === null ? 0 : Math.max(0, Math.min(1, daysUntilOos / 21))
-            const potentialScore = Math.round(demandScore * stockScore * 45)
-            items.push({
-              entrepreneurId: ent.id,
-              entrepreneurName: ent.name,
-              nmId: item.nmId,
-              article: item.article,
-              title: item.title,
-              subject: item.subject,
-              opens: 0,
-              carts: 0,
-              orders: item.orders,
-              orderSum: item.orderSum,
-              ctrToCart: 0,
-              conversion: 0,
-              fboStock,
-              daysUntilOos,
-              potentialScore,
-              recommendation: daysUntilOos !== null && daysUntilOos < 10 ? 'Сначала довезти ФБО' : 'Проверить воронку позже',
-              dataSource: 'orders-fallback',
-            })
-          }
+        if (promotionRows.length === 0) {
+          notices.push(`${ent.name}: нет рекламируемых товаров со статистикой за выбранный период.`)
           continue
         }
 
-        const prepared = funnel.map((product) => {
-          const selected = product.statistic?.selected || {}
-          const opens = Number(selected.openCount) || 0
-          const orders = Number(selected.orderCount) || 0
-          return {
-            product,
-            opens,
-            carts: Number(selected.cartCount) || 0,
-            orders,
-            orderSum: Number(selected.orderSum) || 0,
-            conversion: opens > 0 ? orders / opens : 0,
-            fboStock: fboStocks.get(product.product.nmId) || 0,
-          }
-        })
+        const clickMedian = median(promotionRows.map((row) => row.clicks)) || 1
+        const crMedian = median(promotionRows.map((row) => row.clicks > 0 ? row.orders / row.clicks : 0)) || 0.01
+        const periodDays = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1)
 
-        const trafficMedian = median(prepared.map((item) => item.opens)) || 1
-        const conversionMedian = median(prepared.map((item) => item.conversion)) || 0.01
+        for (const row of promotionRows) {
+          const fboStock = fboStocks.get(row.nmId) || 0
+          if (row.clicks < minClicks || row.orders <= 0 || fboStock <= 0) continue
 
-        for (const item of prepared) {
-          if (item.opens < minOpens || item.orders <= 0 || item.fboStock <= 0) continue
-
-          const avgDailyOrders = item.orders / Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1)
-          const daysUntilOos = avgDailyOrders > 0 ? Math.round((item.fboStock / avgDailyOrders) * 10) / 10 : null
-          const conversionScore = Math.min(2, item.conversion / conversionMedian)
-          const lowTrafficScore = Math.max(0.15, Math.min(1.5, trafficMedian / Math.max(item.opens, 1)))
+          const conversion = row.clicks > 0 ? row.orders / row.clicks : 0
+          const avgDailyOrders = row.orders / periodDays
+          const daysUntilOos = avgDailyOrders > 0 ? Math.round((fboStock / avgDailyOrders) * 10) / 10 : null
+          const conversionScore = Math.min(2, conversion / crMedian)
+          const lowTrafficScore = Math.max(0.15, Math.min(1.5, clickMedian / Math.max(row.clicks, 1)))
           const stockScore = daysUntilOos === null ? 0 : Math.max(0, Math.min(1, daysUntilOos / 14))
-          const confidenceScore = Math.min(1, item.opens / 100)
+          const confidenceScore = Math.min(1, row.clicks / 100)
           const potentialScore = Math.round(conversionScore * lowTrafficScore * stockScore * confidenceScore * 50)
 
-          let recommendation = 'Разгонять трафик'
+          let recommendation = 'Увеличить рекламный трафик'
           if (daysUntilOos !== null && daysUntilOos < 10) recommendation = 'Сначала довезти ФБО'
-          else if (item.opens < trafficMedian * 0.6) recommendation = 'Добавить рекламу'
-          else if (item.carts > 0 && item.orders / item.carts < 0.25) recommendation = 'Проверить цену/карточку'
+          else if (row.clicks < clickMedian * 0.6) recommendation = 'Поднять бюджет/ставку'
+          else if (row.atbs > 0 && row.orders / row.atbs < 0.25) recommendation = 'Проверить цену/карточку'
 
           items.push({
             entrepreneurId: ent.id,
             entrepreneurName: ent.name,
-            nmId: item.product.product.nmId,
-            article: item.product.product.vendorCode || '',
-            title: item.product.product.title || '',
-            subject: item.product.product.subjectName || '',
-            opens: item.opens,
-            carts: item.carts,
-            orders: item.orders,
-            orderSum: item.orderSum,
-            ctrToCart: item.opens > 0 ? item.carts / item.opens : 0,
-            conversion: item.conversion,
-            fboStock: item.fboStock,
+            nmId: row.nmId,
+            article: String(row.nmId),
+            title: row.name || String(row.nmId),
+            subject: '',
+            opens: row.clicks,
+            carts: row.atbs,
+            orders: row.orders,
+            orderSum: row.orderSum,
+            ctrToCart: row.clicks > 0 ? row.atbs / row.clicks : 0,
+            conversion,
+            fboStock,
             daysUntilOos,
             potentialScore,
             recommendation,
-            dataSource: 'funnel',
+            dataSource: 'promotion',
+            spend: row.spend,
+            views: row.views,
+            ctr: row.views > 0 ? row.clicks / row.views : 0,
+            cpc: row.clicks > 0 ? row.spend / row.clicks : 0,
           })
         }
-      } catch (_error: any) {
-        notices.push(`${ent.name}: не удалось получить данные WB для рейтинга роста.`)
+      } catch (error: any) {
+        notices.push(`${ent.name}: не удалось получить рекламную статистику WB Promotion API (${error.message || 'ошибка API'}).`)
       }
     }
 
     const response = {
       dateFrom,
       dateTo,
-      minOpens,
-      source: 'wb-sales-funnel-and-fbo-stocks',
+      minOpens: minClicks,
+      source: 'wb-promotion-fullstats-and-fbo-stocks',
       items: items.sort((a, b) => b.potentialScore - a.potentialScore).slice(0, 100),
       errors,
       notices,

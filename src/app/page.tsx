@@ -245,7 +245,11 @@ interface GrowthPotentialData {
     daysUntilOos: number | null
     potentialScore: number
     recommendation: string
-    dataSource: 'funnel' | 'orders-fallback'
+    dataSource: 'promotion'
+    spend: number
+    views: number
+    ctr: number
+    cpc: number
   }>
   errors?: RateLimitError[]
   notices?: string[]
@@ -2046,7 +2050,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
           </ToggleGroup>
         </div>
         <div className="w-full sm:w-auto">
-          <Label className="text-xs text-muted-foreground mb-1">Мин. переходов</Label>
+          <Label className="text-xs text-muted-foreground mb-1">Мин. кликов рекламы</Label>
           <Input
             type="number"
             min={1}
@@ -2112,7 +2116,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
             <CardHeader className="pb-3">
               <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                 Рейтинг товаров по потенциалу роста
-                <Badge variant="secondary" className="text-xs">WB Sales Funnel / Orders + ФБО</Badge>
+                <Badge variant="secondary" className="text-xs">WB Promotion API + ФБО</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -2125,10 +2129,12 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
                       <tr className="border-b bg-muted/50">
                         <th className="sticky left-0 z-10 min-w-[210px] bg-muted/50 px-3 py-2 text-left font-medium">Товар</th>
                         <th className="min-w-[140px] px-3 py-2 text-left font-medium">ИП</th>
-                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Переходы</th>
+                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Показы</th>
+                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Клики</th>
                         <th className="min-w-[80px] px-3 py-2 text-right font-medium">Корзина</th>
                         <th className="min-w-[80px] px-3 py-2 text-right font-medium">Заказы</th>
                         <th className="min-w-[90px] px-3 py-2 text-right font-medium">CR</th>
+                        <th className="min-w-[100px] px-3 py-2 text-right font-medium">Расход</th>
                         <th className="min-w-[90px] px-3 py-2 text-right font-medium">ФБО</th>
                         <th className="min-w-[90px] px-3 py-2 text-right font-medium">До OOS</th>
                         <th className="min-w-[100px] px-3 py-2 text-right font-medium">Потенциал</th>
@@ -2146,10 +2152,12 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
                             </div>
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">{item.entrepreneurName}</td>
-                          <td className="px-3 py-2 text-right">{item.dataSource === 'funnel' ? formatNumber(item.opens) : '-'}</td>
-                          <td className="px-3 py-2 text-right">{item.dataSource === 'funnel' ? formatNumber(item.carts) : '-'}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(item.views)}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(item.opens)}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(item.carts)}</td>
                           <td className="px-3 py-2 text-right font-medium">{formatNumber(item.orders)}</td>
-                          <td className="px-3 py-2 text-right font-semibold">{item.dataSource === 'funnel' ? formatPct(item.conversion) : '-'}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{formatPct(item.conversion)}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(item.spend))} ₽</td>
                           <td className="px-3 py-2 text-right text-sky-700 dark:text-sky-400">{formatNumber(item.fboStock)}</td>
                           <td className={`px-3 py-2 text-right ${item.daysUntilOos !== null && item.daysUntilOos < 10 ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
                             {item.daysUntilOos === null ? '-' : `${item.daysUntilOos} дн.`}
