@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, Fragment, useMemo } from 'react'
 import {
   LayoutDashboard,
   Table2,
@@ -199,12 +199,17 @@ interface ProductionLoadData {
   dateItems: number[]
   dateOrders: number[]
   dateLoadPct: number[]
+  previousDateItems: number[]
+  previousDateOrders: number[]
+  previousDateLoadPct: number[]
   productItems: Record<number, number>
   productOrders: Record<number, number>
+  forecast: { date: string; predictedItems: number; loadPct: number }[]
+  seasonalityAlerts: { product: string; peakMonthDay: string; peakDate: string; daysToPeak: number; avg: number; peakAvg: number; uplift: number }[]
   summary: {
     yesterday: { date: string; items: number; loadPct: number; orders: number }
-    week: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
-    month: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; days: number }
+    week: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; previousTotalItems: number; previousAvgLoadPct: number; days: number }
+    month: { dateFrom: string; dateTo: string; totalItems: number; avgLoadPct: number; previousTotalItems: number; previousAvgLoadPct: number; days: number }
   }
 }
 
@@ -1596,6 +1601,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
   const [initialLoadDone, setInitialLoadDone] = useState(false)
+  const [capacityInput, setCapacityInput] = useState('2500')
 
   // Always fetch 31 days of data — viewMode only affects display, not API calls
   const fetchData = useCallback(async (entIds?: string[]) => {
@@ -1612,6 +1618,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
       params.set('section', 'production')
       params.set('dateFrom', from)
       params.set('dateTo', yesterday)
+      params.set('capacity', capacityInput)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.production) setFetchedData(json.production)
@@ -1621,7 +1628,12 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt])
+  }, [selectedEnt, capacityInput])
+
+  useEffect(() => {
+    const savedCapacity = window.localStorage.getItem('productionCapacity')
+    if (savedCapacity) setCapacityInput(savedCapacity)
+  }, [])
 
   // Auto-load on first mount with "Все ИП"
   useEffect(() => {
@@ -1651,6 +1663,67 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     if (pct >= 70) return 'Повышенная'
     return 'Нормальная'
   }
+
+  const getLoadCellClass = (pct: number) => {
+    if (pct >= 100) return 'bg-red-600 text-white'
+    if (pct >= 90) return 'bg-red-500 text-white'
+    if (pct >= 70) return 'bg-amber-400 text-amber-950'
+    if (pct >= 40) return 'bg-emerald-300 text-emerald-950'
+    if (pct > 0) return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200'
+    return 'bg-muted text-muted-foreground'
+  }
+
+  const applyCapacity = () => {
+    const nextCapacity = Math.max(1, Math.round(Number(capacityInput) || 2500))
+    const normalized = String(nextCapacity)
+    setCapacityInput(normalized)
+    window.localStorage.setItem('productionCapacity', normalized)
+    fetchData(undefined)
+  }
+
+  const productionChartData = useMemo(() => {
+    if (!fetchedData) return []
+    const history = fetchedData.dates.slice(-30).map((date, idx, arr) => {
+      const realIdx = fetchedData.dates.length - arr.length + idx
+      return {
+        date: formatDateShort(date),
+        dateRaw: date,
+        items: fetchedData.dateItems[realIdx] || 0,
+        previousItems: fetchedData.previousDateItems?.[realIdx] || 0,
+        loadPct: fetchedData.dateLoadPct[realIdx] || 0,
+        previousLoadPct: fetchedData.previousDateLoadPct?.[realIdx] || 0,
+      }
+    })
+    const forecast = (fetchedData.forecast || []).map((row) => ({
+      date: formatDateShort(row.date),
+      dateRaw: row.date,
+      forecastItems: row.predictedItems,
+      forecastLoadPct: row.loadPct,
+    }))
+    return [...history, ...forecast]
+  }, [fetchedData])
+
+  const calendarDays = useMemo(() => {
+    if (!fetchedData) return []
+    return fetchedData.dates.slice(-30).map((date, idx, arr) => {
+      const realIdx = fetchedData.dates.length - arr.length + idx
+      return {
+        date,
+        items: fetchedData.dateItems[realIdx] || 0,
+        orders: fetchedData.dateOrders[realIdx] || 0,
+        loadPct: fetchedData.dateLoadPct[realIdx] || 0,
+      }
+    })
+  }, [fetchedData])
+
+  const totalProductionItems = fetchedData ? Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0) : 0
+  const topProductionProducts = useMemo(() => {
+    if (!fetchedData) return []
+    return fetchedData.products
+      .slice()
+      .sort((a, b) => (fetchedData.productItems[b.id] || 0) - (fetchedData.productItems[a.id] || 0))
+      .slice(0, 15)
+  }, [fetchedData])
 
   // Thermometer component
   function ThermometerGauge({ pct, label, sublabel }: { pct: number; label: string; sublabel?: string }) {
@@ -1706,6 +1779,23 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           className="w-full sm:w-64"
         />
 
+        <div className="grid grid-cols-[1fr_auto] gap-2 sm:w-[260px]">
+          <div className="space-y-1">
+            <Label htmlFor="production-capacity" className="text-xs text-muted-foreground">Мощность, изделий/день</Label>
+            <Input
+              id="production-capacity"
+              inputMode="numeric"
+              value={capacityInput}
+              onChange={(event) => setCapacityInput(event.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={(event) => { if (event.key === 'Enter') applyCapacity() }}
+              className="h-9"
+            />
+          </div>
+          <Button type="button" variant="outline" onClick={applyCapacity} disabled={loading} className="mt-5 h-9 px-3">
+            <Save className="h-4 w-4" />
+          </Button>
+        </div>
+
         <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
@@ -1743,9 +1833,12 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {/* Capacity info */}
           <Card className="border-dashed">
             <CardContent className="py-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Package className="h-4 w-4" />
-                <span>Максимальная производительность: <strong className="text-foreground">{formatNumber(fetchedData.capacity)}</strong> изделий/день (FBS)</span>
+              <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4" />
+                  <span>Максимальная производительность: <strong className="text-foreground">{formatNumber(fetchedData.capacity)}</strong> изделий/день (FBS)</span>
+                </div>
+                <span>Заказы и изделия считаются отдельно: нагрузка строится по изделиям с учетом множителей.</span>
               </div>
             </CardContent>
           </Card>
@@ -1769,6 +1862,94 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
             />
           </div>
 
+          {fetchedData.seasonalityAlerts.length > 0 && (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Сезонный пик в ближайшие 14 дней</AlertTitle>
+              <AlertDescription>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {fetchedData.seasonalityAlerts.slice(0, 6).map((alert) => (
+                    <div key={`${alert.product}-${alert.peakDate}`} className="rounded-md border border-amber-200 bg-background/70 p-3 text-sm dark:border-amber-900">
+                      <div className="font-medium">{alert.product}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Пик {formatDateShort(alert.peakDate)} через {alert.daysToPeak} дн.; исторически x{alert.uplift.toFixed(1)} к среднему
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Динамика и прогноз нагрузки</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={productionChartData} margin={{ left: 0, right: 10, top: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={18} />
+                    <YAxis yAxisId="items" tick={{ fontSize: 11 }} />
+                    <YAxis yAxisId="load" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}%`} />
+                    <Tooltip
+                      formatter={(value: number, name: string) => {
+                        if (name.includes('%')) return `${value.toFixed(1)}%`
+                        return formatNumber(value)
+                      }}
+                      contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line yAxisId="items" type="monotone" dataKey="items" name="Изделия" stroke="#10b981" strokeWidth={2} dot={false} />
+                    <Line yAxisId="items" type="monotone" dataKey="previousItems" name="Изделия, пред. период" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={false} />
+                    <Line yAxisId="items" type="monotone" dataKey="forecastItems" name="Прогноз изделий" stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 3 }} />
+                    <Line yAxisId="load" type="monotone" dataKey="loadPct" name="Нагрузка %" stroke="#ef4444" strokeWidth={1.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <div className="rounded-md bg-muted/50 p-3">
+                  <div className="text-xs text-muted-foreground">7 дней к предыдущим 7 дням</div>
+                  <div className="mt-1 font-semibold">
+                    {fetchedData.summary.week.avgLoadPct.toFixed(1)}% vs {fetchedData.summary.week.previousAvgLoadPct.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="rounded-md bg-muted/50 p-3">
+                  <div className="text-xs text-muted-foreground">30 дней к предыдущим 30 дням</div>
+                  <div className="mt-1 font-semibold">
+                    {fetchedData.summary.month.avgLoadPct.toFixed(1)}% vs {fetchedData.summary.month.previousAvgLoadPct.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {calendarDays.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Календарь нагрузки за 30 дней</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-5 gap-2 sm:grid-cols-10 lg:grid-cols-[repeat(15,minmax(0,1fr))]">
+                  {calendarDays.map((day) => (
+                    <div key={day.date} className={`rounded-md p-2 text-center ${getLoadCellClass(day.loadPct)}`} title={`${formatDateFull(day.date)}: ${day.loadPct.toFixed(1)}%, ${formatNumber(day.items)} изделий`}>
+                      <div className="text-[11px] font-medium">{formatDateShort(day.date)}</div>
+                      <div className="mt-1 text-sm font-bold">{day.loadPct.toFixed(0)}%</div>
+                      <div className="text-[10px] opacity-80">{formatNumber(day.items)} шт</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">до 40%</span>
+                  <span className="rounded bg-emerald-300 px-2 py-1 text-emerald-950">40-70%</span>
+                  <span className="rounded bg-amber-400 px-2 py-1 text-amber-950">70-90%</span>
+                  <span className="rounded bg-red-500 px-2 py-1 text-white">90%+</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* View mode toggle */}
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-muted-foreground">Разбивка:</span>
@@ -1789,7 +1970,33 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div className="space-y-2 p-3 md:hidden">
+                  {[...fetchedData.dates]
+                    .map((date, i) => ({ date, i }))
+                    .slice(-7)
+                    .reverse()
+                    .map(({ date, i }) => {
+                      const loadPct = fetchedData.dateLoadPct[i]
+                      const colors = getLoadColorClasses(loadPct)
+                      return (
+                        <div key={date} className={`rounded-md border p-3 ${colors.border} ${colors.bg}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium">{formatDateFull(date)}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {formatNumber(fetchedData.dateOrders[i])} заказов / {formatNumber(fetchedData.dateItems[i])} изделий
+                              </div>
+                            </div>
+                            <div className={`text-lg font-bold ${colors.text}`}>{loadPct.toFixed(1)}%</div>
+                          </div>
+                          <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-background/80">
+                            <div className={`h-full rounded-full ${colors.bar}`} style={{ width: `${Math.min(loadPct, 100)}%` }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
                   <table className="text-sm w-full">
                     <thead>
                       <tr className="bg-muted/50 border-b">
@@ -1859,6 +2066,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                     <div className={`text-sm font-bold ${getLoadColorClasses(fetchedData.summary.week.avgLoadPct).text}`}>
                       {fetchedData.summary.week.avgLoadPct.toFixed(1)}%
                     </div>
+                    <div className="text-xs text-muted-foreground">пред. период: {fetchedData.summary.week.previousAvgLoadPct.toFixed(1)}%</div>
                   </div>
                 </div>
               </CardContent>
@@ -1890,6 +2098,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                     <div className={`text-sm font-bold ${getLoadColorClasses(fetchedData.summary.month.avgLoadPct).text}`}>
                       {fetchedData.summary.month.avgLoadPct.toFixed(1)}%
                     </div>
+                    <div className="text-xs text-muted-foreground">пред. период: {fetchedData.summary.month.previousAvgLoadPct.toFixed(1)}%</div>
                   </div>
                 </div>
               </CardContent>
@@ -1897,7 +2106,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           )}
 
           {/* Product breakdown - top products by items */}
-          {fetchedData.products.length > 0 && (
+          {topProductionProducts.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -1906,7 +2115,33 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div className="space-y-2 p-3 md:hidden">
+                  {topProductionProducts.map((p) => {
+                    const items = fetchedData.productItems[p.id] || 0
+                    const orders = fetchedData.productOrders[p.id] || 0
+                    const share = totalProductionItems > 0 ? (items / totalProductionItems * 100).toFixed(1) : '0'
+                    return (
+                      <div key={p.id} className="rounded-md border p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-medium leading-snug">{p.name}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {formatNumber(orders)} заказов / {p.multiplier > 1 ? `x${p.multiplier}` : 'x1'}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold">{formatNumber(items)}</div>
+                            <div className="text-xs text-muted-foreground">{share}%</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(Number(share), 100)}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
                   <table className="text-sm w-full">
                     <thead>
                       <tr className="bg-muted/50 border-b">
@@ -1918,15 +2153,10 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedData.products
-                        .slice()
-                        .sort((a, b) => (fetchedData.productItems[b.id] || 0) - (fetchedData.productItems[a.id] || 0))
-                        .slice(0, 15)
-                        .map((p) => {
+                      {topProductionProducts.map((p) => {
                           const items = fetchedData.productItems[p.id] || 0
                           const orders = fetchedData.productOrders[p.id] || 0
-                          const totalItems = Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0)
-                          const share = totalItems > 0 ? (items / totalItems * 100).toFixed(1) : '0'
+                          const share = totalProductionItems > 0 ? (items / totalProductionItems * 100).toFixed(1) : '0'
                           return (
                             <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
                               <td className="px-4 py-2">
@@ -1949,7 +2179,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
                         <td className="px-4 py-2">ИТОГО</td>
                         <td className="text-right px-3 py-2">—</td>
                         <td className="text-right px-3 py-2">{formatNumber(Object.values(fetchedData.productOrders).reduce((s, v) => s + v, 0))}</td>
-                        <td className="text-right px-3 py-2 font-bold">{formatNumber(Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0))}</td>
+                        <td className="text-right px-3 py-2 font-bold">{formatNumber(totalProductionItems)}</td>
                         <td className="text-right px-4 py-2">100%</td>
                       </tr>
                     </tbody>

@@ -53,6 +53,47 @@ const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 
+// Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
+// 7-day rolling product peaks across the available 2024-2026 history.
+const PRODUCTION_SEASONAL_PEAKS = [
+  { product: 'салфетки', peakMonthDay: '04-11', avg: 92.5, peakAvg: 1095.7, uplift: 11.8 },
+  { product: 'салфетки с вышивкой', peakMonthDay: '04-04', avg: 2.5, peakAvg: 66.1, uplift: 26.6 },
+  { product: 'дорожки', peakMonthDay: '04-04', avg: 30.6, peakAvg: 243, uplift: 7.9 },
+  { product: 'флаги', peakMonthDay: '05-02', avg: 35.9, peakAvg: 209.3, uplift: 5.8 },
+  { product: 'Сумки пляжные', peakMonthDay: '04-14', avg: 2, peakAvg: 15.7, uplift: 7.7 },
+  { product: 'Пляжные коврики', peakMonthDay: '07-08', avg: 6.4, peakAvg: 31, uplift: 4.8 },
+  { product: 'Мешки для обуви', peakMonthDay: '08-29', avg: 113.8, peakAvg: 737.4, uplift: 6.5 },
+  { product: 'чехол для обуви', peakMonthDay: '08-30', avg: 52.8, peakAvg: 294.4, uplift: 5.6 },
+  { product: 'Сумки хозяйственные (Шоппер)', peakMonthDay: '08-29', avg: 41.3, peakAvg: 111, uplift: 2.7 },
+  { product: 'Чехлы на Чемодан', peakMonthDay: '10-23', avg: 35.7, peakAvg: 86.3, uplift: 2.4 },
+  { product: 'Наволочка декоративная 2 шт 45*45', peakMonthDay: '11-22', avg: 65.8, peakAvg: 329.1, uplift: 5 },
+  { product: 'набор', peakMonthDay: '12-06', avg: 8.5, peakAvg: 59.6, uplift: 7 },
+  { product: 'Подушка декоративная 90*30', peakMonthDay: '12-08', avg: 33.8, peakAvg: 99.6, uplift: 2.9 },
+  { product: 'Подушка декоративная 60*20', peakMonthDay: '12-09', avg: 54.4, peakAvg: 134.6, uplift: 2.5 },
+  { product: 'Подушка декоративная 150*50', peakMonthDay: '12-16', avg: 184.8, peakAvg: 526.4, uplift: 2.8 },
+  { product: 'Подушка декоративная 120*40', peakMonthDay: '12-16', avg: 32.8, peakAvg: 82.7, uplift: 2.5 },
+  { product: 'Маски', peakMonthDay: '12-17', avg: 44.5, peakAvg: 189.6, uplift: 4.3 },
+  { product: 'Подушка декоративная 45*45', peakMonthDay: '12-19', avg: 86.6, peakAvg: 282.6, uplift: 3.3 },
+  { product: 'Наволочки декоративные 2 шт 40*40', peakMonthDay: '12-19', avg: 82.7, peakAvg: 404, uplift: 4.9 },
+  { product: 'Наволочка декоративная 2 шт 50*50', peakMonthDay: '12-20', avg: 18.3, peakAvg: 160, uplift: 8.7 },
+  { product: 'Наволочка декоративная 150*50', peakMonthDay: '12-20', avg: 106.7, peakAvg: 249.7, uplift: 2.3 },
+  { product: 'Наволочка декоративная 90*30', peakMonthDay: '12-21', avg: 6.6, peakAvg: 29.9, uplift: 4.5 },
+  { product: 'Подушка декоративная 50*50', peakMonthDay: '12-22', avg: 3.1, peakAvg: 30.1, uplift: 9.7 },
+  { product: 'Наволочка декоративная 120*40', peakMonthDay: '12-22', avg: 8.9, peakAvg: 27.1, uplift: 3.1 },
+  { product: 'Кольца для салфеток', peakMonthDay: '12-23', avg: 9.2, peakAvg: 126.7, uplift: 13.7 },
+  { product: 'Подушка декоративная 40*40', peakMonthDay: '02-12', avg: 71.8, peakAvg: 254.4, uplift: 3.5 },
+  { product: 'Подушка декоративная 30*40', peakMonthDay: '02-13', avg: 27.5, peakAvg: 185.1, uplift: 6.7 },
+  { product: 'Шевроны', peakMonthDay: '02-19', avg: 20.7, peakAvg: 113.1, uplift: 5.5 },
+  { product: 'Коврики для мыши', peakMonthDay: '02-20', avg: 13.6, peakAvg: 49, uplift: 3.6 },
+  { product: 'Подушка декоративная 35*35', peakMonthDay: '03-01', avg: 14.6, peakAvg: 36.3, uplift: 2.5 },
+]
+
+function dateDiffDays(from: Date, to: Date): number {
+  const start = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())
+  const end = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate())
+  return Math.round((end - start) / 86400000)
+}
+
 function isSortCenterWarehouse(warehouseName: string): boolean {
   return /\bсц\b/i.test(warehouseName)
 }
@@ -146,7 +187,7 @@ export async function GET(request: NextRequest) {
     const requestedDateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
     let dateFrom = requestedDateFrom
     const dateTo = requestedDateTo
-    if (section === 'daily') {
+    if (section === 'daily' || section === 'production') {
       const fromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
       const toMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
       if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
@@ -763,13 +804,19 @@ export async function GET(request: NextRequest) {
     // ─── Build Production Load ───
     if (needProduction) {
       // Maximum FBS production capacity per day
-      const DAILY_CAPACITY = 2500
+      const capacityParam = Number(searchParams.get('capacity'))
+      const DAILY_CAPACITY = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
 
       // Only FBS orders matter for production load
       const fbsOrders = allMappedOrders.filter(o => o.isFbs)
 
-      // Get unique dates
-      const prodDates = [...new Set(fbsOrders.map(o => o.dateStr).filter(Boolean))].sort()
+      const visibleProdDates = [...new Set(fbsOrders.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
+      const visibleDateIndex = new Map(visibleProdDates.map((date, index) => [date, index]))
+      const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
+      const requestedToMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
+      const visiblePeriodDays = !Number.isNaN(requestedFromMs) && !Number.isNaN(requestedToMs)
+        ? Math.ceil((requestedToMs - requestedFromMs) / 86400000) + 1
+        : visibleProdDates.length
 
       // Product types with items multiplier
       const fbsProductTypes = [...new Set(fbsOrders.map(o => o.mappedType))]
@@ -783,20 +830,33 @@ export async function GET(request: NextRequest) {
       // Build production pivot: productId → dateIdx → items count (orders × multiplier)
       const prodPivot: Record<number, Record<number, number>> = {}   // items
       const prodOrdersPivot: Record<number, Record<number, number>> = {} // raw orders
-      const prodDateItems: number[] = new Array(prodDates.length).fill(0)   // total items per date
-      const prodDateOrders: number[] = new Array(prodDates.length).fill(0)  // total orders per date
+      const prodDateItems: number[] = new Array(visibleProdDates.length).fill(0)   // total items per date
+      const prodDateOrders: number[] = new Array(visibleProdDates.length).fill(0)  // total orders per date
+      const previousDateItems: number[] = new Array(visibleProdDates.length).fill(0)
+      const previousDateOrders: number[] = new Array(visibleProdDates.length).fill(0)
       const prodProductItems: Record<number, number> = {}   // total items per product
       const prodProductOrders: Record<number, number> = {}  // total orders per product
 
       for (const o of fbsOrders) {
-        const dateIdx = prodDates.indexOf(o.dateStr)
-        if (dateIdx === -1) continue
-
         const productId = prodProductMap.get(o.mappedType)
         if (productId === undefined) continue
 
         const multiplier = prodProducts[productId].multiplier
         const items = multiplier // 1 order × multiplier = multiplier items
+        const dateIdx = visibleDateIndex.get(o.dateStr)
+        if (dateIdx === undefined) {
+          const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
+          if (!Number.isNaN(orderMs)) {
+            const shifted = new Date(orderMs)
+            shifted.setDate(shifted.getDate() + visiblePeriodDays)
+            const shiftedIdx = visibleDateIndex.get(shifted.toISOString().split('T')[0])
+            if (shiftedIdx !== undefined) {
+              previousDateItems[shiftedIdx] += items
+              previousDateOrders[shiftedIdx]++
+            }
+          }
+          continue
+        }
 
         // Items pivot
         if (!prodPivot[productId]) prodPivot[productId] = {}
@@ -815,6 +875,9 @@ export async function GET(request: NextRequest) {
       const prodDateLoadPct: number[] = prodDateItems.map(items =>
         Math.round((items / DAILY_CAPACITY) * 1000) / 10 // round to 1 decimal
       )
+      const previousDateLoadPct: number[] = previousDateItems.map(items =>
+        Math.round((items / DAILY_CAPACITY) * 1000) / 10
+      )
 
       // Week/Month aggregates
       const mskOffset2 = 3 * 3600000
@@ -823,44 +886,97 @@ export async function GET(request: NextRequest) {
 
       // Rolling 7 days ending yesterday (not calendar week)
       const weekFromDate = new Date(mskNow2.getTime() - 7 * 86400000).toISOString().split('T')[0] // yesterday - 6 days
-      const weekDates = prodDates.filter(d => d >= weekFromDate && d <= yesterdayMsk2)
+      const weekDates = visibleProdDates.filter(d => d >= weekFromDate && d <= yesterdayMsk2)
       const weekTotalItems = weekDates.reduce((sum, d) => {
-        const idx = prodDates.indexOf(d)
+        const idx = visibleProdDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
       }, 0)
       const weekDays = weekDates.length || 1
       const weekAvgLoadPct = Math.round((weekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
+      const previousWeekTotalItems = weekDates.reduce((sum, d) => {
+        const idx = visibleProdDates.indexOf(d)
+        return sum + (previousDateItems[idx] || 0)
+      }, 0)
+      const previousWeekAvgLoadPct = Math.round((previousWeekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
 
       // Rolling 30 days ending yesterday (not calendar month)
       const monthFromDate = new Date(mskNow2.getTime() - 30 * 86400000).toISOString().split('T')[0] // yesterday - 29 days
-      const monthDates = prodDates.filter(d => d >= monthFromDate && d <= yesterdayMsk2)
+      const monthDates = visibleProdDates.filter(d => d >= monthFromDate && d <= yesterdayMsk2)
       const monthTotalItems = monthDates.reduce((sum, d) => {
-        const idx = prodDates.indexOf(d)
+        const idx = visibleProdDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
       }, 0)
       const monthDays = monthDates.length || 1
       const monthAvgLoadPct = Math.round((monthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
+      const previousMonthTotalItems = monthDates.reduce((sum, d) => {
+        const idx = visibleProdDates.indexOf(d)
+        return sum + (previousDateItems[idx] || 0)
+      }, 0)
+      const previousMonthAvgLoadPct = Math.round((previousMonthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
 
       // Yesterday load
-      const yesterdayIdx = prodDates.indexOf(yesterdayMsk2)
+      const yesterdayIdx = visibleProdDates.indexOf(yesterdayMsk2)
       const yesterdayItems = yesterdayIdx >= 0 ? prodDateItems[yesterdayIdx] : 0
       const yesterdayLoadPct = yesterdayIdx >= 0 ? prodDateLoadPct[yesterdayIdx] : 0
+      const recentItems = prodDateItems.slice(-14).filter(items => items > 0)
+      const avgRecentItems = recentItems.length ? recentItems.reduce((sum, v) => sum + v, 0) / recentItems.length : 0
+      const sameWeekdayAvg = (targetDate: Date) => {
+        const weekday = targetDate.getUTCDay()
+        const values = visibleProdDates
+          .map((date, index) => ({ date, items: prodDateItems[index] || 0 }))
+          .filter(row => row.items > 0 && new Date(`${row.date}T00:00:00`).getUTCDay() === weekday)
+          .slice(-4)
+          .map(row => row.items)
+        if (!values.length) return avgRecentItems
+        return values.reduce((sum, value) => sum + value, 0) / values.length
+      }
+      const forecast = Array.from({ length: 7 }, (_, index) => {
+        const forecastDate = new Date(`${yesterdayMsk2}T00:00:00`)
+        forecastDate.setDate(forecastDate.getDate() + index + 1)
+        const predictedItems = Math.round(((avgRecentItems || 0) * 0.55) + (sameWeekdayAvg(forecastDate) * 0.45))
+        return {
+          date: forecastDate.toISOString().split('T')[0],
+          predictedItems,
+          loadPct: Math.round((predictedItems / DAILY_CAPACITY) * 1000) / 10,
+        }
+      })
+      const todayMsk = new Date(`${new Date(mskNow2).toISOString().split('T')[0]}T00:00:00Z`)
+      const seasonalityAlerts = PRODUCTION_SEASONAL_PEAKS
+        .map((peak) => {
+          const [month, day] = peak.peakMonthDay.split('-').map(Number)
+          let peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear(), month - 1, day))
+          if (dateDiffDays(todayMsk, peakDate) < 0) {
+            peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear() + 1, month - 1, day))
+          }
+          return {
+            ...peak,
+            peakDate: peakDate.toISOString().split('T')[0],
+            daysToPeak: dateDiffDays(todayMsk, peakDate),
+          }
+        })
+        .filter(alert => alert.daysToPeak >= 0 && alert.daysToPeak <= 14)
+        .sort((a, b) => a.daysToPeak - b.daysToPeak || b.uplift - a.uplift)
 
       response.production = {
         capacity: DAILY_CAPACITY,
-        dates: prodDates,
+        dates: visibleProdDates,
         products: prodProducts,
         pivot: prodPivot,
         ordersPivot: prodOrdersPivot,
         dateItems: prodDateItems,
         dateOrders: prodDateOrders,
         dateLoadPct: prodDateLoadPct,
+        previousDateItems,
+        previousDateOrders,
+        previousDateLoadPct,
         productItems: prodProductItems,
         productOrders: prodProductOrders,
+        forecast,
+        seasonalityAlerts,
         summary: {
           yesterday: { date: yesterdayMsk2, items: yesterdayItems, loadPct: yesterdayLoadPct, orders: yesterdayIdx >= 0 ? prodDateOrders[yesterdayIdx] : 0 },
-          week: { dateFrom: weekFromDate, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, days: weekDays },
-          month: { dateFrom: monthFromDate, dateTo: yesterdayMsk2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, days: monthDays },
+          week: { dateFrom: weekFromDate, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, previousTotalItems: previousWeekTotalItems, previousAvgLoadPct: previousWeekAvgLoadPct, days: weekDays },
+          month: { dateFrom: monthFromDate, dateTo: yesterdayMsk2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, previousTotalItems: previousMonthTotalItems, previousAvgLoadPct: previousMonthAvgLoadPct, days: monthDays },
         },
       }
     }
