@@ -104,10 +104,15 @@ interface DashboardData {
 
 interface DailyOrdersData {
   dates: string[]
+  allDates?: string[]
   products: { id: number; name: string }[]
   entrepreneurs: { id: number; name: string }[]
   pivot: Record<number, Record<number, number>>
+  previousPivot?: Record<number, Record<number, number>>
+  previousFbsPivot?: Record<number, Record<number, number>>
+  previousFboPivot?: Record<number, Record<number, number>>
   dateTotals: number[]
+  previousDateTotals?: number[]
   productTotals: Record<number, number>
   entrepreneurDailyData: Record<string, Record<number, number>>
   fbsPivot: Record<number, Record<number, number>>
@@ -946,6 +951,9 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const activeProductTotals = fulfillmentFilter === 'fbs' ? data.fbsProductTotals
     : fulfillmentFilter === 'fbo' ? data.fboProductTotals
     : data.productTotals
+  const previousPivot = fulfillmentFilter === 'fbs' ? data.previousFbsPivot || {}
+    : fulfillmentFilter === 'fbo' ? data.previousFboPivot || {}
+    : data.previousPivot || {}
 
   const { dates, products } = data
   const grandTotal = activeProductTotals ? Object.values(activeProductTotals).reduce((s, v) => s + v, 0) : 0
@@ -953,8 +961,11 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const heatStyle = (value: number | undefined) => {
     const val = value || 0
     if (!val) return undefined
-    const alpha = Math.min(0.26, 0.06 + (val / maxCellValue) * 0.2)
-    return { backgroundColor: `rgba(16, 185, 129, ${alpha})` }
+    const ratio = val / maxCellValue
+    if (ratio >= 0.75) return { backgroundColor: 'rgba(5, 150, 105, 0.42)', color: 'rgb(6, 78, 59)', fontWeight: 700 }
+    if (ratio >= 0.5) return { backgroundColor: 'rgba(16, 185, 129, 0.32)', color: 'rgb(6, 95, 70)', fontWeight: 650 }
+    if (ratio >= 0.25) return { backgroundColor: 'rgba(52, 211, 153, 0.24)' }
+    return { backgroundColor: 'rgba(167, 243, 208, 0.35)' }
   }
 
   // Build grouped structure: baseName → { hasSize, children: [product, ...] }
@@ -993,6 +1004,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const selectedChartData = selectedProduct ? dates.map((date, index) => ({
     date: formatDateShort(date),
     orders: activePivot[selectedProduct.id]?.[index] || 0,
+    previous: previousPivot[selectedProduct.id]?.[index] || 0,
   })) : []
 
   const toggleGroup = (baseName: string) => {
@@ -1023,6 +1035,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Динамика: {selectedProduct.name}</CardTitle>
+            <p className="text-xs text-muted-foreground">Текущий период vs предыдущий равный период</p>
           </CardHeader>
           <CardContent>
             <div className="h-[220px] w-full">
@@ -1032,7 +1045,9 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                  <Line type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="orders" name="Текущий период" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="previous" name="Предыдущий период" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

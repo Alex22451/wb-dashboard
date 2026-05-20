@@ -142,8 +142,20 @@ export async function GET(request: NextRequest) {
       defaultDateFrom = threeMonthsAgo.toISOString().split('T')[0]
     }
 
-    const dateFrom = searchParams.get('dateFrom') || defaultDateFrom
-    const dateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
+    const requestedDateFrom = searchParams.get('dateFrom') || defaultDateFrom
+    const requestedDateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
+    let dateFrom = requestedDateFrom
+    const dateTo = requestedDateTo
+    if (section === 'daily') {
+      const fromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
+      const toMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
+      if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
+        const periodDays = Math.ceil((toMs - fromMs) / 86400000) + 1
+        const extendedFrom = new Date(fromMs)
+        extendedFrom.setDate(extendedFrom.getDate() - periodDays)
+        dateFrom = extendedFrom.toISOString().split('T')[0]
+      }
+    }
 
     // WB API `dateFrom` parameter filters by `lastChangeDate`, not by order `date`.
     // To avoid missing orders that were created in our range but last changed earlier,
@@ -593,16 +605,17 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Daily ───
     if (needDaily) {
-      const dailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter(Boolean))].sort()
+      const visibleDailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
+      const allDailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter(Boolean))].sort()
       const dailyProducts = productTypes.map((name, i) => ({ id: i, name }))
       const dailyProductMap = new Map(productTypes.map((name, i) => [name, i]))
       const dailyEntrepreneurs = targets.map(e => ({ id: e.id, name: e.name }))
 
       const dailyPivot: Record<number, Record<number, number>> = {}
-      const dailyDateTotals: number[] = new Array(dailyDates.length).fill(0)
+      const dailyDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
       const dailyProductTotals: Record<number, number> = {}
       const entrepreneurDailyData: Record<string, Record<number, number>> = {}
-      for (const date of dailyDates) {
+      for (const date of visibleDailyDates) {
         entrepreneurDailyData[date] = {}
         for (const ent of dailyEntrepreneurs) {
           entrepreneurDailyData[date][ent.id] = 0
@@ -611,19 +624,46 @@ export async function GET(request: NextRequest) {
 
       // FBS/FBO separate pivots
       const fbsPivot: Record<number, Record<number, number>> = {}
-      const fbsDateTotals: number[] = new Array(dailyDates.length).fill(0)
+      const fbsDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
       const fbsProductTotals: Record<number, number> = {}
 
       const fboPivot: Record<number, Record<number, number>> = {}
-      const fboDateTotals: number[] = new Array(dailyDates.length).fill(0)
+      const fboDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
       const fboProductTotals: Record<number, number> = {}
+      const previousPivot: Record<number, Record<number, number>> = {}
+      const previousFbsPivot: Record<number, Record<number, number>> = {}
+      const previousFboPivot: Record<number, Record<number, number>> = {}
+      const previousDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+      const visibleDateIndex = new Map(visibleDailyDates.map((date, index) => [date, index]))
+      const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
+      const requestedToMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
+      const visiblePeriodDays = !Number.isNaN(requestedFromMs) && !Number.isNaN(requestedToMs)
+        ? Math.ceil((requestedToMs - requestedFromMs) / 86400000) + 1
+        : visibleDailyDates.length
 
       for (const o of allMappedOrders) {
-        const dateIdx = dailyDates.indexOf(o.dateStr)
-        if (dateIdx === -1) continue
-
         const productId = dailyProductMap.get(o.mappedType)
         if (productId === undefined) continue
+        const dateIdx = visibleDateIndex.get(o.dateStr)
+
+        if (dateIdx === undefined) {
+          const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
+          if (!Number.isNaN(orderMs) && !Number.isNaN(requestedFromMs)) {
+            const shifted = new Date(orderMs)
+            shifted.setDate(shifted.getDate() + visiblePeriodDays)
+            const shiftedDate = shifted.toISOString().split('T')[0]
+            const shiftedIdx = visibleDateIndex.get(shiftedDate)
+            if (shiftedIdx !== undefined) {
+              if (!previousPivot[productId]) previousPivot[productId] = {}
+              previousPivot[productId][shiftedIdx] = (previousPivot[productId][shiftedIdx] || 0) + 1
+              previousDateTotals[shiftedIdx]++
+              const fulfillmentPivot = o.isFbs ? previousFbsPivot : previousFboPivot
+              if (!fulfillmentPivot[productId]) fulfillmentPivot[productId] = {}
+              fulfillmentPivot[productId][shiftedIdx] = (fulfillmentPivot[productId][shiftedIdx] || 0) + 1
+            }
+          }
+          continue
+        }
 
         // All orders
         if (!dailyPivot[productId]) dailyPivot[productId] = {}
@@ -647,11 +687,16 @@ export async function GET(request: NextRequest) {
       }
 
       response.daily = {
-        dates: dailyDates,
+        dates: visibleDailyDates,
+        allDates: allDailyDates,
         products: dailyProducts,
         entrepreneurs: dailyEntrepreneurs,
         pivot: dailyPivot,
+        previousPivot,
+        previousFbsPivot,
+        previousFboPivot,
         dateTotals: dailyDateTotals,
+        previousDateTotals,
         productTotals: dailyProductTotals,
         entrepreneurDailyData,
         fbsPivot,
