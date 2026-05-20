@@ -1426,7 +1426,9 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
   const data = fetchedData
   const latestMonth = data?.monthStats[data.monthStats.length - 1]
-  const previousMonth = data?.monthStats[data.monthStats.length - 2]
+  const periodLabel = data && data.months.length > 0
+    ? `${formatMonthLabel(data.months[0])} — ${formatMonthLabel(data.months[data.months.length - 1])}`
+    : ''
   const totalOrders = data?.monthStats.reduce((sum, month) => sum + month.orders, 0) || 0
   const totalRevenue = data?.monthStats.reduce((sum, month) => sum + month.revenue, 0) || 0
   const totalAdSpend = data?.monthStats.reduce((sum, month) => sum + month.adSpend, 0) || 0
@@ -1434,9 +1436,9 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const trendData = data ? data.monthStats.map((month) => ({
     month: formatMonthLabel(month.month),
     orders: month.orders,
-    revenue: Math.round(month.revenue),
     adSpend: Math.round(month.adSpend),
-    drr: month.drr,
+    drr: month.drr === null ? undefined : Number(month.drr.toFixed(1)),
+    mom: month.momOrdersPct === null ? undefined : Number(month.momOrdersPct.toFixed(1)),
   })) : []
   const entTableData = data ? data.entrepreneurs.map((ent) => {
     const total = data.months.reduce((sum, month) => sum + (data.monthlyData[month]?.[ent.id] || 0), 0)
@@ -1509,7 +1511,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                 <div className="text-xs text-muted-foreground">Заказы за период</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(totalOrders)}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Последний месяц: {latestMonth ? formatNumber(latestMonth.orders) : '—'}
+                  {periodLabel}; последний месяц: {latestMonth ? formatNumber(latestMonth.orders) : '—'}
                 </div>
               </CardContent>
             </Card>
@@ -1517,14 +1519,14 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               <CardContent className="pt-5">
                 <div className="text-xs text-muted-foreground">Выручка заказов</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(totalRevenue))} ₽</div>
-                <div className="mt-1 text-xs text-muted-foreground">по заказам WB</div>
+                <div className="mt-1 text-xs text-muted-foreground">Период: {periodLabel}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5">
                 <div className="text-xs text-muted-foreground">ДРР за период</div>
                 <div className="mt-1 text-2xl font-bold">{totalDrr === null ? '—' : `${totalDrr.toFixed(1)}%`}</div>
-                <div className="mt-1 text-xs text-muted-foreground">реклама / заказы</div>
+                <div className="mt-1 text-xs text-muted-foreground">Реклама / заказы; {periodLabel}</div>
               </CardContent>
             </Card>
             <Card>
@@ -1534,7 +1536,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                   {latestMonth?.momOrdersPct === null || latestMonth?.momOrdersPct === undefined ? '—' : `${latestMonth.momOrdersPct > 0 ? '+' : ''}${latestMonth.momOrdersPct.toFixed(1)}%`}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  YoY: {latestMonth?.yoyOrdersPct === null || latestMonth?.yoyOrdersPct === undefined ? '—' : `${latestMonth.yoyOrdersPct > 0 ? '+' : ''}${latestMonth.yoyOrdersPct.toFixed(1)}%`}
+                  {latestMonth ? formatMonthLabel(latestMonth.month) : '—'}; YoY: {latestMonth?.yoyOrdersPct === null || latestMonth?.yoyOrdersPct === undefined ? '—' : `${latestMonth.yoyOrdersPct > 0 ? '+' : ''}${latestMonth.yoyOrdersPct.toFixed(1)}%`}
                 </div>
               </CardContent>
             </Card>
@@ -1543,72 +1545,38 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Месячная динамика</CardTitle>
+              <p className="text-xs text-muted-foreground">Период: {periodLabel}</p>
             </CardHeader>
             <CardContent>
               <div className="h-[300px] sm:h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={trendData} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
+                  <LineChart data={trendData} margin={{ top: 8, right: 10, bottom: 8, left: -8 }}>
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip formatter={(value: number, name: string) => name === 'ДРР' ? `${value.toFixed(1)}%` : formatNumber(value)} contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+                    <YAxis yAxisId="orders" tick={{ fontSize: 12 }} />
+                    <YAxis yAxisId="percent" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `${value}%`} />
+                    <Tooltip
+                      formatter={(value: number, name: string) => {
+                        if (name === 'ДРР' || name === 'MoM') return `${value.toFixed(1)}%`
+                        return formatNumber(value)
+                      }}
+                      contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                    />
                     <Legend wrapperStyle={{ fontSize: '12px' }} />
-                    <Bar dataKey="orders" name="Заказы" fill="#10b981" radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="adSpend" name="Реклама, ₽" fill="#f59e0b" radius={[2, 2, 0, 0]} />
-                  </BarChart>
+                    <Line yAxisId="orders" type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line yAxisId="percent" type="monotone" dataKey="drr" name="ДРР" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="percent" type="monotone" dataKey="mom" name="MoM" stroke="#64748b" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3 }} />
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Товары дали рост</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {previousMonth && latestMonth ? `${formatMonthLabel(latestMonth.month)} vs ${formatMonthLabel(previousMonth.month)}` : ''}
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {data.productDynamics.growth.length === 0 && <div className="text-sm text-muted-foreground">Нет заметного роста</div>}
-                {data.productDynamics.growth.map((row) => (
-                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{row.name}</div>
-                      <div className="text-xs text-muted-foreground">{formatNumber(row.previousOrders)} → {formatNumber(row.currentOrders)}</div>
-                    </div>
-                    <div className="text-right text-sm font-semibold text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Товары просели</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {previousMonth && latestMonth ? `${formatMonthLabel(latestMonth.month)} vs ${formatMonthLabel(previousMonth.month)}` : ''}
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {data.productDynamics.decline.length === 0 && <div className="text-sm text-muted-foreground">Нет заметной просадки</div>}
-                {data.productDynamics.decline.map((row) => (
-                  <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{row.name}</div>
-                      <div className="text-xs text-muted-foreground">{formatNumber(row.previousOrders)} → {formatNumber(row.currentOrders)}</div>
-                    </div>
-                    <div className="text-right text-sm font-semibold text-red-700 dark:text-red-400">{formatNumber(row.diff)}</div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
           {data.seasonality.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Сезонность по месяцам</CardTitle>
+                <p className="text-xs text-muted-foreground">Период анализа: {periodLabel}</p>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1628,7 +1596,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
           <Accordion type="single" collapsible className="rounded-md border px-4">
             <AccordionItem value="details">
-              <AccordionTrigger>Детализация по ИП и месяцам</AccordionTrigger>
+              <AccordionTrigger>Детализация по ИП за период: {periodLabel}</AccordionTrigger>
               <AccordionContent>
                 <ScrollArea className="w-full">
                   <table className="text-sm">
