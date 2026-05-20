@@ -1,11 +1,11 @@
 {
   "entrepreneurs": [
-    {"id": 1, "name": "Бураго Т.В.", "apiKey": ""},
-    {"id": 3, "name": "Масляков Л.А.", "apiKey": ""},
-    {"id": 4, "name": "Масляков В.А.", "apiKey": ""},
-    {"id": 5, "name": "Масляков А.А.", "apiKey": ""},
-    {"id": 6, "name": "Зубахин А.В.", "apiKey": ""},
-    {"id": 7, "name": "Зубахина Н.В.", "apiKey": ""}
+    {"id": 1, "name": "Бураго Т.В.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4MjU2LCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQyYy1mMTRkLTc3ZDMtOTM3ZS00ODY4MmI3MzZjNDEiLCJpaWQiOjIyNzQyMTM2LCJvaWQiOjE2NzE4NywicyI6MTA3Mzc0MTkyNCwic2lkIjoiZjgzYmU5ZWMtMGMwOS00YWE3LWE3MDItODkxYzE3OGQ5YWJiIiwidCI6ZmFsc2UsInVpZCI6MjI3NDIxMzZ9.k3VFn6cb9LTezC8iCW1Ht1r8FvF_IKgqVz_t9hWf6MFvinnUD8WhGjoGdJyjKXvps1OEgXNh79Ot8hRR4L8YhA"},
+    {"id": 3, "name": "Масляков Л.А.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4NTQ2LCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQzMS01ZjdiLTc2YzgtOThlZC03ZmZlZTY2Y2UwMTQiLCJpaWQiOjYyMzAyOTA2LCJvaWQiOjQwNDEzMzUsInMiOjEwNzM3NDE5MjQsInNpZCI6ImIzYWE5MjQ0LWU2YzAtNDk4OS05MDU1LWVhMGI2MDUxYjE1OSIsInQiOmZhbHNlLCJ1aWQiOjYyMzAyOTA2fQ.eSDPSBSbTmPfL6-x-AViDHu5Zg0OsHozOfIt1q96Be4c4dqLr49eBIxQ2Zal1Z86ip44cYSPmDaZf4v3PdhyiA"},
+    {"id": 4, "name": "Масляков В.А.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4Mjk3LCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQyZC05MmRmLTdiNmYtYWRkMi1iMjZjNzE3ZDlkMjYiLCJpaWQiOjIxMzQyMDQ0MSwib2lkIjo5MjIwMjgsInMiOjEwNzM3NDE5MjQsInNpZCI6IjkzMDdiOWJkLWVjN2ItNDUxNS1hZjY1LTFmNWY0MDE5YWM5YSIsInQiOmZhbHNlLCJ1aWQiOjIxMzQyMDQ0MX0.13rTttgKU05zMS8qDbc5w1bhyZflQu4rgMWdnqbX85n5O6vr_blUp-z5x035QVfMhQ2MxrqWGRU37CLBWiJE7w"},
+    {"id": 5, "name": "Масляков А.А.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4MTgwLCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQyYi1jOWM4LTc3MTItYTk3OS0wOWYwMTk2OWJlOGQiLCJpaWQiOjQ4MjczNTk1LCJvaWQiOjQwNDEwNTIsInMiOjEwNzM3NDE5MjQsInNpZCI6IjMxZGJmOTIzLTVmYzktNDA4Mi05YWJlLTNlNTFhZmM3ZTMzNiIsInQiOmZhbHNlLCJ1aWQiOjQ4MjczNTk1fQ.YnRxW1MGulYJFsIxFolTCw1GkfzfGYA1lRrCIq9RBQFqQetIko2dqUNnWg_WJ3N6lzWk53QKWJ1nROzj4y7HaA"},
+    {"id": 6, "name": "Зубахин А.В.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4NDY2LCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQzMC0yNmQ3LTczYjctODAwMy1lNGI0ZDc4MzdiMDYiLCJpaWQiOjI4NjY2MTA3LCJvaWQiOjczMDI5MSwicyI6MTA3Mzc0MTkyNCwic2lkIjoiNDkyOWVlZjUtOWFiNS00OGI2LTllZmQtZGUwYWY5NjMzM2YxIiwidCI6ZmFsc2UsInVpZCI6Mjg2NjYxMDd9.QzWSwzDWGNhxbv4-37r4B0MXzKyWoMzN6aN8hAp1Ev6XRFowMwwroRnsBafJfw97xr0J5kUJw_-Wm8QYSruZjA"},
+    {"id": 7, "name": "Зубахина Н.В.", "apiKey": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYwMzAydjEiLCJ0eXAiOiJKV1QifQ.eyJhY2MiOjMsImVudCI6MSwiZXhwIjoxNzk1MDI4MjI5LCJmb3IiOiJzZWxmIiwiaWQiOiIwMTllNDQyYy04NzY2LTdiOTgtYmVlNi0yMzAzNjc1NDU1OWQiLCJpaWQiOjE3NTIzNjA3LCJvaWQiOjEzMTExOTEsInMiOjEwNzM3NDE5MjQsInNpZCI6ImY3MGRjOWJjLWY1NWMtNDU1Ny05NzkxLThlNTljMjNiYWYzYSIsInQiOmZhbHNlLCJ1aWQiOjE3NTIzNjA3fQ.ufJ_SmJ_ACIpIjBjxx1KVnN0_U33AssH9btl3RnY5C52Wa-ZH_VQUq0gOnPRE74IYHfoQJMSP6LVokAD2h7uuA"}
   ],
   "adSpends": {
     "1": [

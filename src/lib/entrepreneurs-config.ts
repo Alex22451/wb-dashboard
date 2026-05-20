@@ -28,22 +28,7 @@ export function isVercel(): boolean {
 let _entrepreneursCache: EntrepreneurConfig[] | null = null
 let _adSpendsCache: Record<string, AdSpendEntry[]> | null = null
 
-/** Get entrepreneurs from env var or JSON file */
-export function getEntrepreneurs(): EntrepreneurConfig[] {
-  if (_entrepreneursCache) return _entrepreneursCache
-
-  // 1. Try ENTREPRENEURS env var
-  const envData = process.env.ENTREPRENEURS
-  if (envData) {
-    try {
-      _entrepreneursCache = JSON.parse(envData)
-      return _entrepreneursCache!
-    } catch (e) {
-      console.error('Failed to parse ENTREPRENEURS env var:', e)
-    }
-  }
-
-  // 2. Try entrepreneurs.json (for local dev without DB)
+function readEntrepreneursJson(): EntrepreneurConfig[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require('fs')
@@ -53,12 +38,54 @@ export function getEntrepreneurs(): EntrepreneurConfig[] {
     if (fs.existsSync(jsonPath)) {
       const data = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'))
       if (data.entrepreneurs && Array.isArray(data.entrepreneurs)) {
-        _entrepreneursCache = data.entrepreneurs
-        return _entrepreneursCache!
+        return data.entrepreneurs
       }
     }
   } catch {
     // File not found or parse error, fall through
+  }
+  return []
+}
+
+function normalizeEntrepreneurs(items: EntrepreneurConfig[]): EntrepreneurConfig[] {
+  return items.filter((item) => item.name !== 'Боев Ф.В.')
+}
+
+/** Get entrepreneurs from env var or JSON file */
+export function getEntrepreneurs(): EntrepreneurConfig[] {
+  if (_entrepreneursCache) return _entrepreneursCache
+
+  const fileEntrepreneurs = readEntrepreneursJson()
+
+  // 1. Try ENTREPRENEURS env var. The repository config is authoritative for
+  // active entrepreneurs and keys; env can only fill missing values for matching names.
+  const envData = process.env.ENTREPRENEURS
+  if (envData) {
+    try {
+      const envEntrepreneurs = normalizeEntrepreneurs(JSON.parse(envData))
+      if (fileEntrepreneurs.length > 0) {
+        const envByName = new Map(envEntrepreneurs.map((item) => [item.name, item]))
+        _entrepreneursCache = normalizeEntrepreneurs(fileEntrepreneurs).map((item) => {
+          const envItem = envByName.get(item.name)
+          return {
+            ...item,
+            apiKey: item.apiKey || envItem?.apiKey || '',
+            promotionApiKey: item.promotionApiKey || envItem?.promotionApiKey,
+          }
+        })
+      } else {
+        _entrepreneursCache = envEntrepreneurs
+      }
+      return _entrepreneursCache
+    } catch (e) {
+      console.error('Failed to parse ENTREPRENEURS env var:', e)
+    }
+  }
+
+  // 2. Try entrepreneurs.json (for local dev without DB)
+  if (fileEntrepreneurs.length > 0) {
+    _entrepreneursCache = normalizeEntrepreneurs(fileEntrepreneurs)
+    return _entrepreneursCache
   }
 
   // 3. Empty fallback
