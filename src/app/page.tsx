@@ -97,8 +97,8 @@ interface DashboardData {
     entrepreneurs: { id: number; name: string; spend: number; revenue: number; drr: number | null }[]
   }>
   productDynamics: Record<'yesterday' | 'week' | 'twoWeeks' | 'month', {
-    growth: { name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
-    decline: { name: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+    growth: { name: string; article: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
+    decline: { name: string; article: string; currentOrders: number; previousOrders: number; diff: number; diffPercent: number | null }[]
   }>
 }
 
@@ -762,6 +762,9 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
           <Card>
             <CardHeader className="pb-0">
               <CardTitle className="text-base">Товары: рост и просадка</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Сравнение: {periodLabel[dashboardPeriod]} ({formatDateShort(currentPeriod?.dateFrom || '')} — {formatDateShort(currentPeriod?.dateTo || '')}) vs {prevPeriodLabel[dashboardPeriod]} ({formatDateShort(prevPeriod?.dateFrom || '')} — {formatDateShort(prevPeriod?.dateTo || '')})
+              </p>
             </CardHeader>
             <CardContent>
               <Accordion type="single" collapsible>
@@ -784,9 +787,12 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                         <div className="overflow-x-auto rounded-md border">
                           <table className="w-full text-xs sm:text-sm">
                             <tbody>
-                              {(currentDynamics?.growth || []).map((row) => (
+                              {(currentDynamics?.growth || []).slice(0, 10).map((row) => (
                                 <tr key={row.name} className="border-b last:border-b-0">
-                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="font-medium">{row.name}</div>
+                                    {row.article && <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>}
+                                  </td>
                                   <td className="px-3 py-2 text-right font-medium text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</td>
                                   <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? 'новый' : `+${row.diffPercent}%`}</td>
                                 </tr>
@@ -803,9 +809,12 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                         <div className="overflow-x-auto rounded-md border">
                           <table className="w-full text-xs sm:text-sm">
                             <tbody>
-                              {(currentDynamics?.decline || []).map((row) => (
+                              {(currentDynamics?.decline || []).slice(0, 10).map((row) => (
                                 <tr key={row.name} className="border-b last:border-b-0">
-                                  <td className="px-3 py-2">{row.name}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="font-medium">{row.name}</div>
+                                    {row.article && <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>}
+                                  </td>
                                   <td className="px-3 py-2 text-right font-medium text-red-700 dark:text-red-400">{formatNumber(row.diff)}</td>
                                   <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? '—' : `${row.diffPercent}%`}</td>
                                 </tr>

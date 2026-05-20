@@ -482,24 +482,41 @@ export async function GET(request: NextRequest) {
       const calcProductDynamics = (period: keyof typeof dashboardPeriodStats) => {
         const current = dashboardPeriodStats[period]
         const previous = dashboardPrevPeriodStats[period]
-        const currentByProduct: Record<string, number> = {}
-        const previousByProduct: Record<string, number> = {}
+        const currentByProduct: Record<string, { name: string; article: string; currentOrders: number; previousOrders: number }> = {}
+
+        const getProductKey = (o: typeof allMappedOrders[number]) => {
+          const article = o.order.supplierArticle || ''
+          const nmId = o.order.nmId || ''
+          return `${article || 'unknown'}__${nmId || o.mappedType}`
+        }
+
+        const ensureProduct = (o: typeof allMappedOrders[number]) => {
+          const key = getProductKey(o)
+          if (!currentByProduct[key]) {
+            const article = o.order.supplierArticle || ''
+            currentByProduct[key] = {
+              name: article || o.mappedType,
+              article,
+              currentOrders: 0,
+              previousOrders: 0,
+            }
+          }
+          return currentByProduct[key]
+        }
 
         for (const o of allMappedOrders) {
           if (o.dateStr >= current.dateFrom && o.dateStr <= current.dateTo) {
-            currentByProduct[o.mappedType] = (currentByProduct[o.mappedType] || 0) + 1
+            ensureProduct(o).currentOrders += 1
           } else if (o.dateStr >= previous.dateFrom && o.dateStr <= previous.dateTo) {
-            previousByProduct[o.mappedType] = (previousByProduct[o.mappedType] || 0) + 1
+            ensureProduct(o).previousOrders += 1
           }
         }
 
-        const names = [...new Set([...Object.keys(currentByProduct), ...Object.keys(previousByProduct)])]
-        const rows = names.map((name) => {
-          const currentOrders = currentByProduct[name] || 0
-          const previousOrders = previousByProduct[name] || 0
+        const rows = Object.values(currentByProduct).map((product) => {
+          const { name, article, currentOrders, previousOrders } = product
           const diff = currentOrders - previousOrders
           const diffPercent = previousOrders > 0 ? Math.round((diff / previousOrders) * 1000) / 10 : null
-          return { name, currentOrders, previousOrders, diff, diffPercent }
+          return { name, article, currentOrders, previousOrders, diff, diffPercent }
         })
 
         return {
