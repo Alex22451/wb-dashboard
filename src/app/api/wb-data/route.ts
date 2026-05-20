@@ -879,14 +879,19 @@ export async function GET(request: NextRequest) {
         Math.round((items / DAILY_CAPACITY) * 1000) / 10
       )
 
-      // Week/Month aggregates
+      // Week/Month aggregates end at the selected period end, so historical ranges
+      // remain internally consistent.
       const mskOffset2 = 3 * 3600000
       const mskNow2 = new Date(Date.now() + mskOffset2)
-      const yesterdayMsk2 = new Date(mskNow2.getTime() - 86400000).toISOString().split('T')[0]
+      const todayMskStr = new Date(mskNow2).toISOString().split('T')[0]
+      const periodEnd = requestedDateTo
 
-      // Rolling 7 days ending yesterday (not calendar week)
-      const weekFromDate = new Date(mskNow2.getTime() - 7 * 86400000).toISOString().split('T')[0] // yesterday - 6 days
-      const weekDates = visibleProdDates.filter(d => d >= weekFromDate && d <= yesterdayMsk2)
+      // Rolling 7 days ending at selected period end (not calendar week)
+      const weekEndDate = new Date(`${periodEnd}T00:00:00`)
+      const weekStartDate = new Date(weekEndDate)
+      weekStartDate.setDate(weekStartDate.getDate() - 6)
+      const weekFromDate = weekStartDate.toISOString().split('T')[0]
+      const weekDates = visibleProdDates.filter(d => d >= weekFromDate && d <= periodEnd)
       const weekTotalItems = weekDates.reduce((sum, d) => {
         const idx = visibleProdDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
@@ -899,9 +904,11 @@ export async function GET(request: NextRequest) {
       }, 0)
       const previousWeekAvgLoadPct = Math.round((previousWeekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
 
-      // Rolling 30 days ending yesterday (not calendar month)
-      const monthFromDate = new Date(mskNow2.getTime() - 30 * 86400000).toISOString().split('T')[0] // yesterday - 29 days
-      const monthDates = visibleProdDates.filter(d => d >= monthFromDate && d <= yesterdayMsk2)
+      // Rolling 30 days ending at selected period end (not calendar month)
+      const monthStartDate = new Date(weekEndDate)
+      monthStartDate.setDate(monthStartDate.getDate() - 29)
+      const monthFromDate = monthStartDate.toISOString().split('T')[0]
+      const monthDates = visibleProdDates.filter(d => d >= monthFromDate && d <= periodEnd)
       const monthTotalItems = monthDates.reduce((sum, d) => {
         const idx = visibleProdDates.indexOf(d)
         return sum + (prodDateItems[idx] || 0)
@@ -914,10 +921,10 @@ export async function GET(request: NextRequest) {
       }, 0)
       const previousMonthAvgLoadPct = Math.round((previousMonthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
 
-      // Yesterday load
-      const yesterdayIdx = visibleProdDates.indexOf(yesterdayMsk2)
-      const yesterdayItems = yesterdayIdx >= 0 ? prodDateItems[yesterdayIdx] : 0
-      const yesterdayLoadPct = yesterdayIdx >= 0 ? prodDateLoadPct[yesterdayIdx] : 0
+      // Selected period end load
+      const periodEndIdx = visibleProdDates.indexOf(periodEnd)
+      const periodEndItems = periodEndIdx >= 0 ? prodDateItems[periodEndIdx] : 0
+      const periodEndLoadPct = periodEndIdx >= 0 ? prodDateLoadPct[periodEndIdx] : 0
       const recentItems = prodDateItems.slice(-14).filter(items => items > 0)
       const avgRecentItems = recentItems.length ? recentItems.reduce((sum, v) => sum + v, 0) / recentItems.length : 0
       const sameWeekdayAvg = (targetDate: Date) => {
@@ -931,7 +938,7 @@ export async function GET(request: NextRequest) {
         return values.reduce((sum, value) => sum + value, 0) / values.length
       }
       const forecast = Array.from({ length: 7 }, (_, index) => {
-        const forecastDate = new Date(`${yesterdayMsk2}T00:00:00`)
+        const forecastDate = new Date(`${periodEnd}T00:00:00`)
         forecastDate.setDate(forecastDate.getDate() + index + 1)
         const predictedItems = Math.round(((avgRecentItems || 0) * 0.55) + (sameWeekdayAvg(forecastDate) * 0.45))
         return {
@@ -940,7 +947,7 @@ export async function GET(request: NextRequest) {
           loadPct: Math.round((predictedItems / DAILY_CAPACITY) * 1000) / 10,
         }
       })
-      const todayMsk = new Date(`${new Date(mskNow2).toISOString().split('T')[0]}T00:00:00Z`)
+      const todayMsk = new Date(`${todayMskStr}T00:00:00Z`)
       const seasonalityAlerts = PRODUCTION_SEASONAL_PEAKS
         .map((peak) => {
           const [month, day] = peak.peakMonthDay.split('-').map(Number)
@@ -974,9 +981,9 @@ export async function GET(request: NextRequest) {
         forecast,
         seasonalityAlerts,
         summary: {
-          yesterday: { date: yesterdayMsk2, items: yesterdayItems, loadPct: yesterdayLoadPct, orders: yesterdayIdx >= 0 ? prodDateOrders[yesterdayIdx] : 0 },
-          week: { dateFrom: weekFromDate, dateTo: yesterdayMsk2, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, previousTotalItems: previousWeekTotalItems, previousAvgLoadPct: previousWeekAvgLoadPct, days: weekDays },
-          month: { dateFrom: monthFromDate, dateTo: yesterdayMsk2, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, previousTotalItems: previousMonthTotalItems, previousAvgLoadPct: previousMonthAvgLoadPct, days: monthDays },
+          yesterday: { date: periodEnd, items: periodEndItems, loadPct: periodEndLoadPct, orders: periodEndIdx >= 0 ? prodDateOrders[periodEndIdx] : 0 },
+          week: { dateFrom: weekFromDate, dateTo: periodEnd, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, previousTotalItems: previousWeekTotalItems, previousAvgLoadPct: previousWeekAvgLoadPct, days: weekDays },
+          month: { dateFrom: monthFromDate, dateTo: periodEnd, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, previousTotalItems: previousMonthTotalItems, previousAvgLoadPct: previousMonthAvgLoadPct, days: monthDays },
         },
       }
     }

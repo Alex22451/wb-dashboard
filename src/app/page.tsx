@@ -1595,6 +1595,14 @@ function monthsChartData(data: MonthlyData, view: 'entrepreneurs' | 'products') 
 
 // --- Production Load Tab ---
 function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+  const getDefaultRange = () => {
+    const mskOffset = 3 * 60 * 60 * 1000
+    const nowMsk = new Date(Date.now() + mskOffset)
+    const to = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+    const from = new Date(nowMsk.getTime() - 30 * 86400000).toISOString().split('T')[0]
+    return { from, to }
+  }
+  const defaults = getDefaultRange()
   const [fetchedData, setFetchedData] = useState<ProductionLoadData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -1602,23 +1610,25 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
   const [initialLoadDone, setInitialLoadDone] = useState(false)
   const [capacityInput, setCapacityInput] = useState('2500')
+  const [dateFrom, setDateFrom] = useState(defaults.from)
+  const [dateTo, setDateTo] = useState(defaults.to)
 
-  // Always fetch 31 days of data — viewMode only affects display, not API calls
-  const fetchData = useCallback(async (entIds?: string[]) => {
+  const fetchData = useCallback(async (
+    entIds?: string[],
+    range?: { from: string; to: string },
+    capacityOverride?: string
+  ) => {
     setLoading(true)
     setRateLimitErrors([])
     try {
-      const mskOffset = 3 * 60 * 60 * 1000
-      const nowMsk = new Date(Date.now() + mskOffset)
-      const yesterday = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
-      const from = new Date(nowMsk.getTime() - 31 * 86400000).toISOString().split('T')[0]
+      const activeRange = range || { from: dateFrom, to: dateTo }
 
       const params = new URLSearchParams()
       params.set('entrepreneurId', selectionToParam(entIds || selectedEnt))
       params.set('section', 'production')
-      params.set('dateFrom', from)
-      params.set('dateTo', yesterday)
-      params.set('capacity', capacityInput)
+      params.set('dateFrom', activeRange.from)
+      params.set('dateTo', activeRange.to)
+      params.set('capacity', capacityOverride || capacityInput)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.production) setFetchedData(json.production)
@@ -1628,7 +1638,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, capacityInput])
+  }, [selectedEnt, capacityInput, dateFrom, dateTo])
 
   useEffect(() => {
     const savedCapacity = window.localStorage.getItem('productionCapacity')
@@ -1678,13 +1688,26 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     const normalized = String(nextCapacity)
     setCapacityInput(normalized)
     window.localStorage.setItem('productionCapacity', normalized)
-    fetchData(undefined)
+    fetchData(undefined, undefined, normalized)
+  }
+
+  const setQuickRange = (days: number, shiftDays = 0) => {
+    const mskOffset = 3 * 60 * 60 * 1000
+    const nowMsk = new Date(Date.now() + mskOffset)
+    const end = new Date(nowMsk.getTime() - (1 + shiftDays) * 86400000)
+    const start = new Date(end.getTime() - (days - 1) * 86400000)
+    const range = {
+      from: start.toISOString().split('T')[0],
+      to: end.toISOString().split('T')[0],
+    }
+    setDateFrom(range.from)
+    setDateTo(range.to)
+    fetchData(undefined, range)
   }
 
   const productionChartData = useMemo(() => {
     if (!fetchedData) return []
-    const history = fetchedData.dates.slice(-30).map((date, idx, arr) => {
-      const realIdx = fetchedData.dates.length - arr.length + idx
+    const history = fetchedData.dates.map((date, realIdx) => {
       return {
         date: formatDateShort(date),
         dateRaw: date,
@@ -1705,8 +1728,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
 
   const calendarDays = useMemo(() => {
     if (!fetchedData) return []
-    return fetchedData.dates.slice(-30).map((date, idx, arr) => {
-      const realIdx = fetchedData.dates.length - arr.length + idx
+    return fetchedData.dates.map((date, realIdx) => {
       return {
         date,
         items: fetchedData.dateItems[realIdx] || 0,
@@ -1779,21 +1801,48 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           className="w-full sm:w-64"
         />
 
-        <div className="grid grid-cols-[1fr_auto] gap-2 sm:w-[260px]">
-          <div className="space-y-1">
-            <Label htmlFor="production-capacity" className="text-xs text-muted-foreground">Мощность, изделий/день</Label>
+        <div className="flex w-full flex-col gap-2 rounded-md border bg-muted/20 p-2 sm:w-auto sm:flex-row sm:items-center">
+          <div className="flex items-center gap-2 px-1 text-xs font-medium text-muted-foreground">
+            <Thermometer className="h-4 w-4" />
+            Мощность
+          </div>
+          <div className="flex gap-2">
             <Input
               id="production-capacity"
+              aria-label="Мощность производства, изделий в день"
               inputMode="numeric"
               value={capacityInput}
               onChange={(event) => setCapacityInput(event.target.value.replace(/[^\d]/g, ''))}
               onKeyDown={(event) => { if (event.key === 'Enter') applyCapacity() }}
-              className="h-9"
+              className="h-9 w-full sm:w-32"
             />
+            <Button type="button" variant="outline" onClick={applyCapacity} disabled={loading} className="h-9 shrink-0 px-3" title="Сохранить мощность">
+              <Save className="h-4 w-4" />
+            </Button>
           </div>
-          <Button type="button" variant="outline" onClick={applyCapacity} disabled={loading} className="mt-5 h-9 px-3">
-            <Save className="h-4 w-4" />
-          </Button>
+        </div>
+
+        <div className="flex w-full flex-col gap-2 rounded-md border bg-muted/20 p-2 lg:w-auto lg:flex-row lg:items-center">
+          <div className="flex items-center gap-2 px-1 text-xs font-medium text-muted-foreground">
+            <Calendar className="h-4 w-4" />
+            Период
+          </div>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 w-full sm:w-40" />
+            <span className="text-sm text-muted-foreground">—</span>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 w-full sm:w-40" />
+          </div>
+          <ToggleGroup type="single" onValueChange={(value) => {
+            if (value === '30') setQuickRange(30)
+            if (value === '60') setQuickRange(60)
+            if (value === 'prev30') setQuickRange(30, 30)
+            if (value === 'prev60') setQuickRange(60, 60)
+          }} className="justify-start overflow-x-auto rounded-md border bg-background">
+            <ToggleGroupItem value="30" className="text-xs px-2">30 дн</ToggleGroupItem>
+            <ToggleGroupItem value="60" className="text-xs px-2">60 дн</ToggleGroupItem>
+            <ToggleGroupItem value="prev30" className="text-xs px-2">30 дн назад</ToggleGroupItem>
+            <ToggleGroupItem value="prev60" className="text-xs px-2">2 мес назад</ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
@@ -1847,7 +1896,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <ThermometerGauge
               pct={fetchedData.summary.yesterday.loadPct}
-              label="Вчера"
+              label="Последний день периода"
               sublabel={`${formatNumber(fetchedData.summary.yesterday.items)} изделий / ${formatNumber(fetchedData.summary.yesterday.orders)} заказов`}
             />
             <ThermometerGauge
@@ -1928,7 +1977,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           {calendarDays.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Календарь нагрузки за 30 дней</CardTitle>
+                <CardTitle className="text-base">Календарь нагрузки за выбранный период</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-5 gap-2 sm:grid-cols-10 lg:grid-cols-[repeat(15,minmax(0,1fr))]">
