@@ -223,10 +223,40 @@ interface SupplyData {
   }>
 }
 
+interface GrowthPotentialData {
+  dateFrom: string
+  dateTo: string
+  minOpens: number
+  source: string
+  items: Array<{
+    entrepreneurId: number
+    entrepreneurName: string
+    nmId: number
+    article: string
+    title: string
+    subject: string
+    opens: number
+    carts: number
+    orders: number
+    orderSum: number
+    ctrToCart: number
+    conversion: number
+    fboStock: number
+    daysUntilOos: number | null
+    potentialScore: number
+    recommendation: string
+  }>
+  errors?: RateLimitError[]
+}
+
 const MONTH_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 
 function formatNumber(n: number): string {
   return n.toLocaleString('ru-RU')
+}
+
+function formatPct(value: number): string {
+  return `${(value * 100).toFixed(1)}%`
 }
 
 function formatDateShort(dateStr: string): string {
@@ -1929,6 +1959,197 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   )
 }
 
+// --- Growth Potential Tab ---
+function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+  const [data, setData] = useState<GrowthPotentialData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
+  const [periodDays, setPeriodDays] = useState(30)
+  const [minOpens, setMinOpens] = useState(20)
+
+  const getDates = useCallback(() => {
+    const mskOffset = 3 * 60 * 60 * 1000
+    const nowMsk = new Date(Date.now() + mskOffset)
+    const to = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
+    const from = new Date(nowMsk.getTime() - (periodDays + 1) * 86400000).toISOString().split('T')[0]
+    return { from, to }
+  }, [periodDays])
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const dates = getDates()
+      const params = new URLSearchParams()
+      params.set('entrepreneurId', selectionToParam(selectedEnt))
+      params.set('dateFrom', dates.from)
+      params.set('dateTo', dates.to)
+      params.set('minOpens', String(minOpens))
+      const res = await fetch(`/api/growth-potential?${params.toString()}`)
+      const json = await res.json()
+      setData(json)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [getDates, selectedEnt, minOpens])
+
+  const totalPotential = data?.items.filter((item) => item.potentialScore >= 50).length || 0
+  const avgConversion = data?.items.length
+    ? data.items.reduce((sum, item) => sum + item.conversion, 0) / data.items.length
+    : 0
+
+  return (
+    <div className="space-y-4">
+      {data?.errors && data.errors.length > 0 && <RateLimitAlert errors={data.errors} />}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="w-full sm:w-auto">
+          <Label className="text-xs text-muted-foreground mb-1">ИП</Label>
+          <MultiEntrepreneurSelect
+            entrepreneurs={entrepreneurs}
+            selectedIds={selectedEnt}
+            onChange={setSelectedEnt}
+            onlyWithApi
+            className="w-full sm:w-64"
+          />
+        </div>
+        <div className="w-full sm:w-auto">
+          <Label className="text-xs text-muted-foreground mb-1">Период</Label>
+          <ToggleGroup type="single" value={String(periodDays)} onValueChange={(v) => { if (v) setPeriodDays(Number(v)) }} className="justify-start rounded-md border">
+            <ToggleGroupItem value="14" className="text-xs px-3">14 дней</ToggleGroupItem>
+            <ToggleGroupItem value="30" className="text-xs px-3">30 дней</ToggleGroupItem>
+            <ToggleGroupItem value="60" className="text-xs px-3">60 дней</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <div className="w-full sm:w-auto">
+          <Label className="text-xs text-muted-foreground mb-1">Мин. переходов</Label>
+          <Input
+            type="number"
+            min={1}
+            value={minOpens}
+            onChange={(e) => setMinOpens(Math.max(1, Number(e.target.value) || 1))}
+            className="w-full sm:w-32"
+          />
+        </div>
+        <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
+          {loading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Расчёт...
+            </>
+          ) : (
+            <>
+              <TrendingUp className="h-4 w-4" />
+              Найти рост
+            </>
+          )}
+        </Button>
+      </div>
+
+      {loading && <Skeleton className="h-96 w-full" />}
+
+      {!loading && !data && (
+        <EmptyState
+          message="Выберите ИП и нажмите «Найти рост»"
+          icon={<TrendingUp className="h-12 w-12" />}
+        />
+      )}
+
+      {!loading && data && (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-muted-foreground mb-1">Кандидатов</div>
+                <div className="text-xl font-bold">{formatNumber(data.items.length)}</div>
+              </CardContent>
+            </Card>
+            <Card className="border-emerald-200 dark:border-emerald-800">
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-emerald-700 dark:text-emerald-400 mb-1">Сильный потенциал</div>
+                <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{formatNumber(totalPotential)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-muted-foreground mb-1">Средняя конверсия</div>
+                <div className="text-xl font-bold">{formatPct(avgConversion)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="text-xs text-muted-foreground mb-1">Период</div>
+                <div className="text-sm font-semibold">{formatDateShort(data.dateFrom)} — {formatDateShort(data.dateTo)}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                Рейтинг товаров по потенциалу роста
+                <Badge variant="secondary" className="text-xs">WB Sales Funnel + ФБО</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {data.items.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">Нет товаров, которые прошли фильтры по конверсии, трафику и ФБО-остатку</p>
+              ) : (
+                <ScrollArea className="w-full">
+                  <table className="min-w-full text-xs sm:text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="sticky left-0 z-10 min-w-[210px] bg-muted/50 px-3 py-2 text-left font-medium">Товар</th>
+                        <th className="min-w-[140px] px-3 py-2 text-left font-medium">ИП</th>
+                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Переходы</th>
+                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Корзина</th>
+                        <th className="min-w-[80px] px-3 py-2 text-right font-medium">Заказы</th>
+                        <th className="min-w-[90px] px-3 py-2 text-right font-medium">CR</th>
+                        <th className="min-w-[90px] px-3 py-2 text-right font-medium">ФБО</th>
+                        <th className="min-w-[90px] px-3 py-2 text-right font-medium">До OOS</th>
+                        <th className="min-w-[100px] px-3 py-2 text-right font-medium">Потенциал</th>
+                        <th className="min-w-[170px] px-3 py-2 text-left font-medium">Рекомендация</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.items.map((item) => (
+                        <tr key={`${item.entrepreneurId}-${item.nmId}`} className="border-b hover:bg-muted/30">
+                          <td className="sticky left-0 z-10 bg-background px-3 py-2">
+                            <div className="max-w-[260px] truncate font-medium" title={item.title || item.article}>{item.title || item.article}</div>
+                            <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                              <span className="font-mono">{item.article || item.nmId}</span>
+                              {item.subject && <span>{item.subject}</span>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{item.entrepreneurName}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(item.opens)}</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(item.carts)}</td>
+                          <td className="px-3 py-2 text-right font-medium">{formatNumber(item.orders)}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{formatPct(item.conversion)}</td>
+                          <td className="px-3 py-2 text-right text-sky-700 dark:text-sky-400">{formatNumber(item.fboStock)}</td>
+                          <td className={`px-3 py-2 text-right ${item.daysUntilOos !== null && item.daysUntilOos < 10 ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                            {item.daysUntilOos === null ? '-' : `${item.daysUntilOos} дн.`}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Badge variant={item.potentialScore >= 50 ? 'default' : 'secondary'}>{item.potentialScore}</Badge>
+                          </td>
+                          <td className="px-3 py-2">{item.recommendation}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <ScrollBar orientation="horizontal" />
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
 // --- Ad Spend Tab ---
 function AdSpendTab() {
   const [data, setData] = useState<AdSpendData | null>(null)
@@ -2790,6 +3011,10 @@ export default function Home() {
               <Megaphone className="h-4 w-4" />
               <span className="hidden sm:inline">Реклама</span>
             </TabsTrigger>
+            <TabsTrigger value="growth" className="h-9 gap-2 px-3">
+              <TrendingUp className="h-4 w-4" />
+              <span className="hidden sm:inline">Рост</span>
+            </TabsTrigger>
             <TabsTrigger value="compare" className="h-9 gap-2 px-3">
               <GitCompare className="h-4 w-4" />
               <span className="hidden sm:inline">API vs Excel</span>
@@ -2828,6 +3053,9 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="ads">
             <AdSpendTab />
+          </TabsContent>
+          <TabsContent value="growth">
+            <GrowthPotentialTab entrepreneurs={entrepreneurs} />
           </TabsContent>
           <TabsContent value="compare">
             <WbCompareTab entrepreneurs={entrepreneurs} />
