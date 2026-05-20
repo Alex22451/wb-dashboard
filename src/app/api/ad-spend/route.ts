@@ -8,15 +8,20 @@ export async function GET() {
     if (isVercel()) {
       const entrepreneurs = getEntrepreneurs().map((e) => ({ id: e.id, name: e.name }))
       const adSpendsData = getAdSpends()
+      const years = Object.values(adSpendsData)
+        .flat()
+        .map((entry) => entry.year)
+        .filter((year) => Number.isFinite(year))
+      const selectedYear = years.length > 0 ? Math.max(...years) : new Date().getFullYear()
 
-      // Flatten and filter for 2026 (or latest year available)
+      // Flatten and filter for the latest year available
       const grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number }[] }> = {}
       for (const [entIdStr, entries] of Object.entries(adSpendsData)) {
         const entId = Number(entIdStr)
         const ent = entrepreneurs.find((e) => e.id === entId)
         if (!ent) continue
 
-        const yearEntries = (entries as Array<{ year: number; month: number; budget: number; actual: number }>).filter((e) => e.year === 2026)
+        const yearEntries = (entries as Array<{ year: number; month: number; budget: number; actual: number }>).filter((e) => e.year === selectedYear)
         if (yearEntries.length === 0) continue
 
         grouped[entId] = {
@@ -28,10 +33,15 @@ export async function GET() {
         }
       }
 
-      return NextResponse.json({ entrepreneurs, grouped })
+      return NextResponse.json({ entrepreneurs, grouped, year: selectedYear })
     }
 
     // Local development: use Prisma SQLite
+    const yearRows = await db.$queryRawUnsafe<Array<{ year: number | null }>>(
+      `SELECT MAX(year) as year FROM AdSpend`
+    )
+    const selectedYear = Number(yearRows[0]?.year) || new Date().getFullYear()
+
     const adSpends = await db.$queryRawUnsafe<Array<{
       entrepreneurId: number
       entrepreneurName: string
@@ -43,7 +53,7 @@ export async function GET() {
       SELECT a.entrepreneurId, e.name as entrepreneurName, a.year, a.month, a.budget, a.actual
       FROM AdSpend a
       JOIN Entrepreneur e ON a.entrepreneurId = e.id
-      WHERE a.year = 2026
+      WHERE a.year = ${selectedYear}
       ORDER BY a.year, a.month
     `)
 
@@ -66,7 +76,7 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ entrepreneurs, grouped })
+    return NextResponse.json({ entrepreneurs, grouped, year: selectedYear })
   } catch (error) {
     console.error('Ad spend API error:', error)
     return NextResponse.json({ error: 'Failed to load ad spend data' }, { status: 500 })

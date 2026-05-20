@@ -35,7 +35,7 @@ function extractWbSize(article: string, subject?: string): string {
           if (match4) return 'набор 4 шт'
         }
       }
-      return 'набор'
+      return 'набор 4шт'
     }
     // Special case: салфетки 40х40 with 6шт/4шт but NO "набор" word — still a набора
     if (isSalfetki) {
@@ -130,7 +130,6 @@ const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
   { subject: 'Брелоки', types: ['ремувки', 'брелоки'] },
   { subject: 'Гобелены', types: ['гобелен', 'фотофоны'] },
   { subject: 'Фотофоны', types: ['фотофоны', 'гобелен'] },
-  { subject: 'Мочалки', types: [] },
   { subject: 'Коврики для намаза', types: ['коврики для намаза'] },
   { subject: 'Сумки пляжные', types: ['сумки пляжные'] },
   { subject: 'Сумки хозяйственные', types: ['сумки хозяйственные (шоппер)'] },
@@ -248,13 +247,13 @@ const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'подушки внутренние', articlePattern: /./i, excelType: 'подушка внутренняя', priority: 20 },
   // "Подушки декоративные" → внутренняя if article says so
   { subjectContains: 'подушки декоративные', articlePattern: /внутренняя/i, excelType: 'подушка внутренняя', priority: 110 },
-  // NO default for "Подушки декоративные" — need size matching to distinguish types
+  { subjectContains: 'подушки декоративные', articlePattern: /./i, excelType: 'подушка декоративная', priority: 20 },
   // NO default for "Подушки" — need size matching to distinguish types
 
   // ═══ "Наволочки" subjects → disambiguate ═══
   // "Наволочки декоративные" → сублимация if article says so
   { subjectContains: 'наволочки декоративные', articlePattern: /подсублим|сублим/i, excelType: 'наволочки под сублимацию', priority: 110 },
-  // NO default for "Наволочки декоративные" — need size matching to distinguish 'наволочка декоративная' vs 'наволочки декоративные'
+  { subjectContains: 'наволочки декоративные', articlePattern: /./i, excelType: 'наволочка декоративная', priority: 20 },
   // NO default for "Наволочки" — need size matching to distinguish types
 
   // ═══ "Игрушки" subjects → disambiguate ═══
@@ -490,6 +489,7 @@ export async function GET(request: NextRequest) {
     const entrepreneurId = searchParams.get('entrepreneurId')
     const dateFrom = searchParams.get('dateFrom')
     const dateTo = searchParams.get('dateTo')
+    const source = searchParams.get('source') || 'orders'
 
     if (!entrepreneurId) {
       return NextResponse.json({ error: 'entrepreneurId is required' }, { status: 400 })
@@ -556,7 +556,7 @@ export async function GET(request: NextRequest) {
     // Build set of available Excel typeKeys for context-aware mapping
     const availableExcelTypes = new Set(Object.values(excelByProduct).map(e => e.typeKey))
 
-    // ═══ 3. Fetch WB API data — PRIMARY: Orders/Sales API (complete data), SUPPLEMENTARY: Sales Funnel ═══
+    // ═══ 3. Fetch WB API data ═══
     const filterFrom = dateFrom || '2026-01-01'
     const filterTo = dateTo || new Date().toISOString().split('T')[0]
 
@@ -566,11 +566,48 @@ export async function GET(request: NextRequest) {
       size: string; brand: string; total: number; byDate: Record<string, number>; bySize: Record<string, number>
     }> = {}
 
-    let wbDataSource: 'orders' | 'sales' = 'orders'
+    let wbDataSource: 'funnel' | 'orders' | 'sales' = source === 'funnel' ? 'funnel' : 'orders'
     let wbError: string | null = null
     let funnelProductCount = 0
 
-    // ── PRIMARY: Orders/Sales API (gives ALL products, no 50-item limit) ──
+    // ── Optional diagnostic source: Sales Funnel API ──
+    // Excel data is exported from "Воронка продаж", so the closest WB API source is
+    // the Sales Funnel endpoint and its statistic.selected.orderCount metric.
+    if (source === 'funnel') {
+      try {
+        const funnelResult = await fetchSalesFunnel(apiKey, filterFrom, filterTo)
+        funnelProductCount = funnelResult.products.size
+        if (funnelResult.error) wbError = funnelResult.error
+
+        for (const product of funnelResult.products.values()) {
+          const orderCount = product.statistic?.selected?.orderCount || 0
+          if (orderCount <= 0) continue
+
+          const article = product.product.vendorCode || 'unknown'
+          const subject = product.product.subjectName || ''
+          const compositeKey = `${article}__${product.product.nmId || 0}`
+
+          wbByArticle[compositeKey] = {
+            supplierArticle: article,
+            subject,
+            category: subject,
+            nmId: product.product.nmId || 0,
+            size: extractWbSize(article, subject),
+            brand: product.product.brandName || '',
+            total: orderCount,
+            byDate: {},
+            bySize: {},
+          }
+        }
+      } catch (e: any) {
+        wbError = `Ошибка подключения к WB Sales Funnel API: ${e.message}`
+      }
+    }
+
+    // ── FALLBACK: Orders/Sales API ──
+    // These endpoints are useful for operational daily analytics, but for period-level
+    // comparison against Excel funnel exports they can drift because they are driven by
+    // WB record dates/changes rather than the exact funnel aggregation.
     let wbOrders: any[] = []
     let wbSales: any[] = []
 
@@ -581,7 +618,14 @@ export async function GET(request: NextRequest) {
     // This matches what the user needs: understanding production load.
     const filterToDateRange = (records: any[]) => {
       return records.filter((o: any) => {
-        const d = o.date?.substring(0, 10)
+        const rawDate = o.date || ''
+        let d = rawDate.substring(0, 10)
+        if (rawDate.includes('T')) {
+          const parsed = new Date(rawDate).getTime()
+          if (!Number.isNaN(parsed)) {
+            d = new Date(parsed + 3 * 60 * 60 * 1000).toISOString().substring(0, 10)
+          }
+        }
         if (!d || d < filterFrom || d > filterTo) return false
         // NOTE: We do NOT filter out isCancel or saleID — we want ALL orders/records
         // to match the "Воронка продаж" data from Excel
@@ -589,33 +633,37 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // ── Fetch ORDERS (chunked to avoid 80K API limit) ──
-    // The WB Orders API limits responses to ~80,000 records.
-    // When requesting wide date ranges, recent data gets cut off.
-    // Solution: Fetch month by month, most recent first.
-    const orderChunks: Array<{ from: string; to: string }> = []
-    {
-      let chunkEnd = new Date(filterTo + 'T23:59:59')
-      const startDate = new Date(filterFrom + 'T00:00:00')
-      while (chunkEnd >= startDate) {
-        const year = chunkEnd.getFullYear()
-        const month = chunkEnd.getMonth()
-        const monthStart = new Date(year, month, 1)
-        const chunkFrom = monthStart > startDate ? monthStart : startDate
-        orderChunks.push({
-          from: chunkFrom.toISOString().split('T')[0],
-          to: chunkEnd.toISOString().split('T')[0],
-        })
-        chunkEnd = new Date(year, month, 0)
-        chunkEnd.setHours(23, 59, 59)
+    if (Object.keys(wbByArticle).length === 0) {
+      // ── Fetch ORDERS (chunked to avoid 80K API limit) ──
+      // The WB Orders API limits responses to ~80,000 records.
+      // When requesting wide date ranges, recent data gets cut off.
+      // Solution: Fetch month by month, most recent first.
+      const orderChunks: Array<{ from: string; to: string }> = []
+      {
+        let chunkEnd = new Date(filterTo + 'T23:59:59')
+        const startDate = new Date(filterFrom + 'T00:00:00')
+        while (chunkEnd >= startDate) {
+          const year = chunkEnd.getFullYear()
+          const month = chunkEnd.getMonth()
+          const monthStart = new Date(year, month, 1)
+          const chunkFrom = monthStart > startDate ? monthStart : startDate
+          orderChunks.push({
+            from: chunkFrom.toISOString().split('T')[0],
+            to: chunkEnd.toISOString().split('T')[0],
+          })
+          chunkEnd = new Date(year, month, 0)
+          chunkEnd.setHours(23, 59, 59)
+        }
       }
-    }
 
     const seenOrderKeys = new Set<string>()
     for (let i = 0; i < orderChunks.length; i++) {
       const chunk = orderChunks[i]
       try {
-        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${chunk.from}&flag=0`
+        const apiFromDate = new Date(chunk.from + 'T00:00:00')
+        apiFromDate.setDate(apiFromDate.getDate() - 2)
+        const apiFrom = apiFromDate.toISOString().split('T')[0]
+        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiFrom}&flag=0`
         const ordersResponse = await fetchWbApi(ordersUrl, { headers: apiHeaders })
         if (!ordersResponse.ok && i === 0) {
           const errData = await ordersResponse.json().catch(() => ({}))
@@ -662,7 +710,10 @@ export async function GET(request: NextRequest) {
     for (let i = 0; i < salesChunks.length; i++) {
       const chunk = salesChunks[i]
       try {
-        const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${chunk.from}&flag=0`
+        const apiFromDate = new Date(chunk.from + 'T00:00:00')
+        apiFromDate.setDate(apiFromDate.getDate() - 2)
+        const apiFrom = apiFromDate.toISOString().split('T')[0]
+        const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiFrom}&flag=0`
         const salesResponse = await fetchWbApi(salesUrl, { headers: apiHeaders })
         if (salesResponse.ok) {
           const chunkSales = await salesResponse.json()
@@ -721,6 +772,7 @@ export async function GET(request: NextRequest) {
         wbByArticle[compositeKey].bySize[orderSize] = (wbByArticle[compositeKey].bySize[orderSize] || 0) + 1
       }
     })
+    }
 
     // Exclude unwanted subjects
     for (const key of Object.keys(wbByArticle)) {
@@ -729,14 +781,6 @@ export async function GET(request: NextRequest) {
       if (EXCLUDED_WB_SUBJECTS.some(excl => subjectLower.includes(excl.toLowerCase()))) {
         delete wbByArticle[key]
       }
-    }
-
-    // ── SUPPLEMENTARY: Fetch Sales Funnel data for verification (limited to ~110 products) ──
-    try {
-      const funnelResult = await fetchSalesFunnel(apiKey, filterFrom, filterTo)
-      funnelProductCount = funnelResult.products.size
-    } catch (_e: any) {
-      // Funnel API failure is not critical — it's supplementary
     }
 
     // ═══ 4. Smart mapping: WB article → Excel product ═══

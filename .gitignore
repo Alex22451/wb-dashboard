@@ -50,5 +50,6 @@ test
 prompt
 
 server.log
+db/*.db
 # Skills directory
 /skills/

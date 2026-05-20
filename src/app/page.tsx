@@ -120,6 +120,7 @@ interface MonthlyData {
 }
 
 interface AdSpendData {
+  year?: number
   entrepreneurs: { id: number; name: string }[]
   grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number }[] }>
 }
@@ -1833,11 +1834,11 @@ function AdSpendTab() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Расходы на рекламу по месяцам (2026)</CardTitle></CardHeader>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Расходы на рекламу по месяцам ({data.year || new Date().getFullYear()})</CardTitle></CardHeader>
         <CardContent>
           {entries.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за 2026 год</p>
+            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за {data.year || new Date().getFullYear()} год</p>
           ) : (
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
@@ -1856,7 +1857,7 @@ function AdSpendTab() {
       </Card>
       {entries.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация (2026)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация ({data.year || new Date().getFullYear()})</CardTitle></CardHeader>
           <CardContent>
             <ScrollArea className="w-full">
               <table className="text-sm">
@@ -1977,9 +1978,9 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
           {data.dataSource && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                Источник WB: {data.dataSource === 'sales' ? 'Продажи (Sales API)' : 'Заказы (Orders API)'}
+                Источник WB: {data.dataSource === 'funnel' ? 'Воронка продаж' : data.dataSource === 'sales' ? 'Продажи (Sales API)' : 'Заказы (Orders API)'}
               </span>
-              <span>— Продажи точнее отражают реальные данные</span>
+              <span>— сравнение строится по заказам с маппингом WB-артикулов к Excel-товарам</span>
             </div>
           )}
 

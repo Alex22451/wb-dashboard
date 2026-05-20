@@ -2,6 +2,12 @@ import { db } from '@/lib/db'
 import { isVercel, getEntrepreneurs } from '@/lib/entrepreneurs-config'
 import { NextResponse } from 'next/server'
 
+function maskApiKey(key: string | null | undefined): string | null {
+  if (!key) return null
+  if (key.length <= 8) return '********'
+  return `${key.slice(0, 4)}********${key.slice(-4)}`
+}
+
 export async function GET() {
   try {
     // On Vercel, use config-based data directly (no DB)
@@ -10,7 +16,7 @@ export async function GET() {
       const result = entrepreneurs.map((e) => ({
         id: e.id,
         name: e.name,
-        wbApiKey: e.apiKey || null,
+        wbApiKey: maskApiKey(e.apiKey),
         totalOrders: 0,
         hasApiKey: !!e.apiKey,
       }))
@@ -35,7 +41,7 @@ export async function GET() {
     const result = entrepreneurs.map((e) => ({
       id: e.id,
       name: e.name,
-      wbApiKey: e.wbApiKey,
+      wbApiKey: maskApiKey(e.wbApiKey),
       totalOrders: Number(e.totalOrders),
       hasApiKey: !!e.wbApiKey,
     }))

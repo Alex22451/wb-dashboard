@@ -10,6 +10,13 @@ import { isVercel } from './entrepreneurs-config'
 // Lazy initialization — avoids require() at module level
 let _db: any = null
 
+type DbClientLike = {
+  $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>
+  $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>
+  $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<number>
+  $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>
+}
+
 function getDb() {
   if (_db) return _db
 
@@ -36,7 +43,7 @@ function getDb() {
 }
 
 // Export a proxy that lazily initializes on first access
-export const db = new Proxy({} as any, {
+export const db = new Proxy({} as DbClientLike, {
   get(_target, prop) {
     const actualDb = getDb()
     const value = actualDb[prop]

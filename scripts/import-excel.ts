@@ -37,7 +37,8 @@ async function main() {
   const filePath = path.join(uploadDir, files[0])
   console.log(`Loading: ${files[0]}`)
 
-  const XLSX = await import('xlsx')
+  const xlsxModule = await import('xlsx')
+  const XLSX = (xlsxModule as any).default ?? xlsxModule
   const wb = XLSX.readFile(filePath)
   
   const allProductNames = new Set<string>()
@@ -85,6 +86,11 @@ async function main() {
   }
   
   console.log(`Total unique products: ${allProductNames.size}`)
+
+  const existingKeys = await db.$queryRaw<Array<{ name: string; wbApiKey: string | null }>>`
+    SELECT name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''
+  `
+  const apiKeyByName = new Map(existingKeys.map((row) => [row.name, row.wbApiKey]))
   
   // Clear existing data using raw SQL (fast)
   console.log('Clearing existing data...')
@@ -101,7 +107,12 @@ async function main() {
   const entrepreneurMap: Record<string, number> = {}
   for (let i = 0; i < ENTREPRENEUR_SHEETS.length; i++) {
     const name = ENTREPRENEUR_SHEETS[i]
-    await db.$executeRawUnsafe(`INSERT INTO Entrepreneur (id, name) VALUES (${i + 1}, '${name.replace(/'/g, "''")}')`)
+    const apiKey = apiKeyByName.get(name)
+    if (apiKey) {
+      await db.$executeRaw`INSERT INTO Entrepreneur (id, name, wbApiKey) VALUES (${i + 1}, ${name}, ${apiKey})`
+    } else {
+      await db.$executeRaw`INSERT INTO Entrepreneur (id, name) VALUES (${i + 1}, ${name})`
+    }
     entrepreneurMap[name] = i + 1
   }
   

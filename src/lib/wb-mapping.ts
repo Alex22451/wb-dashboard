@@ -22,7 +22,6 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Брелоки', types: ['ремувки', 'брелоки'] },
   { subject: 'Гобелены', types: ['гобелен', 'фотофоны'] },
   { subject: 'Фотофоны', types: ['фотофоны', 'гобелен'] },
-  // Мочалки — исключена (в EXCLUDED_WB_SUBJECTS)
   { subject: 'Коврики для намаза', types: ['коврики для намаза'] },
   { subject: 'Сумки пляжные', types: ['сумки пляжные'] },
   { subject: 'Сумки хозяйственные', types: ['сумки хозяйственные (шоппер)'] },
@@ -31,8 +30,6 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
-  // Исключены: Наборы для создания слепков, Наборы для рисования, Стаканы — нет в Excel
-  // Эти категории перенесены в EXCLUDED_WB_SUBJECTS
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
   { subject: 'Мягкие игрушки', types: ['мягкие игрушки', 'игрушки антистресс'] },
   { subject: 'Игрушки антистресс', types: ['игрушки антистресс', 'мягкие игрушки'] },
@@ -41,7 +38,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Ткани для рукоделия', types: ['ткань'] },
 ]
 
-// WB subject categories to exclude entirely
+// WB subject categories to exclude entirely because they are absent from the Excel report.
 export const EXCLUDED_WB_SUBJECTS: string[] = [
   'Картины по номерам',
   'Картины',
@@ -58,7 +55,6 @@ export const EXCLUDED_WB_SUBJECTS: string[] = [
   'Маски эротик',
   'Рюкзаки',
   'Дождевики',
-  // Нет в Excel — исключены по результатам аудита:
   'Наборы для создания слепков',
   'Наборы для рисования',
   'Стаканы',
@@ -324,10 +320,7 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
   // 1. Get possible types from subject mapping
   const possibleTypes = findSubjectTypes(subject)
   if (possibleTypes.length === 0) {
-    // Subject not in explicit mapping — fall back to raw subject name
-    // EXCLUDED subjects are already filtered BEFORE this function is called
-    // This ensures we don't lose valid orders just because they're not in the mapping table
-    return subject.toLowerCase()
+    return null
   }
 
   // 3. Check article/brand keyword overrides (simplified - no Excel data needed)
