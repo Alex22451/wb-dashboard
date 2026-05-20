@@ -596,10 +596,18 @@ export async function GET(request: NextRequest) {
       const dailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter(Boolean))].sort()
       const dailyProducts = productTypes.map((name, i) => ({ id: i, name }))
       const dailyProductMap = new Map(productTypes.map((name, i) => [name, i]))
+      const dailyEntrepreneurs = targets.map(e => ({ id: e.id, name: e.name }))
 
       const dailyPivot: Record<number, Record<number, number>> = {}
       const dailyDateTotals: number[] = new Array(dailyDates.length).fill(0)
       const dailyProductTotals: Record<number, number> = {}
+      const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+      for (const date of dailyDates) {
+        entrepreneurDailyData[date] = {}
+        for (const ent of dailyEntrepreneurs) {
+          entrepreneurDailyData[date][ent.id] = 0
+        }
+      }
 
       // FBS/FBO separate pivots
       const fbsPivot: Record<number, Record<number, number>> = {}
@@ -622,6 +630,7 @@ export async function GET(request: NextRequest) {
         dailyPivot[productId][dateIdx] = (dailyPivot[productId][dateIdx] || 0) + 1
         dailyDateTotals[dateIdx]++
         dailyProductTotals[productId] = (dailyProductTotals[productId] || 0) + 1
+        entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
 
         // FBS or FBO
         if (o.isFbs) {
@@ -640,9 +649,11 @@ export async function GET(request: NextRequest) {
       response.daily = {
         dates: dailyDates,
         products: dailyProducts,
+        entrepreneurs: dailyEntrepreneurs,
         pivot: dailyPivot,
         dateTotals: dailyDateTotals,
         productTotals: dailyProductTotals,
+        entrepreneurDailyData,
         fbsPivot,
         fbsDateTotals,
         fbsProductTotals,

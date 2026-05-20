@@ -105,9 +105,11 @@ interface DashboardData {
 interface DailyOrdersData {
   dates: string[]
   products: { id: number; name: string }[]
+  entrepreneurs: { id: number; name: string }[]
   pivot: Record<number, Record<number, number>>
   dateTotals: number[]
   productTotals: Record<number, number>
+  entrepreneurDailyData: Record<string, Record<number, number>>
   fbsPivot: Record<number, Record<number, number>>
   fbsDateTotals: number[]
   fbsProductTotals: Record<number, number>
@@ -931,6 +933,8 @@ function extractBaseName(name: string): string {
 // --- Data Table Component (shared) ---
 function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo' }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [sortDateIdx, setSortDateIdx] = useState<number | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
 
   // Select the appropriate pivot and totals based on filter
   const activePivot = fulfillmentFilter === 'fbs' ? data.fbsPivot
@@ -945,6 +949,13 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 
   const { dates, products } = data
   const grandTotal = activeProductTotals ? Object.values(activeProductTotals).reduce((s, v) => s + v, 0) : 0
+  const maxCellValue = Math.max(1, ...Object.values(activePivot).flatMap((row) => Object.values(row)))
+  const heatStyle = (value: number | undefined) => {
+    const val = value || 0
+    if (!val) return undefined
+    const alpha = Math.min(0.26, 0.06 + (val / maxCellValue) * 0.2)
+    return { backgroundColor: `rgba(16, 185, 129, ${alpha})` }
+  }
 
   // Build grouped structure: baseName → { hasSize, children: [product, ...] }
   const groupedProducts = (() => {
@@ -966,10 +977,23 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
     const result = [...groups.values()].map(group => {
       const groupTotal = group.children.reduce((s, p) => s + (activeProductTotals?.[p.id] || 0), 0)
       return { ...group, total: groupTotal }
-    }).sort((a, b) => b.total - a.total)
+    }).sort((a, b) => {
+      if (sortDateIdx !== null) {
+        const aDate = a.children.reduce((s, p) => s + (activePivot[p.id]?.[sortDateIdx] || 0), 0)
+        const bDate = b.children.reduce((s, p) => s + (activePivot[p.id]?.[sortDateIdx] || 0), 0)
+        return bDate - aDate
+      }
+      return b.total - a.total
+    })
 
     return result
   })()
+
+  const selectedProduct = selectedProductId !== null ? products.find((p) => p.id === selectedProductId) : null
+  const selectedChartData = selectedProduct ? dates.map((date, index) => ({
+    date: formatDateShort(date),
+    orders: activePivot[selectedProduct.id]?.[index] || 0,
+  })) : []
 
   const toggleGroup = (baseName: string) => {
     setExpandedGroups(prev => {
@@ -994,16 +1018,68 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const filterLabel = fulfillmentFilter === 'fbs' ? ' (FBS)' : fulfillmentFilter === 'fbo' ? ' (FBO)' : ''
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
-      <ScrollArea className="w-full max-h-[70vh] sm:max-h-[600px]">
+    <div className="space-y-3">
+      {selectedProduct && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Динамика: {selectedProduct.name}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[220px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={selectedChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                  <Line type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="space-y-2 sm:hidden">
+        {groupedProducts.map((group) => {
+          const groupDateTotals = dates.map((_, i) =>
+            group.children.reduce((s, p) => s + ((activePivot[p.id]?.[i]) || 0), 0)
+          )
+          if (group.total === 0) return null
+          return (
+            <div key={group.baseName} className="rounded-lg border bg-card p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="break-words text-sm font-medium">{group.baseName}</div>
+                  <div className="text-xs text-muted-foreground">{group.children.length > 1 ? `${group.children.length} вариантов` : filterLabel.trim()}</div>
+                </div>
+                <div className="text-right text-lg font-bold">{formatNumber(group.total)}</div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {dates.map((date, index) => (
+                  <div key={date} className="rounded-md border px-2 py-1.5" style={heatStyle(groupDateTotals[index])}>
+                    <div className="text-[10px] text-muted-foreground">{formatDateShort(date)}</div>
+                    <div className="text-sm font-semibold">{groupDateTotals[index] || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-lg border bg-card sm:block">
+      <ScrollArea className="w-full max-h-[600px]">
         <table className="min-w-full text-xs sm:text-sm">
           <thead>
             <tr className="bg-muted/50 border-b">
               <th className="sticky left-0 z-10 min-w-[170px] bg-muted/50 px-2 py-2 text-left font-medium sm:min-w-[220px] sm:px-3">Продукт{filterLabel}</th>
               <th className="min-w-[70px] bg-muted/50 px-2 py-2 text-right font-medium sm:px-3">Итого</th>
-              {dates.map((d) => (
+              {dates.map((d, index) => (
                 <th key={d} className="min-w-[58px] whitespace-nowrap px-2 py-2 text-right font-medium sm:px-3" title={formatDateFull(d)}>
-                  {formatDateShort(d)}
+                  <button type="button" className="underline-offset-2 hover:underline" onClick={() => setSortDateIdx(sortDateIdx === index ? null : index)}>
+                    {formatDateShort(d)}{sortDateIdx === index ? ' ↓' : ''}
+                  </button>
                 </th>
               ))}
             </tr>
@@ -1033,12 +1109,14 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                 if (!productPivot || total === 0) return null
                 return (
                   <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
-                    <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">{p.name}</td>
+                    <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">
+                      <button type="button" className="text-left hover:underline" onClick={() => setSelectedProductId(p.id)}>{p.name}</button>
+                    </td>
                     <td className="px-2 py-2 text-right font-medium sm:px-3">{formatNumber(total)}</td>
                     {dates.map((d, i) => {
                       const val = productPivot[i]
                       return (
-                        <td key={d} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
+                        <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
                           {val || '—'}
                         </td>
                       )
@@ -1065,7 +1143,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                     </td>
                     <td className="px-2 py-2 text-right font-semibold sm:px-3">{formatNumber(group.total)}</td>
                     {dates.map((d, i) => (
-                      <td key={d} className="px-2 py-2 text-right font-medium sm:px-3">
+                      <td key={d} style={heatStyle(groupDateTotals[i])} className="px-2 py-2 text-right font-medium sm:px-3">
                         {groupDateTotals[i] || '—'}
                       </td>
                     ))}
@@ -1082,13 +1160,13 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                       return (
                         <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors bg-muted/10">
                           <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
-                            <span className="text-muted-foreground">{sizePart}</span>
+                            <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => setSelectedProductId(p.id)}>{sizePart}</button>
                           </td>
                           <td className="px-2 py-2 text-right sm:px-3">{formatNumber(total)}</td>
                           {dates.map((d, i) => {
                             const val = productPivot[i]
                             return (
-                              <td key={d} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
+                              <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
                                 {val || '—'}
                               </td>
                             )
@@ -1103,6 +1181,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
         </table>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
+      </div>
     </div>
   )
 }
@@ -1244,6 +1323,52 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
                 </CardContent>
               </Card>
             </div>
+          )}
+          {fetchedData.dates.length > 0 && fetchedData.entrepreneurs.length > 1 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Сравнение ИП по дням</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="space-y-2 p-3 sm:hidden">
+                  {fetchedData.dates.map((date) => (
+                    <div key={date} className="rounded-md border p-3">
+                      <div className="mb-2 text-sm font-medium">{formatDateFull(date)}</div>
+                      <div className="space-y-1">
+                        {fetchedData.entrepreneurs.map((ent) => (
+                          <div key={ent.id} className="flex items-center justify-between gap-3 text-sm">
+                            <span className="truncate text-muted-foreground">{ent.name}</span>
+                            <span className="font-semibold">{formatNumber(fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="min-w-[120px] px-3 py-2 text-left font-medium">Дата</th>
+                        {fetchedData.entrepreneurs.map((ent) => (
+                          <th key={ent.id} className="min-w-[140px] px-3 py-2 text-right font-medium">{ent.name}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fetchedData.dates.map((date) => (
+                        <tr key={date} className="border-b last:border-b-0">
+                          <td className="px-3 py-2 font-medium">{formatDateShort(date)}</td>
+                          {fetchedData.entrepreneurs.map((ent) => (
+                            <td key={ent.id} className="px-3 py-2 text-right">{formatNumber(fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
           )}
           <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} />
         </div>
