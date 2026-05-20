@@ -1440,6 +1440,13 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     drr: month.drr === null ? undefined : Number(month.drr.toFixed(1)),
     mom: month.momOrdersPct === null ? undefined : Number(month.momOrdersPct.toFixed(1)),
   })) : []
+  const drrValues = trendData.map((row) => row.drr).filter((value): value is number => typeof value === 'number')
+  const drrDomain = drrValues.length
+    ? [
+        Math.max(0, Math.floor(Math.min(...drrValues) - 1)),
+        Math.ceil(Math.max(...drrValues) + 1),
+      ]
+    : [0, 10]
   const entTableData = data ? data.entrepreneurs.map((ent) => {
     const total = data.months.reduce((sum, month) => sum + (data.monthlyData[month]?.[ent.id] || 0), 0)
     const revenue = data.months.reduce((sum, month) => sum + (data.monthlyRevenue[month]?.[ent.id] || 0), 0)
@@ -1531,7 +1538,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">MoM / YoY</div>
+                <div className="text-xs text-muted-foreground">MoM / YoY по заказам</div>
                 <div className="mt-1 text-2xl font-bold">
                   {latestMonth?.momOrdersPct === null || latestMonth?.momOrdersPct === undefined ? '—' : `${latestMonth.momOrdersPct > 0 ? '+' : ''}${latestMonth.momOrdersPct.toFixed(1)}%`}
                 </div>
@@ -1542,10 +1549,21 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
             </Card>
           </div>
 
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="font-medium">MoM</div>
+              <div className="mt-1 text-xs text-muted-foreground">Month over Month: сравнение заказов выбранного месяца с предыдущим месяцем.</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="font-medium">YoY</div>
+              <div className="mt-1 text-xs text-muted-foreground">Year over Year: сравнение заказов выбранного месяца с тем же месяцем прошлого года.</div>
+            </div>
+          </div>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Месячная динамика</CardTitle>
-              <p className="text-xs text-muted-foreground">Период: {periodLabel}</p>
+              <p className="text-xs text-muted-foreground">Период: {periodLabel}; ДРР показан на отдельной шкале справа.</p>
             </CardHeader>
             <CardContent>
               <div className="h-[300px] sm:h-80">
@@ -1554,18 +1572,17 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                     <YAxis yAxisId="orders" tick={{ fontSize: 12 }} />
-                    <YAxis yAxisId="percent" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `${value}%`} />
+                    <YAxis yAxisId="drr" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `${value}%`} domain={drrDomain} />
                     <Tooltip
                       formatter={(value: number, name: string) => {
-                        if (name === 'ДРР' || name === 'MoM') return `${value.toFixed(1)}%`
+                        if (name === 'ДРР') return `${value.toFixed(1)}%`
                         return formatNumber(value)
                       }}
                       contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
                     />
                     <Legend wrapperStyle={{ fontSize: '12px' }} />
                     <Line yAxisId="orders" type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
-                    <Line yAxisId="percent" type="monotone" dataKey="drr" name="ДРР" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                    <Line yAxisId="percent" type="monotone" dataKey="mom" name="MoM" stroke="#64748b" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3 }} />
+                    <Line yAxisId="drr" type="monotone" dataKey="drr" name="ДРР" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
