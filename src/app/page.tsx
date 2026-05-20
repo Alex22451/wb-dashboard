@@ -1835,13 +1835,9 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           <ToggleGroup type="single" onValueChange={(value) => {
             if (value === '30') setQuickRange(30)
             if (value === '60') setQuickRange(60)
-            if (value === 'prev30') setQuickRange(30, 30)
-            if (value === 'prev60') setQuickRange(60, 60)
           }} className="justify-start overflow-x-auto rounded-md border bg-background">
             <ToggleGroupItem value="30" className="text-xs px-2">30 дн</ToggleGroupItem>
             <ToggleGroupItem value="60" className="text-xs px-2">60 дн</ToggleGroupItem>
-            <ToggleGroupItem value="prev30" className="text-xs px-2">30 дн назад</ToggleGroupItem>
-            <ToggleGroupItem value="prev60" className="text-xs px-2">2 мес назад</ToggleGroupItem>
           </ToggleGroup>
         </div>
 
