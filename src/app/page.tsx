@@ -28,8 +28,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -258,12 +260,108 @@ function EmptyState({ message, icon }: { message: string; icon?: React.ReactNode
   )
 }
 
+const ALL_ENTREPRENEURS = 'all'
+
+function selectionToParam(selectedIds: string[]): string {
+  if (selectedIds.length === 0 || selectedIds.includes(ALL_ENTREPRENEURS)) return ALL_ENTREPRENEURS
+  return selectedIds.join(',')
+}
+
+function selectionLabel(selectedIds: string[], entrepreneurs: EntrepreneurInfo[], placeholder = 'Выберите ИП'): string {
+  if (selectedIds.length === 0) return placeholder
+  if (selectedIds.includes(ALL_ENTREPRENEURS)) return 'Все ИП'
+  if (selectedIds.length === 1) {
+    return entrepreneurs.find((e) => String(e.id) === selectedIds[0])?.name || placeholder
+  }
+  return `Выбрано ИП: ${selectedIds.length}`
+}
+
+function MultiEntrepreneurSelect({
+  entrepreneurs,
+  selectedIds,
+  onChange,
+  className = '',
+  onlyWithApi = false,
+  placeholder = 'Выберите ИП',
+}: {
+  entrepreneurs: EntrepreneurInfo[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  className?: string
+  onlyWithApi?: boolean
+  placeholder?: string
+}) {
+  const options = onlyWithApi ? entrepreneurs.filter((e) => e.hasApiKey) : entrepreneurs
+  const hasAll = selectedIds.includes(ALL_ENTREPRENEURS)
+
+  const toggleId = (id: string) => {
+    if (id === ALL_ENTREPRENEURS) {
+      onChange([ALL_ENTREPRENEURS])
+      return
+    }
+
+    const current = selectedIds.filter((v) => v !== ALL_ENTREPRENEURS)
+    const next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id]
+    onChange(next.length > 0 ? next : [ALL_ENTREPRENEURS])
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className={`h-10 justify-between gap-2 px-3 font-normal ${className}`}>
+          <span className="truncate">{selectionLabel(selectedIds, options, placeholder)}</span>
+          {selectedIds.length > 0 && !hasAll && (
+            <Badge variant="secondary" className="ml-auto shrink-0 text-[10px]">{selectedIds.length}</Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(92vw,320px)] p-2">
+        <div className="space-y-1">
+          <div
+            role="button"
+            tabIndex={0}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+            onClick={() => toggleId(ALL_ENTREPRENEURS)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleId(ALL_ENTREPRENEURS) }}
+          >
+            <Checkbox checked={hasAll} />
+            <span className="font-medium">Все ИП</span>
+          </div>
+          <div className="my-1 h-px bg-border" />
+          <ScrollArea className="max-h-64">
+            <div className="space-y-1 pr-2">
+              {options.map((e) => {
+                const id = String(e.id)
+                const checked = !hasAll && selectedIds.includes(id)
+                return (
+                  <div
+                    key={e.id}
+                    role="button"
+                    tabIndex={0}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+                    onClick={() => toggleId(id)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') toggleId(id) }}
+                  >
+                    <Checkbox checked={checked} />
+                    <span className="min-w-0 flex-1 truncate">{e.name}</span>
+                    {e.hasApiKey && <Badge variant="secondary" className="text-[10px]">API</Badge>}
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 // --- Dashboard Tab ---
 function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSource, onLoad, loading, rateLimitErrors }: {
   data: DashboardData | null
   entrepreneurs: EntrepreneurInfo[]
-  selectedEnt: string
-  onSelectEnt: (id: string) => void
+  selectedEnt: string[]
+  onSelectEnt: (ids: string[]) => void
   dataSource?: 'excel' | 'wbapi'
   onLoad: () => void
   loading: boolean
@@ -313,25 +411,21 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       <RateLimitAlert errors={rateLimitErrors} />
 
       {/* ИП Selector + Period + Load Button */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={selectedEnt} onValueChange={onSelectEnt}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Выберите ИП" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все ИП (сводный)</SelectItem>
-            {entrepreneurs.map((e) => (
-              <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={entrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={onSelectEnt}
+          className="w-full sm:w-64"
+          placeholder="Выберите ИП"
+        />
+        <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="w-full justify-start overflow-x-auto rounded-md border sm:w-auto">
           <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
           <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
           <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
           <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
         </ToggleGroup>
-        <Button onClick={onLoad} disabled={loading || !selectedEnt} className="gap-2">
+        <Button onClick={onLoad} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -357,7 +451,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
       {/* Empty state when no data and not loading */}
       {!loading && !data && (
         <EmptyState
-          message={selectedEnt ? 'Нажмите "Загрузить" для получения данных' : 'Выберите ИП и нажмите "Загрузить"'}
+          message={selectedEnt.length > 0 ? 'Нажмите "Загрузить" для получения данных' : 'Выберите ИП и нажмите "Загрузить"'}
           icon={<LayoutDashboard className="h-12 w-12" />}
         />
       )}
@@ -403,9 +497,9 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
-                  <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="border rounded-md">
+                  <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="justify-start overflow-x-auto rounded-md border">
                     <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
                     <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
                     <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
@@ -421,7 +515,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             <CardContent>
               {!showChart ? (
                 /* Card view */
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Card className="border-border">
                     <CardContent className="pt-3 pb-3">
                       <div className="text-xs text-muted-foreground mb-1">Всего</div>
@@ -635,15 +729,15 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const filterLabel = fulfillmentFilter === 'fbs' ? ' (FBS)' : fulfillmentFilter === 'fbo' ? ' (FBO)' : ''
 
   return (
-    <div className="border rounded-lg overflow-hidden">
-      <ScrollArea className="w-full max-h-[600px]">
-        <table className="text-sm">
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <ScrollArea className="w-full max-h-[70vh] sm:max-h-[600px]">
+        <table className="min-w-full text-xs sm:text-sm">
           <thead>
             <tr className="bg-muted/50 border-b">
-              <th className="text-left px-3 py-2 font-medium min-w-[200px] sticky left-0 bg-muted/50 z-10">Продукт{filterLabel}</th>
-              <th className="text-right px-3 py-2 font-medium min-w-[80px] bg-muted/50">Итого</th>
+              <th className="sticky left-0 z-10 min-w-[170px] bg-muted/50 px-2 py-2 text-left font-medium sm:min-w-[220px] sm:px-3">Продукт{filterLabel}</th>
+              <th className="min-w-[70px] bg-muted/50 px-2 py-2 text-right font-medium sm:px-3">Итого</th>
               {dates.map((d) => (
-                <th key={d} className="text-right px-3 py-2 font-medium min-w-[60px] whitespace-nowrap" title={formatDateFull(d)}>
+                <th key={d} className="min-w-[58px] whitespace-nowrap px-2 py-2 text-right font-medium sm:px-3" title={formatDateFull(d)}>
                   {formatDateShort(d)}
                 </th>
               ))}
@@ -651,10 +745,10 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
           </thead>
           <tbody>
             <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold">
-              <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО{filterLabel}</td>
-              <td className="text-right px-3 py-2 font-bold bg-emerald-50 dark:bg-emerald-950/20">{formatNumber(grandTotal)}</td>
+              <td className="sticky left-0 z-10 bg-emerald-50 px-2 py-2 dark:bg-emerald-950/20 sm:px-3">ИТОГО{filterLabel}</td>
+              <td className="bg-emerald-50 px-2 py-2 text-right font-bold dark:bg-emerald-950/20 sm:px-3">{formatNumber(grandTotal)}</td>
               {dates.map((d, i) => (
-                <td key={d} className="text-right px-3 py-2">{formatNumber(activeDateTotals[i] || 0)}</td>
+                <td key={d} className="px-2 py-2 text-right sm:px-3">{formatNumber(activeDateTotals[i] || 0)}</td>
               ))}
             </tr>
             {groupedProducts.map((group) => {
@@ -674,12 +768,12 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                 if (!productPivot || total === 0) return null
                 return (
                   <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
-                    <td className="px-3 py-2 sticky left-0 bg-background z-10">{p.name}</td>
-                    <td className="text-right px-3 py-2 font-medium">{formatNumber(total)}</td>
+                    <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">{p.name}</td>
+                    <td className="px-2 py-2 text-right font-medium sm:px-3">{formatNumber(total)}</td>
                     {dates.map((d, i) => {
                       const val = productPivot[i]
                       return (
-                        <td key={d} className={`text-right px-3 py-2 ${val ? '' : 'text-muted-foreground'}`}>
+                        <td key={d} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
                           {val || '—'}
                         </td>
                       )
@@ -695,7 +789,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                     className="border-b hover:bg-muted/30 transition-colors cursor-pointer select-none"
                     onClick={() => toggleGroup(group.baseName)}
                   >
-                    <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">
+                    <td className="sticky left-0 z-10 bg-background px-2 py-2 font-medium sm:px-3">
                       <div className="flex items-center gap-1.5">
                         <span className={`text-muted-foreground transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
                           ▶
@@ -704,9 +798,9 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                         <span className="text-xs text-muted-foreground">({group.children.length})</span>
                       </div>
                     </td>
-                    <td className="text-right px-3 py-2 font-semibold">{formatNumber(group.total)}</td>
+                    <td className="px-2 py-2 text-right font-semibold sm:px-3">{formatNumber(group.total)}</td>
                     {dates.map((d, i) => (
-                      <td key={d} className="text-right px-3 py-2 font-medium">
+                      <td key={d} className="px-2 py-2 text-right font-medium sm:px-3">
                         {groupDateTotals[i] || '—'}
                       </td>
                     ))}
@@ -722,14 +816,14 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                       const sizePart = p.name.replace(new RegExp('^' + group.baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').trim() || '(без размера)'
                       return (
                         <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors bg-muted/10">
-                          <td className="px-3 py-2 sticky left-0 bg-muted/10 z-10 pl-8">
+                          <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
                             <span className="text-muted-foreground">{sizePart}</span>
                           </td>
-                          <td className="text-right px-3 py-2">{formatNumber(total)}</td>
+                          <td className="px-2 py-2 text-right sm:px-3">{formatNumber(total)}</td>
                           {dates.map((d, i) => {
                             const val = productPivot[i]
                             return (
-                              <td key={d} className={`text-right px-3 py-2 ${val ? '' : 'text-muted-foreground'}`}>
+                              <td key={d} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
                                 {val || '—'}
                               </td>
                             )
@@ -752,7 +846,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [fetchedData, setFetchedData] = useState<DailyOrdersData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [fulfillmentFilter, setFulfillmentFilter] = useState<'all' | 'fbs' | 'fbo'>('all')
   // Default to yesterday in Moscow timezone (последний день = yesterday, not today)
@@ -773,7 +867,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
     setRateLimitErrors([])
     try {
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectedEnt)
+      params.set('entrepreneurId', selectionToParam(selectedEnt))
       params.set('section', 'daily')
       const df = overrideFrom ?? (dateMode === 'single' ? singleDate : dateFrom)
       const dt = overrideTo ?? (dateMode === 'single' ? singleDate : dateTo)
@@ -797,31 +891,26 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
       {/* Rate limit errors */}
       <RateLimitAlert errors={rateLimitErrors} />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedEnt} onValueChange={setSelectedEnt}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Все ИП" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все ИП (сводный)</SelectItem>
-            {entrepreneurs.map((e) => (
-              <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={entrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={setSelectedEnt}
+          className="w-full sm:w-64"
+        />
 
-        <ToggleGroup type="single" value={dateMode} onValueChange={(v) => { if (v) setDateMode(v as 'single' | 'range') }} className="border rounded-md">
+        <ToggleGroup type="single" value={dateMode} onValueChange={(v) => { if (v) setDateMode(v as 'single' | 'range') }} className="justify-start rounded-md border">
           <ToggleGroupItem value="single" className="text-xs px-3">Один день</ToggleGroupItem>
           <ToggleGroupItem value="range" className="text-xs px-3">Диапазон</ToggleGroupItem>
         </ToggleGroup>
 
         {dateMode === 'single' ? (
-          <Input type="date" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+          <Input type="date" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
         ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
             <span className="text-sm text-muted-foreground">—</span>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
             {/* Quick period buttons — auto-fetch on click */}
             <ToggleGroup type="single" onValueChange={(v) => {
               if (!v) return
@@ -833,7 +922,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
               setDateFrom(from)
               setDateTo(yesterday)
               fetchDailyData(from, yesterday)
-            }} className="border rounded-md">
+            }} className="justify-start overflow-x-auto rounded-md border">
               <ToggleGroupItem value="week" className="text-xs px-2">Неделя</ToggleGroupItem>
               <ToggleGroupItem value="twoWeeks" className="text-xs px-2">2 недели</ToggleGroupItem>
               <ToggleGroupItem value="month" className="text-xs px-2">Месяц</ToggleGroupItem>
@@ -841,7 +930,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
           </div>
         )}
 
-        <Button onClick={() => fetchDailyData()} disabled={loading} className="gap-2">
+        <Button onClick={() => fetchDailyData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -856,7 +945,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
         </Button>
 
         {fetchedData && (
-          <ToggleGroup type="single" value={fulfillmentFilter} onValueChange={(v) => { if (v) setFulfillmentFilter(v as 'all' | 'fbs' | 'fbo') }} className="border rounded-md">
+          <ToggleGroup type="single" value={fulfillmentFilter} onValueChange={(v) => { if (v) setFulfillmentFilter(v as 'all' | 'fbs' | 'fbo') }} className="justify-start rounded-md border">
             <ToggleGroupItem value="all" className="text-xs px-3">Все</ToggleGroupItem>
             <ToggleGroupItem value="fbs" className="text-xs px-3 text-amber-700 dark:text-amber-400">FBS</ToggleGroupItem>
             <ToggleGroupItem value="fbo" className="text-xs px-3 text-sky-700 dark:text-sky-400">FBO</ToggleGroupItem>
@@ -870,7 +959,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
         <div className="space-y-4">
           {/* FBS/FBO summary cards */}
           {fetchedData.dates.length > 0 && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Card>
                 <CardContent className="pt-4 pb-4">
                   <div className="text-xs text-muted-foreground mb-1">Всего заказов</div>
@@ -908,7 +997,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [fetchedData, setFetchedData] = useState<MonthlyData | null>(null)
   const [loading, setLoading] = useState(false)
   const [view, setView] = useState<'entrepreneurs' | 'products'>('entrepreneurs')
-  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
 
   // Use fetchedData
@@ -927,7 +1016,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     setRateLimitErrors([])
     try {
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectedEnt)
+      params.set('entrepreneurId', selectionToParam(selectedEnt))
       params.set('section', 'monthly')
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
@@ -947,21 +1036,16 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       {/* Rate limit errors */}
       <RateLimitAlert errors={rateLimitErrors} />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedEnt} onValueChange={setSelectedEnt}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Все ИП" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все ИП (сводный)</SelectItem>
-            {entrepreneurs.map((e) => (
-              <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={entrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={setSelectedEnt}
+          className="w-full sm:w-64"
+        />
 
         <Select value={view} onValueChange={(v) => setView(v as 'entrepreneurs' | 'products')}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-full sm:w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -970,7 +1054,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
           </SelectContent>
         </Select>
 
-        <Button onClick={fetchData} disabled={loading} className="gap-2">
+        <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -1003,9 +1087,9 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-80">
+              <div className="h-[300px] sm:h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthsChartData(data, view)} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                  <BarChart data={monthsChartData(data, view)} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                     <XAxis dataKey="month" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 12 }} />
@@ -1103,13 +1187,13 @@ function monthsChartData(data: MonthlyData, view: 'entrepreneurs' | 'products') 
 function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [fetchedData, setFetchedData] = useState<ProductionLoadData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
   const [initialLoadDone, setInitialLoadDone] = useState(false)
 
   // Always fetch 31 days of data — viewMode only affects display, not API calls
-  const fetchData = useCallback(async (entId?: string) => {
+  const fetchData = useCallback(async (entIds?: string[]) => {
     setLoading(true)
     setRateLimitErrors([])
     try {
@@ -1119,7 +1203,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
       const from = new Date(nowMsk.getTime() - 31 * 86400000).toISOString().split('T')[0]
 
       const params = new URLSearchParams()
-      params.set('entrepreneurId', entId || selectedEnt)
+      params.set('entrepreneurId', selectionToParam(entIds || selectedEnt))
       params.set('section', 'production')
       params.set('dateFrom', from)
       params.set('dateTo', yesterday)
@@ -1138,7 +1222,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
   useEffect(() => {
     if (!initialLoadDone) {
       setInitialLoadDone(true)
-      fetchData('all')
+      fetchData([ALL_ENTREPRENEURS])
     }
   }, [initialLoadDone, fetchData])
 
@@ -1209,20 +1293,15 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
       <RateLimitAlert errors={rateLimitErrors} />
 
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedEnt} onValueChange={(v) => { setSelectedEnt(v); fetchData(v) }}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Все ИП" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все ИП (сводный)</SelectItem>
-            {entrepreneurs.map((e) => (
-              <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={entrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={(ids) => { setSelectedEnt(ids); fetchData(ids) }}
+          className="w-full sm:w-64"
+        />
 
-        <Button onClick={() => fetchData()} disabled={loading} className="gap-2">
+        <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -1484,7 +1563,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
 function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [fetchedData, setFetchedData] = useState<SupplyData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedEnt, setSelectedEnt] = useState<string>('all')
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [supplyDays, setSupplyDays] = useState<number>(14)
   const [coefficient, setCoefficient] = useState<number>(1)
@@ -1511,7 +1590,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     setPage(0)
     try {
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectedEnt)
+      params.set('entrepreneurId', selectionToParam(selectedEnt))
       params.set('section', 'supply')
       params.set('dateFrom', dateFrom)
       params.set('dateTo', dateTo)
@@ -1559,32 +1638,27 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       <RateLimitAlert errors={rateLimitErrors} />
 
       {/* Controls row 1: ИП + Date range */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="w-full sm:w-auto">
           <Label className="text-xs text-muted-foreground mb-1">ИП</Label>
-          <Select value={selectedEnt} onValueChange={setSelectedEnt}>
-            <SelectTrigger className="w-56">
-              <SelectValue placeholder="Все ИП" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все ИП (сводный)</SelectItem>
-              {entrepreneurs.map((e) => (
-                <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <MultiEntrepreneurSelect
+            entrepreneurs={entrepreneurs}
+            selectedIds={selectedEnt}
+            onChange={setSelectedEnt}
+            className="w-full sm:w-64"
+          />
         </div>
 
-        <div>
+        <div className="w-full sm:w-auto">
           <Label className="text-xs text-muted-foreground mb-1">Период анализа (от)</Label>
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" />
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40" />
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <Label className="text-xs text-muted-foreground mb-1">Период анализа (до)</Label>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" />
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40" />
         </div>
 
-        <Button onClick={fetchData} disabled={loading} className="gap-2">
+        <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -1600,17 +1674,17 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       </div>
 
       {/* Controls row 2: Supply period + Coefficient */}
-      <div className="flex flex-wrap items-center gap-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:gap-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-sm font-medium text-muted-foreground">Загрузить склад на:</span>
-          <ToggleGroup type="single" value={String(supplyDays)} onValueChange={(v) => { if (v) setSupplyDays(Number(v)) }} className="border rounded-md">
+          <ToggleGroup type="single" value={String(supplyDays)} onValueChange={(v) => { if (v) setSupplyDays(Number(v)) }} className="justify-start overflow-x-auto rounded-md border">
             {supplyPeriods.map((p) => (
               <ToggleGroupItem key={p.value} value={String(p.value)} className="text-xs px-3">{p.label}</ToggleGroupItem>
             ))}
           </ToggleGroup>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <span className="text-sm font-medium text-muted-foreground">Коэффициент:</span>
           <div className="flex items-center gap-2">
             <input
@@ -1620,7 +1694,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
               step={0.05}
               value={coefficient}
               onChange={(e) => setCoefficient(Number(e.target.value))}
-              className="w-32 h-2 accent-amber-500 cursor-pointer"
+              className="h-2 w-full min-w-40 accent-amber-500 cursor-pointer sm:w-32"
             />
             <span className="text-sm font-bold text-amber-700 dark:text-amber-400 min-w-[40px] text-center">{coefficient.toFixed(2)}</span>
           </div>
@@ -1639,7 +1713,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       {!loading && fetchedData && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             <Card>
               <CardContent className="pt-4 pb-4">
                 <div className="text-xs text-muted-foreground mb-1">Артикулов</div>
@@ -1899,59 +1973,132 @@ function AdSpendTab() {
 }
 
 // --- WB Compare Tab ---
+function combineCompareData(items: CompareData[], entrepreneurs: EntrepreneurInfo[], selectedIds: string[]): CompareData | null {
+  if (items.length === 0) return null
+  if (items.length === 1) return items[0]
+
+  const productMap = new Map<string, CompareData['productSummary'][number]>()
+  for (const item of items) {
+    for (const product of item.productSummary) {
+      const key = `${product.productName}__${product.excelSize}`
+      const existing = productMap.get(key)
+      if (!existing) {
+        productMap.set(key, { ...product, wbBySize: { ...product.wbBySize } })
+        continue
+      }
+      const wbBySize = { ...existing.wbBySize }
+      for (const [size, count] of Object.entries(product.wbBySize)) {
+        wbBySize[size] = (wbBySize[size] || 0) + count
+      }
+      const excelTotal = existing.excelTotal + product.excelTotal
+      const wbTotal = existing.wbTotal + product.wbTotal
+      const diff = wbTotal - excelTotal
+      productMap.set(key, {
+        ...existing,
+        excelTotal,
+        wbTotal,
+        diff,
+        diffPercent: excelTotal > 0 ? ((diff / excelTotal) * 100).toFixed(1) : '—',
+        isMatched: existing.isMatched || product.isMatched,
+        wbArticleCount: existing.wbArticleCount + product.wbArticleCount,
+        wbBySize,
+        wbSubject: [...new Set([existing.wbSubject, product.wbSubject].filter(Boolean).flatMap((v) => v.split(', ').filter(Boolean)))].join(', '),
+        wbCategory: [...new Set([existing.wbCategory, product.wbCategory].filter(Boolean).flatMap((v) => v.split(', ').filter(Boolean)))].join(', '),
+        matchMethod: [...new Set([existing.matchMethod, product.matchMethod].filter(Boolean).flatMap((v) => v.split(', ').filter(Boolean)))].join(', '),
+      })
+    }
+  }
+
+  const unmatchedMap = new Map<string, CompareData['unmatchedBySubject'][number]>()
+  for (const item of items) {
+    for (const group of item.unmatchedBySubject) {
+      const existing = unmatchedMap.get(group.subject)
+      unmatchedMap.set(group.subject, existing ? {
+        subject: group.subject,
+        articleCount: existing.articleCount + group.articleCount,
+        totalOrders: existing.totalOrders + group.totalOrders,
+        examples: [...new Set([...existing.examples, ...group.examples])].slice(0, 5),
+      } : { ...group })
+    }
+  }
+
+  const names = selectedIds
+    .map((id) => entrepreneurs.find((e) => String(e.id) === id)?.name)
+    .filter(Boolean)
+    .join(', ')
+
+  return {
+    ...items[0],
+    entrepreneur: { id: 0, name: names || `Выбрано ИП: ${items.length}` },
+    wbError: items.map((item) => item.wbError).filter(Boolean).join('; ') || null,
+    totals: {
+      excelTotal: items.reduce((s, item) => s + item.totals.excelTotal, 0),
+      wbTotal: items.reduce((s, item) => s + item.totals.wbTotal, 0),
+      matchedExcelTotal: items.reduce((s, item) => s + item.totals.matchedExcelTotal, 0),
+      matchedWbTotal: items.reduce((s, item) => s + item.totals.matchedWbTotal, 0),
+      totalDiff: items.reduce((s, item) => s + item.totals.totalDiff, 0),
+      matchedDiff: items.reduce((s, item) => s + item.totals.matchedDiff, 0),
+    },
+    productSummary: [...productMap.values()].sort((a, b) => {
+      if (a.isMatched && !b.isMatched) return -1
+      if (!a.isMatched && b.isMatched) return 1
+      return Math.abs(b.diff) - Math.abs(a.diff)
+    }),
+    unmatchedBySubject: [...unmatchedMap.values()].sort((a, b) => b.totalOrders - a.totalOrders),
+  }
+}
+
 function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [data, setData] = useState<CompareData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selectedEnt, setSelectedEnt] = useState<string>('5') // Масляков А.А. by default
+  const [selectedEnt, setSelectedEnt] = useState<string[]>(['5']) // Масляков А.А. by default
   const [dateFrom, setDateFrom] = useState<string>('2026-04-01')
   const [dateTo, setDateTo] = useState<string>('2026-04-29')
   const apiEntrepreneurs = entrepreneurs.filter((e) => e.hasApiKey)
 
   const fetchData = useCallback(async () => {
-    if (!selectedEnt) return
+    const ids = selectedEnt.includes(ALL_ENTREPRENEURS)
+      ? apiEntrepreneurs.map((e) => String(e.id))
+      : selectedEnt
+    if (ids.length === 0) return
     setLoading(true)
     try {
-      const params = new URLSearchParams({
-        entrepreneurId: selectedEnt,
-        ...(dateFrom ? { dateFrom } : {}),
-        ...(dateTo ? { dateTo } : {}),
-      })
-      const res = await fetch(`/api/wb-compare?${params.toString()}`)
-      const json = await res.json()
-      setData(json)
+      const results = await Promise.all(ids.map(async (id) => {
+        const params = new URLSearchParams({
+          entrepreneurId: id,
+          ...(dateFrom ? { dateFrom } : {}),
+          ...(dateTo ? { dateTo } : {}),
+        })
+        const res = await fetch(`/api/wb-compare?${params.toString()}`)
+        return await res.json()
+      }))
+      setData(combineCompareData(results.filter((item) => !item.error), entrepreneurs, ids))
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateFrom, dateTo])
+  }, [selectedEnt, apiEntrepreneurs, dateFrom, dateTo, entrepreneurs])
 
-  const selectedEntrepreneur = entrepreneurs.find((e) => String(e.id) === selectedEnt)
+  const selectedEntrepreneurLabel = selectionLabel(selectedEnt, apiEntrepreneurs)
 
   return (
     <div className="space-y-4">
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedEnt} onValueChange={setSelectedEnt}>
-          <SelectTrigger className="w-64">
-            <SelectValue placeholder="Выберите ИП" />
-          </SelectTrigger>
-          <SelectContent>
-            {apiEntrepreneurs.length > 0 ? (
-              apiEntrepreneurs.map((e) => (
-                <SelectItem key={e.id} value={String(e.id)}>{e.name} 🔑</SelectItem>
-              ))
-            ) : (
-              <SelectItem value="none" disabled>Нет ИП с API ключом</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={apiEntrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={setSelectedEnt}
+          className="w-full sm:w-72"
+          placeholder="Выберите ИП с API"
+        />
 
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
         <span className="text-sm text-muted-foreground">—</span>
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" min="2026-01-01" max="2026-12-31" />
+        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
 
-        <Button onClick={fetchData} disabled={loading || !selectedEnt || selectedEnt === 'none'}>
+        <Button onClick={fetchData} disabled={loading || selectedEnt.length === 0 || apiEntrepreneurs.length === 0} className="w-full sm:w-auto">
           {loading ? 'Загрузка...' : 'Сравнить'}
         </Button>
       </div>
@@ -2051,7 +2198,7 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">
-                  Сравнение по товарам: {selectedEntrepreneur?.name} — Excel vs WB API
+                  Сравнение по товарам: {selectedEntrepreneurLabel} — Excel vs WB API
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -2446,7 +2593,7 @@ export default function Home() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [entrepreneurs, setEntrepreneurs] = useState<EntrepreneurInfo[]>([])
   const [activeTab, setActiveTab] = useState('dashboard')
-  const [selectedDashEnt, setSelectedDashEnt] = useState<string>('') // Empty = no auto-fetch
+  const [selectedDashEnt, setSelectedDashEnt] = useState<string[]>([]) // Empty = no auto-fetch
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
@@ -2462,12 +2609,12 @@ export default function Home() {
 
   // Explicit dashboard data load — only triggered by user clicking "Загрузить"
   const loadDashboardData = useCallback(async () => {
-    if (!selectedDashEnt) return
+    if (selectedDashEnt.length === 0) return
     setDashboardLoading(true)
     setRateLimitErrors([])
     try {
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectedDashEnt)
+      params.set('entrepreneurId', selectionToParam(selectedDashEnt))
       params.set('section', 'dashboard')
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
@@ -2485,61 +2632,64 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-3 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center">
               <Package className="h-4 w-4 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold leading-tight">WB Отчёты</h1>
-              <p className="text-xs text-muted-foreground">Ежедневная аналитика заказов • 2026</p>
+              <h1 className="text-base font-bold leading-tight sm:text-lg">WB Отчёты</h1>
+              <p className="hidden text-xs text-muted-foreground sm:block">Ежедневная аналитика заказов • 2026</p>
             </div>
           </div>
           {dashboard?.latestDate && (
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="outline" className="shrink-0 text-[10px] sm:text-xs">
               Данные по: {formatDateFull(dashboard.latestDate)}
             </Badge>
           )}
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1800px] mx-auto w-full px-4 sm:px-6 py-6 pb-24">
+      <main className="mx-auto w-full max-w-[1800px] flex-1 px-3 py-4 pb-20 sm:px-6 sm:py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 flex-wrap h-auto gap-1">
-            <TabsTrigger value="dashboard" className="gap-2">
+          <ScrollArea className="mb-5 w-full whitespace-nowrap">
+          <TabsList className="h-auto w-max gap-1 p-1">
+            <TabsTrigger value="dashboard" className="h-9 gap-2 px-3">
               <LayoutDashboard className="h-4 w-4" />
               <span className="hidden sm:inline">Сводка</span>
             </TabsTrigger>
-            <TabsTrigger value="daily" className="gap-2">
+            <TabsTrigger value="daily" className="h-9 gap-2 px-3">
               <Table2 className="h-4 w-4" />
               <span className="hidden sm:inline">Ежедневные</span>
             </TabsTrigger>
-            <TabsTrigger value="production" className="gap-2">
+            <TabsTrigger value="production" className="h-9 gap-2 px-3">
               <Thermometer className="h-4 w-4" />
               <span className="hidden sm:inline">Нагрузка</span>
             </TabsTrigger>
-            <TabsTrigger value="supply" className="gap-2">
+            <TabsTrigger value="supply" className="h-9 gap-2 px-3">
               <Truck className="h-4 w-4" />
               <span className="hidden sm:inline">Поставки</span>
             </TabsTrigger>
-            <TabsTrigger value="monthly" className="gap-2">
+            <TabsTrigger value="monthly" className="h-9 gap-2 px-3">
               <Calendar className="h-4 w-4" />
               <span className="hidden sm:inline">По месяцам</span>
             </TabsTrigger>
-            <TabsTrigger value="ads" className="gap-2">
+            <TabsTrigger value="ads" className="h-9 gap-2 px-3">
               <Megaphone className="h-4 w-4" />
               <span className="hidden sm:inline">Реклама</span>
             </TabsTrigger>
-            <TabsTrigger value="compare" className="gap-2">
+            <TabsTrigger value="compare" className="h-9 gap-2 px-3">
               <GitCompare className="h-4 w-4" />
               <span className="hidden sm:inline">API vs Excel</span>
             </TabsTrigger>
-            <TabsTrigger value="apikeys" className="gap-2">
+            <TabsTrigger value="apikeys" className="h-9 gap-2 px-3">
               <Key className="h-4 w-4" />
               <span className="hidden sm:inline">API Ключи</span>
             </TabsTrigger>
           </TabsList>
+          <ScrollBar orientation="horizontal" />
+          </ScrollArea>
 
           <TabsContent value="dashboard">
             <DashboardTab

@@ -98,6 +98,14 @@ export async function GET(request: NextRequest) {
 
     if (entrepreneurId === 'all') {
       targets = entResult
+    } else if (entrepreneurId.includes(',')) {
+      const entIds = new Set(
+        entrepreneurId
+          .split(',')
+          .map((id) => Number(id.trim()))
+          .filter((id) => Number.isFinite(id))
+      )
+      targets = entResult.filter(e => entIds.has(e.id))
     } else {
       const entId = Number(entrepreneurId)
       targets = entResult.filter(e => e.id === entId)
