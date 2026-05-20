@@ -52,6 +52,43 @@ const CACHE_TTL_DAILY = 2 * 60 * 1000       // 2 min
 const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 
+function isSortCenterWarehouse(warehouseName: string): boolean {
+  return /\bсц\b/i.test(warehouseName)
+}
+
+function distributeSupplyQty<T extends { recommendedQtyRaw: number }>(
+  rows: T[],
+  supplyQty: number
+): Array<T & { recommendedQty: number }> {
+  if (supplyQty <= 0 || rows.length === 0) return []
+
+  const totalRaw = rows.reduce((sum, row) => sum + row.recommendedQtyRaw, 0)
+  if (totalRaw <= 0) return []
+
+  const distributed = rows.map((row) => {
+    const exact = (row.recommendedQtyRaw / totalRaw) * supplyQty
+    const floor = Math.floor(exact)
+    return { ...row, recommendedQty: floor, remainder: exact - floor }
+  })
+
+  let remaining = supplyQty - distributed.reduce((sum, row) => sum + row.recommendedQty, 0)
+  distributed
+    .sort((a, b) => b.remainder - a.remainder)
+    .forEach((row) => {
+      if (remaining <= 0) return
+      row.recommendedQty += 1
+      remaining -= 1
+    })
+
+  return distributed
+    .filter((row) => row.recommendedQty > 0)
+    .sort((a, b) => b.recommendedQty - a.recommendedQty)
+    .map((row) => {
+      const { remainder: _remainder, ...cleanRow } = row
+      return cleanRow as T & { recommendedQty: number }
+    })
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl
@@ -779,23 +816,23 @@ export async function GET(request: NextRequest) {
           const currentFboStock = fboStock[stat.article] || 0
           const supplyQty = Math.max(0, rawSupply - currentFboStock)
           const daysUntilOos = avgDaily > 0 ? Math.round((currentFboStock / avgDaily) * 10) / 10 : null
-          const warehouseRows = Object.entries(stat.warehouses)
+          const warehouseDemandRows = Object.entries(stat.warehouses)
+            .filter(([warehouse]) => !isSortCenterWarehouse(warehouse))
             .map(([warehouse, orders]) => {
               const warehouseAvgDaily = orders / daysInRange
               const stock = fboStockByWarehouse[stat.article]?.[warehouse] || 0
               const targetStock = Math.ceil(warehouseAvgDaily * supplyDays * coefficient)
-              const recommendedQty = Math.max(0, targetStock - stock)
               return {
                 warehouse,
                 orders,
                 avgDaily: Math.round(warehouseAvgDaily * 100) / 100,
                 stock,
-                recommendedQty,
+                recommendedQtyRaw: Math.max(0, targetStock - stock),
                 daysUntilOos: warehouseAvgDaily > 0 ? Math.round((stock / warehouseAvgDaily) * 10) / 10 : null,
               }
             })
-            .filter(row => row.recommendedQty > 0)
-            .sort((a, b) => b.recommendedQty - a.recommendedQty)
+            .filter(row => row.recommendedQtyRaw > 0)
+          const warehouseRows = distributeSupplyQty(warehouseDemandRows, supplyQty)
           return {
             article: stat.article,
             subject: stat.subject,
