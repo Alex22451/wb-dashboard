@@ -491,6 +491,12 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
     })
   })() : []
 
+  const displayProductName = (row: { name: string; article: string }) => {
+    const name = row.name.trim()
+    const article = row.article.trim()
+    return article && name === article ? article : name
+  }
+
   return (
     <div className="space-y-6">
       {/* Rate limit errors */}
@@ -782,16 +788,35 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <div>
+                      <div className="min-w-0">
                         <div className="mb-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">Какие товары дали рост</div>
-                        <div className="overflow-x-auto rounded-md border">
+                        <div className="space-y-2 sm:hidden">
+                          {(currentDynamics?.growth || []).slice(0, 10).map((row) => (
+                            <div key={row.name} className="rounded-md border p-3">
+                              <div className="break-words text-sm font-medium leading-snug">{displayProductName(row)}</div>
+                              {row.article && row.name.trim() !== row.article.trim() && (
+                                <div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{row.article}</div>
+                              )}
+                              <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</span>
+                                <span className="text-xs text-muted-foreground">{row.diffPercent === null ? 'новый' : `+${row.diffPercent}%`}</span>
+                              </div>
+                            </div>
+                          ))}
+                          {(!currentDynamics || currentDynamics.growth.length === 0) && (
+                            <div className="rounded-md border p-4 text-center text-sm text-muted-foreground">Нет товаров с ростом</div>
+                          )}
+                        </div>
+                        <div className="hidden overflow-x-auto rounded-md border sm:block">
                           <table className="w-full text-xs sm:text-sm">
                             <tbody>
                               {(currentDynamics?.growth || []).slice(0, 10).map((row) => (
                                 <tr key={row.name} className="border-b last:border-b-0">
                                   <td className="px-3 py-2">
-                                    <div className="font-medium">{row.name}</div>
-                                    {row.article && <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>}
+                                    <div className="font-medium">{displayProductName(row)}</div>
+                                    {row.article && row.name.trim() !== row.article.trim() && (
+                                      <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>
+                                    )}
                                   </td>
                                   <td className="px-3 py-2 text-right font-medium text-emerald-700 dark:text-emerald-400">+{formatNumber(row.diff)}</td>
                                   <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? 'новый' : `+${row.diffPercent}%`}</td>
@@ -804,16 +829,35 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                           </table>
                         </div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="mb-2 text-sm font-medium text-red-700 dark:text-red-400">Антирейтинг / просадка</div>
-                        <div className="overflow-x-auto rounded-md border">
+                        <div className="space-y-2 sm:hidden">
+                          {(currentDynamics?.decline || []).slice(0, 10).map((row) => (
+                            <div key={row.name} className="rounded-md border p-3">
+                              <div className="break-words text-sm font-medium leading-snug">{displayProductName(row)}</div>
+                              {row.article && row.name.trim() !== row.article.trim() && (
+                                <div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{row.article}</div>
+                              )}
+                              <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                                <span className="font-semibold text-red-700 dark:text-red-400">{formatNumber(row.diff)}</span>
+                                <span className="text-xs text-muted-foreground">{row.diffPercent === null ? '—' : `${row.diffPercent}%`}</span>
+                              </div>
+                            </div>
+                          ))}
+                          {(!currentDynamics || currentDynamics.decline.length === 0) && (
+                            <div className="rounded-md border p-4 text-center text-sm text-muted-foreground">Нет товаров с просадкой</div>
+                          )}
+                        </div>
+                        <div className="hidden overflow-x-auto rounded-md border sm:block">
                           <table className="w-full text-xs sm:text-sm">
                             <tbody>
                               {(currentDynamics?.decline || []).slice(0, 10).map((row) => (
                                 <tr key={row.name} className="border-b last:border-b-0">
                                   <td className="px-3 py-2">
-                                    <div className="font-medium">{row.name}</div>
-                                    {row.article && <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>}
+                                    <div className="font-medium">{displayProductName(row)}</div>
+                                    {row.article && row.name.trim() !== row.article.trim() && (
+                                      <div className="font-mono text-[10px] text-muted-foreground">{row.article}</div>
+                                    )}
                                   </td>
                                   <td className="px-3 py-2 text-right font-medium text-red-700 dark:text-red-400">{formatNumber(row.diff)}</td>
                                   <td className="px-3 py-2 text-right text-muted-foreground">{row.diffPercent === null ? '—' : `${row.diffPercent}%`}</td>
