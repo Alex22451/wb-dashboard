@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cache/warm-wb",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
