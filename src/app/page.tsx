@@ -1901,6 +1901,14 @@ function AdSpendTab() {
 
   const { grouped } = data
   const entries = Object.values(grouped)
+  const now = new Date()
+  const reportYear = data.year || 2026
+  const currentMonth = reportYear === now.getFullYear() ? now.getMonth() + 1 : 12
+  const currentMonthLabel = MONTH_SHORT[currentMonth - 1]
+  const currentMonthCampaignRows = entries.map((entry) => ({
+    entrepreneur: entry.entrepreneur,
+    campaigns: entry.months.find((month) => month.month === currentMonth)?.topCampaigns || [],
+  }))
   const chartData = Array.from({ length: 12 }, (_, i) => {
     const entry: Record<string, any> = { month: MONTH_SHORT[i] }
     entries.forEach((e) => { const monthData = e.months.find((m) => m.month === i + 1); entry[e.entrepreneur] = monthData?.actual || 0 })
@@ -1988,7 +1996,7 @@ function AdSpendTab() {
       {entries.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Топ-3 кампании по затратам за месяц</CardTitle>
+            <CardTitle className="text-base">Топ-5 кампаний по затратам за текущий месяц ({currentMonthLabel})</CardTitle>
           </CardHeader>
           <CardContent>
             <ScrollArea className="w-full">
@@ -1996,24 +2004,33 @@ function AdSpendTab() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="sticky left-0 z-10 min-w-[150px] bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
-                    <th className="min-w-[90px] px-3 py-2 text-left font-medium">Месяц</th>
+                    <th className="min-w-[60px] px-3 py-2 text-right font-medium">#</th>
                     <th className="min-w-[260px] px-3 py-2 text-left font-medium">Кампания</th>
                     <th className="min-w-[90px] px-3 py-2 text-right font-medium">ID</th>
                     <th className="min-w-[120px] px-3 py-2 text-right font-medium">Затраты</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.flatMap((entry) => entry.months.flatMap((month) =>
-                    (month.topCampaigns || []).map((campaign, index) => (
-                      <tr key={`${entry.entrepreneur}-${month.month}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
+                  {currentMonthCampaignRows.flatMap((entry) => {
+                    if (entry.campaigns.length === 0) {
+                      return [
+                        <tr key={`${entry.entrepreneur}-empty`} className="border-b">
+                          <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{entry.entrepreneur}</td>
+                          <td colSpan={4} className="px-3 py-2 text-muted-foreground">Нет затрат за текущий месяц</td>
+                        </tr>,
+                      ]
+                    }
+
+                    return entry.campaigns.map((campaign, index) => (
+                      <tr key={`${entry.entrepreneur}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
                         <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{entry.entrepreneur}</td>
-                        <td className="px-3 py-2">{MONTH_SHORT[month.month - 1]}</td>
+                        <td className="px-3 py-2 text-right text-muted-foreground">{index + 1}</td>
                         <td className="px-3 py-2">{campaign.name}</td>
-                        <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '-'}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
                       </tr>
                     ))
-                  ))}
+                  })}
                 </tbody>
               </table>
               <ScrollBar orientation="horizontal" />

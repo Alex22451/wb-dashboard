@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
           }
 
           const campaigns = [...campaignTotals.values()].sort((a, b) => b.spend - a.spend)
-          const topCampaigns = campaigns.slice(0, 3)
+          const topCampaigns = campaigns.slice(0, 5)
           const actual = campaigns.reduce((sum, campaign) => sum + campaign.spend, 0)
 
           monthRows.push({ month, actual, topCampaigns })
