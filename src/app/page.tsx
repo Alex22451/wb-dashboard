@@ -159,11 +159,12 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]) {
+function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
     ? entrepreneurs.filter((ent) => ent.hasApiKey).map((ent) => String(ent.id))
     : selection.split(',').map((id) => id.trim()).filter(Boolean)
   const byId = new Map(entrepreneurs.map((ent) => [String(ent.id), ent]))
+  const userScope = user ? `${user.role}:${user.id}` : 'anonymous'
   return selectedIds
     .sort((a, b) => Number(a) - Number(b))
     .map((id) => {
@@ -171,10 +172,11 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
       return `${id}:${ent?.name || ''}:${ent?.wbApiKey || ''}`
     })
     .join('|')
+    .concat(`::${userScope}`)
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v2:${scope}:${date}`
+  return `wb-daily-cache-v3:${scope}:${date}`
 }
 
 function endOfMonthIso(date: string) {
@@ -1440,7 +1442,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 }
 
 // --- Daily Orders Tab ---
-function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurInfo[]; user: AuthUser | null }) {
   const [fetchedData, setFetchedData] = useState<DailyOrdersData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -1565,7 +1567,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
       const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user)
 
       for (let i = 0; i < dates.length; i++) {
         const date = dates[i]
@@ -1599,7 +1601,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, mergeDailyResponses])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
 
@@ -4113,7 +4115,7 @@ export default function Home() {
       if (json.dashboard) {
         const baseDashboard = json.dashboard as DashboardData
         const selection = selectionToParam(selectedDashEnt)
-        const cacheScope = getDailyCacheScope(selection, entrepreneurs)
+        const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser)
         const dailyByDate = new Map<string, DailyOrdersData>()
         const periodKeys: Array<keyof DashboardData['periodStats']> = ['yesterday', 'week', 'twoWeeks', 'month']
         const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
@@ -4226,7 +4228,7 @@ export default function Home() {
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt, entrepreneurs])
+  }, [selectedDashEnt, entrepreneurs, authUser])
 
   if (!authChecked) {
     return (
@@ -4367,7 +4369,7 @@ export default function Home() {
           </TabsContent>
           {tabEnabled('daily') && (
             <TabsContent value="daily">
-              <DailyOrdersTab entrepreneurs={entrepreneurs} />
+              <DailyOrdersTab entrepreneurs={entrepreneurs} user={authUser} />
             </TabsContent>
           )}
           {tabEnabled('production') && (
