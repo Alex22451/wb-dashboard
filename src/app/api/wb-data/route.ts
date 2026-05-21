@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v2:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v3:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -388,7 +388,28 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
   const dates = getDateRange(from, to)
   if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
   if (dates.length === 1) return fetchFunnelProductOrders(apiKey, from, to)
-  return fetchFunnelHistoryOrders(apiKey, from, to)
+
+  const orders: any[] = []
+  const errors: string[] = []
+  const maxHistoryDays = 5
+
+  for (let i = 0; i < dates.length; i += maxHistoryDays) {
+    const chunk = dates.slice(i, i + maxHistoryDays)
+    const result = chunk.length === 1
+      ? await fetchFunnelProductOrders(apiKey, chunk[0], chunk[0])
+      : await fetchFunnelHistoryOrders(apiKey, chunk[0], chunk[chunk.length - 1])
+
+    if (result.orders.length > 0) orders.push(...result.orders)
+    if (result.error) errors.push(result.error)
+    if (i + maxHistoryDays < dates.length) {
+      await new Promise(resolve => setTimeout(resolve, 1200))
+    }
+  }
+
+  return {
+    orders,
+    error: errors.slice(0, 3).join('; ') || undefined,
+  }
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
