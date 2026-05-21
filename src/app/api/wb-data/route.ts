@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v5:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v6:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -419,13 +419,13 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
       ? await fetchFunnelProductOrders(apiKey, chunk[0], chunk[0])
       : await fetchFunnelHistoryOrders(apiKey, chunk[0], chunk[chunk.length - 1])
 
-    if (result.orders.length > 0) {
-      orders.push(...result.orders)
-    } else if (result.error && chunk.length > 1) {
+    if (result.error && chunk.length > 1) {
       const dailyFallback = await fetchFunnelProductOrdersByDate(apiKey, chunk)
       if (dailyFallback.orders.length > 0) orders.push(...dailyFallback.orders)
       if (dailyFallback.error) errors.push(dailyFallback.error)
       if (dailyFallback.orders.length === 0 && !dailyFallback.error) errors.push(result.error)
+    } else if (result.orders.length > 0) {
+      orders.push(...result.orders)
     } else if (result.error) {
       errors.push(result.error)
     }
