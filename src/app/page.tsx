@@ -1060,6 +1060,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [sortDateIdx, setSortDateIdx] = useState<number | null>(null)
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
 
   // Select the appropriate pivot and totals based on filter
   const activePivot = fulfillmentFilter === 'fbs' ? data.fbsPivot
@@ -1121,11 +1122,27 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
   })()
 
   const selectedProduct = selectedProductId !== null ? products.find((p) => p.id === selectedProductId) : null
+  const selectedGroup = selectedGroupName ? groupedProducts.find((group) => group.baseName === selectedGroupName) : null
+  const selectedChartTitle = selectedProduct?.name || selectedGroup?.baseName || ''
   const selectedChartData = selectedProduct ? dates.map((date, index) => ({
     date: formatDateShort(date),
     orders: activePivot[selectedProduct.id]?.[index] || 0,
     previous: previousPivot[selectedProduct.id]?.[index] || 0,
+  })) : selectedGroup ? dates.map((date, index) => ({
+    date: formatDateShort(date),
+    orders: selectedGroup.children.reduce((sum, product) => sum + (activePivot[product.id]?.[index] || 0), 0),
+    previous: selectedGroup.children.reduce((sum, product) => sum + (previousPivot[product.id]?.[index] || 0), 0),
   })) : []
+
+  const selectProductChart = (productId: number) => {
+    setSelectedProductId(productId)
+    setSelectedGroupName(null)
+  }
+
+  const selectGroupChart = (baseName: string) => {
+    setSelectedProductId(null)
+    setSelectedGroupName(baseName)
+  }
 
   const toggleGroup = (baseName: string) => {
     setExpandedGroups(prev => {
@@ -1151,10 +1168,10 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 
   return (
     <div className="space-y-3">
-      {selectedProduct && (
+      {selectedChartTitle && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Динамика: {selectedProduct.name}</CardTitle>
+            <CardTitle className="text-sm">Динамика: {selectedChartTitle}</CardTitle>
             <p className="text-xs text-muted-foreground">Текущий период vs предыдущий равный период</p>
           </CardHeader>
           <CardContent>
@@ -1182,7 +1199,12 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
           )
           if (group.total === 0) return null
           return (
-            <div key={group.baseName} className="rounded-lg border bg-card p-3">
+            <button
+              key={group.baseName}
+              type="button"
+              className="w-full rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/30"
+              onClick={() => selectGroupChart(group.baseName)}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="break-words text-sm font-medium">{group.baseName}</div>
@@ -1198,20 +1220,20 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                   </div>
                 ))}
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
 
       <div className="hidden overflow-hidden rounded-lg border bg-card sm:block">
-      <ScrollArea className="w-full max-h-[600px]">
+      <div className="max-h-[min(72vh,720px)] overflow-auto">
         <table className="min-w-full text-xs sm:text-sm">
           <thead>
             <tr className="bg-muted/50 border-b">
-              <th className="sticky left-0 z-10 min-w-[170px] bg-muted/50 px-2 py-2 text-left font-medium sm:min-w-[220px] sm:px-3">Продукт{filterLabel}</th>
-              <th className="min-w-[70px] bg-muted/50 px-2 py-2 text-right font-medium sm:px-3">Итого</th>
+              <th className="sticky left-0 top-0 z-20 min-w-[170px] bg-muted px-2 py-2 text-left font-medium sm:min-w-[220px] sm:px-3">Продукт{filterLabel}</th>
+              <th className="sticky top-0 z-10 min-w-[70px] bg-muted px-2 py-2 text-right font-medium sm:px-3">Итого</th>
               {dates.map((d, index) => (
-                <th key={d} className="min-w-[58px] whitespace-nowrap px-2 py-2 text-right font-medium sm:px-3" title={formatDateFull(d)}>
+                <th key={d} className="sticky top-0 z-10 min-w-[58px] whitespace-nowrap bg-muted px-2 py-2 text-right font-medium sm:px-3" title={formatDateFull(d)}>
                   <button type="button" className="underline-offset-2 hover:underline" onClick={() => setSortDateIdx(sortDateIdx === index ? null : index)}>
                     {formatDateShort(d)}{sortDateIdx === index ? ' ↓' : ''}
                   </button>
@@ -1245,7 +1267,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                 return (
                   <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
                     <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">
-                      <button type="button" className="text-left hover:underline" onClick={() => setSelectedProductId(p.id)}>{p.name}</button>
+                      <button type="button" className="text-left hover:underline" onClick={() => selectProductChart(p.id)}>{p.name}</button>
                     </td>
                     <td className="px-2 py-2 text-right font-medium sm:px-3">{formatNumber(total)}</td>
                     {dates.map((d, i) => {
@@ -1265,7 +1287,10 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                 <Fragment key={group.baseName}>
                   <tr
                     className="border-b hover:bg-muted/30 transition-colors cursor-pointer select-none"
-                    onClick={() => toggleGroup(group.baseName)}
+                    onClick={() => {
+                      selectGroupChart(group.baseName)
+                      toggleGroup(group.baseName)
+                    }}
                   >
                     <td className="sticky left-0 z-10 bg-background px-2 py-2 font-medium sm:px-3">
                       <div className="flex items-center gap-1.5">
@@ -1295,7 +1320,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                       return (
                         <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors bg-muted/10">
                           <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
-                            <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => setSelectedProductId(p.id)}>{sizePart}</button>
+                            <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => selectProductChart(p.id)}>{sizePart}</button>
                           </td>
                           <td className="px-2 py-2 text-right sm:px-3">{formatNumber(total)}</td>
                           {dates.map((d, i) => {
@@ -1314,8 +1339,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
             })}
           </tbody>
         </table>
-        <ScrollBar orientation="horizontal" />
-      </ScrollArea>
+      </div>
       </div>
     </div>
   )
