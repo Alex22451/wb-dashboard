@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v7:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v8:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -227,11 +227,11 @@ function saleReturnToOrder(record: any): any {
 }
 
 async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
-  const cacheKey = `funnel-products-raw-v2:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+  const cacheKey = `funnel-products-positive-v1:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
     const allProducts: any[] = []
     let offset = 0
-    const limit = 1000
+    const limit = 100
 
     while (offset < 250000) {
       const response = await fetch(FUNNEL_PRODUCTS_URL, {
@@ -267,10 +267,14 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
 
       const data = await response.json()
       const products = data?.data?.products || []
-      allProducts.push(...products)
+      const positiveProducts = products.filter((product: any) => {
+        return (Number(product?.statistic?.selected?.orderCount) || 0) > 0
+      })
+      allProducts.push(...positiveProducts)
       if (products.length < limit) break
+      if (positiveProducts.length < products.length) break
       offset += limit
-      await new Promise(resolve => setTimeout(resolve, 1800))
+      await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
     }
 
     return { products: allProducts }
