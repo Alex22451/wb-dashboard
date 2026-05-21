@@ -192,6 +192,23 @@ function getDirectProductName(order: any): string {
   return 'Товар без артикула'
 }
 
+function isReturnSale(record: any): boolean {
+  const saleId = String(record.saleID || record.saleId || '')
+  return saleId.startsWith('R')
+    || Number(record.finishedPrice) < 0
+    || Number(record.priceWithDisc) < 0
+    || Number(record.forPay) < 0
+}
+
+function saleReturnToOrder(record: any): any {
+  return {
+    ...record,
+    isReturn: true,
+    isCancel: false,
+    odid: `return:${record.saleID || record.srid || record.gNumber || `${record.supplierArticle || ''}:${record.nmId || ''}:${record.date || ''}`}`,
+  }
+}
+
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
   const url = `${AD_API_BASE}/adv/v1/upd?from=${from}&to=${to}`
   const response = await fetch(url, {
@@ -333,7 +350,9 @@ export async function GET(request: NextRequest) {
       entrepreneurId: number
       entrepreneurName: string
       orders: any[]
+      returns: any[]
       error?: string
+      returnError?: string
     }> = []
 
     for (let i = 0; i < targets.length; i++) {
@@ -348,7 +367,9 @@ export async function GET(request: NextRequest) {
       const result = await cachedRequest(cacheKey, cacheTtl, async () => {
         const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
         let orders: any[] = []
+        let returns: any[] = []
         let error: string | undefined
+        let returnError: string | undefined
 
         try {
           // flag=0 returns the complete dataset filtered by lastChangeDate (not order date).
@@ -380,11 +401,39 @@ export async function GET(request: NextRequest) {
           error = 'Ошибка сети'
         }
 
+        try {
+          const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
+          const salesResponse = await fetch(salesUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+
+          if (salesResponse.status === 429 || salesResponse.status === 461) {
+            console.log(`WB Sales API rate limited for ${ent.name}, returns skipped`)
+            returnError = 'WB API ограничил загрузку возвратов. Подождите минуту и повторите.'
+          } else if (salesResponse.status === 401) {
+            console.log(`WB Sales API unauthorized for ${ent.name} (401)`)
+            returnError = 'Неверный API ключ для загрузки возвратов (401)'
+          } else if (salesResponse.ok) {
+            const allSales = await salesResponse.json()
+            if (Array.isArray(allSales)) {
+              returns = filterToDateRange(allSales, dateFrom, dateTo)
+                .filter(isReturnSale)
+                .map(saleReturnToOrder)
+            }
+          } else {
+            console.log(`WB Sales API error for ${ent.name}: ${salesResponse.status}`)
+            returnError = `Ошибка API возвратов (${salesResponse.status})`
+          }
+        } catch (_e) {
+          console.log(`WB Sales API network error for ${ent.name}`)
+          returnError = 'Ошибка сети при загрузке возвратов'
+        }
+
         return {
           entrepreneurId: ent.id,
           entrepreneurName: ent.name,
-          orders,
+          orders: [...orders, ...returns],
+          returns,
           error,
+          returnError,
         }
       }, true)
 
@@ -457,8 +506,12 @@ export async function GET(request: NextRequest) {
 
     // Collect rate limit errors for UI display
     const rateLimitErrors = results
-      .filter(r => r.error)
-      .map(r => ({ id: r.entrepreneurId, name: r.entrepreneurName, error: r.error }))
+      .flatMap(r => {
+        const errors: Array<{ id: number; name: string; error: string }> = []
+        if (r.error) errors.push({ id: r.entrepreneurId, name: r.entrepreneurName, error: r.error })
+        if (r.returnError) errors.push({ id: r.entrepreneurId, name: r.entrepreneurName, error: r.returnError })
+        return errors
+      })
 
     // Build response based on requested section(s)
     const needDashboard = !section || section === 'dashboard'
