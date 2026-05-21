@@ -79,12 +79,13 @@ async function edgeRequest<T = unknown>(path: string, init?: RequestInit): Promi
     cache: 'no-store',
   })
 
-  if (response.status === 404) return null
+  if (response.status === 404 || response.status === 204) return null
   if (!response.ok) {
     const body = await response.text().catch(() => '')
     throw new Error(`Edge Config ${response.status}: ${body.slice(0, 160)}`)
   }
-  return response.json()
+  const body = await response.text()
+  return body ? JSON.parse(body) : null
 }
 
 async function kvGet<T = string>(key: string): Promise<T | null> {
