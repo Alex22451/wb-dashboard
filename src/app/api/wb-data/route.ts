@@ -561,17 +561,13 @@ export async function GET(request: NextRequest) {
       const prevMonth = prevMonthDate.toISOString().substring(0, 7)
 
       let totalOrders = allMappedOrders.length
-      let yesterdayOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk).length
-      let dayBeforeYesterdayOrders = allMappedOrders.filter(o => o.dateStr === dayBeforeMsk).length
-      let monthOrders = allMappedOrders.filter(o => o.monthStr === currentMonth).length
-      let prevMonthOrders = allMappedOrders.filter(o => o.monthStr === prevMonth).length
+      const yesterdayOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk).length
+      const dayBeforeYesterdayOrders = allMappedOrders.filter(o => o.dateStr === dayBeforeMsk).length
+      const monthOrders = allMappedOrders.filter(o => o.monthStr === currentMonth).length
+      const prevMonthOrders = allMappedOrders.filter(o => o.monthStr === prevMonth).length
 
       if (useFunnelTotals) {
         totalOrders = (await getFunnelSummaryForTargets(requestedDateFrom, requestedDateTo)).total
-        yesterdayOrders = (await getFunnelSummaryForTargets(yesterdayMsk, yesterdayMsk)).total
-        dayBeforeYesterdayOrders = (await getFunnelSummaryForTargets(dayBeforeMsk, dayBeforeMsk)).total
-        monthOrders = (await getFunnelSummaryForTargets(`${currentMonth}-01`, yesterdayMsk)).total
-        prevMonthOrders = (await getFunnelSummaryForTargets(`${prevMonth}-01`, new Date(Date.UTC(Number(prevMonth.slice(0, 4)), Number(prevMonth.slice(5, 7)), 0)).toISOString().split('T')[0])).total
       }
 
       // FBS/FBO breakdown for yesterday and day before
@@ -619,18 +615,11 @@ export async function GET(request: NextRequest) {
       for (const ent of targets) {
         weekEntStats[ent.id] = { id: ent.id, name: ent.name, totalOrders: 0 }
       }
-      if (useFunnelTotals) {
-        const funnelWeek = await getFunnelSummaryForTargets(weekFromDate, yesterdayMsk)
-        for (const ent of targets) {
-          weekEntStats[ent.id].totalOrders = funnelWeek.byEntrepreneur[ent.id]?.orders || 0
+      for (const o of weekOrders) {
+        if (!weekEntStats[o.entrepreneurId]) {
+          weekEntStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
         }
-      } else {
-        for (const o of weekOrders) {
-          if (!weekEntStats[o.entrepreneurId]) {
-            weekEntStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
-          }
-          weekEntStats[o.entrepreneurId].totalOrders++
-        }
+        weekEntStats[o.entrepreneurId].totalOrders++
       }
 
       // FBS/FBO daily breakdown for chart (last 60 days ending yesterday)
@@ -655,47 +644,45 @@ export async function GET(request: NextRequest) {
       }
 
       // Period summary stats (total, fbs, fbo for different periods)
-      const calcPeriodStats = async (days: number) => {
+      const calcPeriodStats = (days: number) => {
         const from = new Date(mskNow.getTime() - days * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= from && o.dateStr <= yesterdayMsk)
-        const funnel = useFunnelTotals ? await getFunnelSummaryForTargets(from, yesterdayMsk) : null
         return {
-          total: funnel?.total ?? periodOrders.length,
+          total: periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
-          revenue: funnel?.revenue ?? Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
+          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: from,
           dateTo: yesterdayMsk,
         }
       }
 
       // Previous period stats (same length, just shifted back)
-      const calcPrevPeriodStats = async (days: number) => {
+      const calcPrevPeriodStats = (days: number) => {
         const prevTo = new Date(mskNow.getTime() - (days + 1) * 86400000).toISOString().split('T')[0]
         const prevFrom = new Date(mskNow.getTime() - (days * 2) * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= prevFrom && o.dateStr <= prevTo)
-        const funnel = useFunnelTotals ? await getFunnelSummaryForTargets(prevFrom, prevTo) : null
         return {
-          total: funnel?.total ?? periodOrders.length,
+          total: periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
-          revenue: funnel?.revenue ?? Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
+          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: prevFrom,
           dateTo: prevTo,
         }
       }
 
       const dashboardPeriodStats = {
-        yesterday: await calcPeriodStats(1),
-        week: await calcPeriodStats(7),
-        twoWeeks: await calcPeriodStats(14),
-        month: await calcPeriodStats(30),
+        yesterday: calcPeriodStats(1),
+        week: calcPeriodStats(7),
+        twoWeeks: calcPeriodStats(14),
+        month: calcPeriodStats(30),
       }
       const dashboardPrevPeriodStats = {
-        yesterday: await calcPrevPeriodStats(1),
-        week: await calcPrevPeriodStats(7),
-        twoWeeks: await calcPrevPeriodStats(14),
-        month: await calcPrevPeriodStats(30),
+        yesterday: calcPrevPeriodStats(1),
+        week: calcPrevPeriodStats(7),
+        twoWeeks: calcPrevPeriodStats(14),
+        month: calcPrevPeriodStats(30),
       }
 
       const calcProductDynamics = (period: keyof typeof dashboardPeriodStats) => {
