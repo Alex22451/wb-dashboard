@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
-import { getCachedFunnelProducts, getVercelWbTargets, saveCachedFunnelProducts } from '@/lib/user-store'
+import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import {
@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v9:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v10:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -229,12 +229,6 @@ function saleReturnToOrder(record: any): any {
 async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
   const cacheKey = `funnel-products-positive-v1:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
-    const fingerprint = apiKeyFingerprint(apiKey)
-    if (from === to) {
-      const persisted = await getCachedFunnelProducts(fingerprint, from).catch(() => null)
-      if (persisted) return { products: persisted.products }
-    }
-
     const allProducts: any[] = []
     let offset = 0
     const limit = 100
@@ -283,10 +277,6 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
       await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
     }
 
-    if (from === to && allProducts.length > 0) {
-      await saveCachedFunnelProducts(fingerprint, from, allProducts).catch(() => undefined)
-    }
-
     return { products: allProducts }
   })
 }
@@ -328,20 +318,13 @@ async function fetchFunnelProductOrders(apiKey: string, from: string, to: string
 async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): Promise<{ orders: any[]; error?: string }> {
   const orders: any[] = []
   const errors: string[] = []
-  let loadedFromWb = 0
 
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i]
-    const cached = await getCachedFunnelProducts(apiKeyFingerprint(apiKey), date).catch(() => null)
     const result = await fetchFunnelProductOrders(apiKey, date, date)
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
-    if (!cached) loadedFromWb += 1
-    if (loadedFromWb >= 2 && i < dates.length - 1) {
-      errors.push('Часть дней еще догружается из WB. Обновите период через минуту.')
-      break
-    }
-    if (!cached && i < dates.length - 1) {
+    if (i < dates.length - 1) {
       await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
     }
   }

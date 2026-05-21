@@ -141,6 +141,24 @@ interface AuthUser {
   role: 'admin' | 'user'
 }
 
+function getClientDateRange(from: string, to: string): string[] {
+  const start = new Date(`${from}T00:00:00Z`)
+  const end = new Date(`${to}T00:00:00Z`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return []
+
+  const dates: string[] = []
+  const cursor = new Date(start)
+  while (cursor <= end && dates.length < 120) {
+    dates.push(cursor.toISOString().split('T')[0])
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return dates
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'compare'] as const
 type OptionalTabId = typeof OPTIONAL_TAB_IDS[number]
 
@@ -1381,27 +1399,137 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
   const [dateFrom, setDateFrom] = useState<string>(getYesterday())
   const [dateTo, setDateTo] = useState<string>(getYesterday())
 
+  const mergeDailyResponses = useCallback((days: DailyOrdersData[], dates: string[]): DailyOrdersData => {
+    const products: { id: number; name: string }[] = []
+    const productIdByName = new Map<string, number>()
+    const entrepreneursById = new Map<number, { id: number; name: string }>()
+    const dateIndex = new Map(dates.map((date, index) => [date, index]))
+
+    const ensureProduct = (name: string) => {
+      const existing = productIdByName.get(name)
+      if (existing !== undefined) return existing
+      const id = products.length
+      productIdByName.set(name, id)
+      products.push({ id, name })
+      return id
+    }
+
+    for (const day of days) {
+      for (const ent of day.entrepreneurs || []) entrepreneursById.set(ent.id, ent)
+    }
+
+    const emptyPivot = (): Record<number, Record<number, number>> => ({})
+    const pivot = emptyPivot()
+    const fbsPivot = emptyPivot()
+    const fboPivot = emptyPivot()
+    const dateTotals = new Array(dates.length).fill(0)
+    const fbsDateTotals = new Array(dates.length).fill(0)
+    const fboDateTotals = new Array(dates.length).fill(0)
+    const productTotals: Record<number, number> = {}
+    const fbsProductTotals: Record<number, number> = {}
+    const fboProductTotals: Record<number, number> = {}
+    const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+
+    const addPivot = (
+      targetPivot: Record<number, Record<number, number>>,
+      targetDateTotals: number[],
+      targetProductTotals: Record<number, number>,
+      productId: number,
+      targetDateIdx: number,
+      value: number,
+    ) => {
+      if (!value) return
+      if (!targetPivot[productId]) targetPivot[productId] = {}
+      targetPivot[productId][targetDateIdx] = (targetPivot[productId][targetDateIdx] || 0) + value
+      targetDateTotals[targetDateIdx] += value
+      targetProductTotals[productId] = (targetProductTotals[productId] || 0) + value
+    }
+
+    for (const day of days) {
+      for (const [date, entRows] of Object.entries(day.entrepreneurDailyData || {})) {
+        entrepreneurDailyData[date] = entrepreneurDailyData[date] || {}
+        for (const [entId, value] of Object.entries(entRows)) {
+          entrepreneurDailyData[date][Number(entId)] = (entrepreneurDailyData[date][Number(entId)] || 0) + value
+        }
+      }
+
+      for (const product of day.products || []) {
+        const nextProductId = ensureProduct(product.name)
+        const sourceDateTotals = [
+          { source: day.pivot, dates: day.dates, totals: dateTotals, productTotals, target: pivot },
+          { source: day.fbsPivot, dates: day.dates, totals: fbsDateTotals, productTotals: fbsProductTotals, target: fbsPivot },
+          { source: day.fboPivot, dates: day.dates, totals: fboDateTotals, productTotals: fboProductTotals, target: fboPivot },
+        ]
+
+        for (const group of sourceDateTotals) {
+          const row = group.source?.[product.id] || {}
+          for (const [sourceIdxRaw, value] of Object.entries(row)) {
+            const sourceDate = group.dates[Number(sourceIdxRaw)]
+            const targetDateIdx = dateIndex.get(sourceDate)
+            if (targetDateIdx === undefined) continue
+            addPivot(group.target, group.totals, group.productTotals, nextProductId, targetDateIdx, Number(value) || 0)
+          }
+        }
+      }
+    }
+
+    return {
+      dates,
+      allDates: dates,
+      products,
+      entrepreneurs: [...entrepreneursById.values()],
+      pivot,
+      previousPivot: {},
+      previousFbsPivot: {},
+      previousFboPivot: {},
+      dateTotals,
+      previousDateTotals: new Array(dates.length).fill(0),
+      productTotals,
+      entrepreneurDailyData,
+      fbsPivot,
+      fbsDateTotals,
+      fbsProductTotals,
+      fboPivot,
+      fboDateTotals,
+      fboProductTotals,
+    }
+  }, [])
+
   const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
     setLoading(true)
     setRateLimitErrors([])
     try {
-      const params = new URLSearchParams()
-      params.set('entrepreneurId', selectionToParam(selectedEnt))
-      params.set('section', 'daily')
       const df = overrideFrom ?? (dateMode === 'single' ? singleDate : dateFrom)
       const dt = overrideTo ?? (dateMode === 'single' ? singleDate : dateTo)
-      if (df) params.set('dateFrom', df)
-      if (dt) params.set('dateTo', dt)
-      const res = await fetch(`/api/wb-data?${params.toString()}`)
-      const json = await res.json()
-      if (json.daily) setFetchedData(json.daily)
-      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+      const dates = dateMode === 'range' ? getClientDateRange(df, dt) : [df]
+      const loadedDays: DailyOrdersData[] = []
+      const errors: RateLimitError[] = []
+
+      for (let i = 0; i < dates.length; i++) {
+        const date = dates[i]
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selectionToParam(selectedEnt))
+        params.set('section', 'daily')
+        params.set('dateFrom', date)
+        params.set('dateTo', date)
+
+        const res = await fetch(`/api/wb-data?${params.toString()}`)
+        const json = await res.json()
+        if (json.daily) {
+          loadedDays.push(json.daily)
+          setFetchedData(mergeDailyResponses(loadedDays, dates))
+        }
+        if (json.rateLimitErrors) errors.push(...json.rateLimitErrors)
+        if (dateMode === 'range' && i < dates.length - 1) await sleep(21000)
+      }
+
+      setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
 
