@@ -3,6 +3,7 @@ import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
 import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
+import { createHash } from 'crypto'
 import {
   mapWbOrderToProductKey,
   filterToDateRange,
@@ -22,12 +23,16 @@ interface CacheEntry {
 const apiCache = new Map<string, CacheEntry>()
 const inFlightRequests = new Map<string, Promise<any>>()
 
-function getCacheKey(entId: number, dateFrom: string, dateTo: string): string {
-  return `${entId}:orders:${dateFrom}:${dateTo}`
+function apiKeyFingerprint(apiKey: string): string {
+  return createHash('sha256').update(normalizeApiKey(apiKey)).digest('hex').slice(0, 16)
 }
 
-function getStockCacheKey(entId: number, stockDate: string): string {
-  return `${entId}:stocks:${stockDate}`
+function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders:${dateFrom}:${dateTo}`
+}
+
+function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
+  return `${entId}:${apiKeyFingerprint(apiKey)}:stocks:${stockDate}`
 }
 
 function getCached(key: string): any | null {
@@ -333,7 +338,7 @@ export async function GET(request: NextRequest) {
 
     for (let i = 0; i < targets.length; i++) {
       const ent = targets[i]
-      const cacheKey = getCacheKey(ent.id, apiDateFrom, dateTo)
+      const cacheKey = getCacheKey(ent.id, ent.wbApiKey, apiDateFrom, dateTo)
 
       // Delay between entrepreneurs (1s) to respect rate limits
       if (i > 0) {
@@ -1211,7 +1216,7 @@ export async function GET(request: NextRequest) {
         const ent = targets[i]
         const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
         const stockDate = dateTo || new Date().toISOString().split('T')[0]
-        const stockCacheKey = getStockCacheKey(ent.id, stockDate)
+        const stockCacheKey = getStockCacheKey(ent.id, ent.wbApiKey, stockDate)
 
         const cachedStocks = getCached(stockCacheKey)
         if (cachedStocks) {

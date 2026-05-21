@@ -3,6 +3,7 @@ import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
+import { createHash } from 'crypto'
 
 interface EntrepreneurRow {
   id: number
@@ -69,6 +70,10 @@ function setCached(key: string, data: unknown) {
       if (now - entry.timestamp > CACHE_TTL) growthCache.delete(cacheKey)
     }
   }
+}
+
+function apiKeyFingerprint(apiKey: string): string {
+  return createHash('sha256').update(apiKey.trim().replace(/^bearer\s+/i, '')).digest('hex').slice(0, 16)
 }
 
 function parseEntrepreneurIds(value: string | null, rows: EntrepreneurRow[]): EntrepreneurRow[] {
@@ -204,16 +209,16 @@ export async function GET(request: NextRequest) {
     })()
     const minClicks = Number(searchParams.get('minOpens')) || 20
 
-    const cacheKey = `promotion:${entrepreneurId || 'all'}:${dateFrom}:${dateTo}:${minClicks}`
-    const cached = getCached(cacheKey)
-    if (cached) return NextResponse.json(cached)
-
     const rows = isVercel()
       ? await getVercelWbTargets(user, entrepreneurId)
       : await db.$queryRawUnsafe<EntrepreneurRow[]>(
           `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${user.role === 'admin' ? '' : `AND userId = ${user.id}`}`
         )
     const targets = parseEntrepreneurIds(entrepreneurId, rows).slice(0, 1)
+    const cacheKey = `promotion:${targets.map((target) => `${target.id}:${apiKeyFingerprint(target.wbApiKey)}`).join(',')}:${dateFrom}:${dateTo}:${minClicks}`
+    const cached = getCached(cacheKey)
+    if (cached) return NextResponse.json(cached)
+
     const errors: Array<{ id: number; name: string; error: string }> = []
     const notices: string[] = []
     const items: GrowthItem[] = []
