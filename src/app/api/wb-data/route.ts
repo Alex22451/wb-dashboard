@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
-import { isVercel } from '@/lib/entrepreneurs-config'
+import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
 import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import {
@@ -142,10 +142,33 @@ function getOrderRevenue(order: any): number {
     || 0
 }
 
+function normalizeApiKey(apiKey: string): string {
+  return apiKey.trim().replace(/^bearer\s+/i, '').trim()
+}
+
+function wbAuthHeader(apiKey: string): string {
+  const token = apiKey.trim()
+  return token.toLowerCase().startsWith('bearer ') ? token : `Bearer ${token}`
+}
+
+function getDirectProductName(order: any): string {
+  const article = String(order.supplierArticle || '').trim()
+  const subject = String(order.subject || '').trim()
+  const brand = String(order.brand || '').trim()
+  const nmId = order.nmId ? String(order.nmId) : ''
+
+  if (article && subject) return `${article} · ${subject}`
+  if (article) return article
+  if (subject && brand) return `${subject} · ${brand}`
+  if (subject) return subject
+  if (nmId) return `nmId ${nmId}`
+  return 'Товар без артикула'
+}
+
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
   const url = `${AD_API_BASE}/adv/v1/upd?from=${from}&to=${to}`
   const response = await fetch(url, {
-    headers: { Authorization: apiKey },
+    headers: { Authorization: wbAuthHeader(apiKey) },
     signal: AbortSignal.timeout(20000),
   })
   if (response.status === 204) return 0
@@ -260,6 +283,13 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    const mappedAdminApiKeys = new Set(
+      getEntrepreneurs()
+        .map((ent) => normalizeApiKey(ent.apiKey || ''))
+        .filter(Boolean)
+    )
+    const shouldUseExcelMapping = (apiKey: string) => mappedAdminApiKeys.has(normalizeApiKey(apiKey))
+
     // Determine cache TTL based on section
     const CACHE_TTL_PRODUCTION = 2 * 60 * 1000  // 2 min
     const CACHE_TTL_SUPPLY = 2 * 60 * 1000  // 2 min
@@ -290,7 +320,7 @@ export async function GET(request: NextRequest) {
         continue
       }
 
-      const apiHeaders = { 'Authorization': `Bearer ${ent.wbApiKey}`, 'Content-Type': 'application/json' }
+      const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
 
       // Delay between entrepreneurs (1s) to respect rate limits
       if (i > 0) {
@@ -359,21 +389,29 @@ export async function GET(request: NextRequest) {
 
     for (const result of results) {
       const { entrepreneurId, entrepreneurName, orders } = result
+      const target = targets.find((ent) => ent.id === entrepreneurId)
+      const useExcelMapping = target ? shouldUseExcelMapping(target.wbApiKey) : false
 
       for (const order of orders) {
-        const subject = order.subject || ''
-        const article = order.supplierArticle || ''
-        const brand = order.brand || ''
+        let mappedType: string
+        if (useExcelMapping) {
+          const subject = order.subject || ''
+          const article = order.supplierArticle || ''
+          const brand = order.brand || ''
 
-        // Filter out EXCLUDED subjects (Картины, Алмазная мозаика, etc.)
-        // These categories should NOT be counted in analytics/statistics
-        const subjectLower = subject.toLowerCase()
-        if (EXCLUDED_WB_SUBJECTS.some(excl => subjectLower.includes(excl.toLowerCase()))) {
-          continue
+          // Filter out EXCLUDED subjects only for the configured admin/catalog keys.
+          // User-added external API keys should show raw WB API data without Excel mapping.
+          const subjectLower = subject.toLowerCase()
+          if (EXCLUDED_WB_SUBJECTS.some(excl => subjectLower.includes(excl.toLowerCase()))) {
+            continue
+          }
+
+          const mapped = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
+          if (!mapped) continue
+          mappedType = mapped
+        } else {
+          mappedType = getDirectProductName(order)
         }
-
-        const mappedType = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
-        if (!mappedType) continue
 
         // Convert UTC date to Moscow date (UTC+3)
         // WB API returns dates like "2026-05-18T01:30:00Z" (UTC)
@@ -1160,7 +1198,7 @@ export async function GET(request: NextRequest) {
 
       for (let i = 0; i < targets.length; i++) {
         const ent = targets[i]
-        const apiHeaders = { 'Authorization': `Bearer ${ent.wbApiKey}`, 'Content-Type': 'application/json' }
+        const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
         const stockDate = dateTo || new Date().toISOString().split('T')[0]
         const stockCacheKey = getStockCacheKey(ent.id, stockDate)
 
