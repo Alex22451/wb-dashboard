@@ -394,7 +394,7 @@ export async function GET(request: NextRequest) {
             const allOrders = await response.json()
             if (Array.isArray(allOrders)) {
               orders = useExactSingleDayStats
-                ? filterToDateRange(allOrders, requestedDateFrom, requestedDateTo)
+                ? allOrders
                 : filterToDateRange(allOrders, dateFrom, dateTo)
             }
           } else {
@@ -421,11 +421,7 @@ export async function GET(request: NextRequest) {
           } else if (salesResponse.ok) {
             const allSales = await salesResponse.json()
             if (Array.isArray(allSales)) {
-              returns = filterToDateRange(
-                allSales,
-                useExactSingleDayStats ? requestedDateFrom : dateFrom,
-                useExactSingleDayStats ? requestedDateTo : dateTo
-              )
+              returns = (useExactSingleDayStats ? allSales : filterToDateRange(allSales, dateFrom, dateTo))
                 .filter(isReturnSale)
                 .map(saleReturnToOrder)
             }
