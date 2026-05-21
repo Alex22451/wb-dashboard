@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs } from '@/lib/entrepreneurs-config'
+import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface EntrepreneurWithPromotionKey {
@@ -95,7 +96,11 @@ export async function GET(request: NextRequest) {
     const year = Number(request.nextUrl.searchParams.get('year')) || 2026
     const isVercel = !!process.env.VERCEL
     const entrepreneurs = isVercel
-      ? (user.role === 'admin' ? getVercelEntrepreneurs() : [])
+      ? (await getVercelWbTargets(user, 'all')).map((e) => ({
+          id: e.id,
+          name: e.name,
+          promotionApiKey: e.wbPromotionApiKey || e.wbApiKey,
+        }))
       : await getLocalEntrepreneurs(user.role === 'admin' ? undefined : user.id)
     const months = getAvailableMonths(year)
 

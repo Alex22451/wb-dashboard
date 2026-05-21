@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { forbidden, getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
+import { clearUserApiKey, saveUserApiKeys } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
@@ -9,10 +10,28 @@ export async function POST(request: NextRequest) {
 
   // On Vercel, API keys are managed via environment variables, not the database
   if (isVercel()) {
-    return NextResponse.json({
-      error: 'На Vercel API ключи настраиваются через переменные окружения (ENTREPRENEURS). Измените ENTREPRENEURS в настройках проекта Vercel.',
-      vercel: true,
-    }, { status: 400 })
+    if (user.role === 'admin') {
+      return NextResponse.json({
+        error: 'Админские ключи на Vercel настраиваются через ENTREPRENEURS. Пользовательские ключи сохраняются в аккаунте пользователя.',
+        vercel: true,
+      }, { status: 400 })
+    }
+
+    try {
+      const body = await request.json()
+      const { apiKey, promotionApiKey } = body
+      if (!apiKey && !promotionApiKey) {
+        return NextResponse.json({ error: 'Введите хотя бы один API ключ' }, { status: 400 })
+      }
+      await saveUserApiKeys(user.id, {
+        apiKey: apiKey ? String(apiKey).trim() : undefined,
+        promotionApiKey: promotionApiKey ? String(promotionApiKey).trim() : undefined,
+      })
+      return NextResponse.json({ success: true, entrepreneurId: user.id })
+    } catch (error) {
+      console.error('Save Vercel API key error:', error)
+      return NextResponse.json({ error: 'Ошибка сохранения API ключа' }, { status: 500 })
+    }
   }
 
   try {
@@ -56,10 +75,11 @@ export async function DELETE(request: NextRequest) {
 
   // On Vercel, API keys are managed via environment variables, not the database
   if (isVercel()) {
-    return NextResponse.json({
-      error: 'На Vercel API ключи настраиваются через переменные окружения (ENTREPRENEURS). Измените ENTREPRENEURS в настройках проекта Vercel.',
-      vercel: true,
-    }, { status: 400 })
+    if (user.role === 'admin') {
+      return NextResponse.json({ error: 'Админские ключи на Vercel настраиваются через ENTREPRENEURS' }, { status: 400 })
+    }
+    await clearUserApiKey(user.id)
+    return NextResponse.json({ success: true, entrepreneurId: user.id })
   }
 
   try {

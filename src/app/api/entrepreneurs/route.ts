@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
-import { isVercel, getEntrepreneurs } from '@/lib/entrepreneurs-config'
+import { isVercel } from '@/lib/entrepreneurs-config'
+import { getVercelEntrepreneursForUser } from '@/lib/user-store'
 import { NextResponse } from 'next/server'
 
 function maskApiKey(key: string | null | undefined): string | null {
@@ -16,14 +17,13 @@ export async function GET() {
 
     // On Vercel, use config-based data directly (no DB)
     if (isVercel()) {
-      if (user.role !== 'admin') return NextResponse.json([])
-      const entrepreneurs = getEntrepreneurs()
+      const entrepreneurs = await getVercelEntrepreneursForUser(user)
       const result = entrepreneurs.map((e) => ({
         id: e.id,
         name: e.name,
-        wbApiKey: maskApiKey(e.apiKey),
+        wbApiKey: maskApiKey(e.wbApiKey),
         totalOrders: 0,
-        hasApiKey: !!e.apiKey,
+        hasApiKey: !!e.wbApiKey,
       }))
       return NextResponse.json(result)
     }

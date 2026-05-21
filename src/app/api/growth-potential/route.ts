@@ -1,5 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
+import { isVercel } from '@/lib/entrepreneurs-config'
+import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface EntrepreneurRow {
@@ -206,10 +208,11 @@ export async function GET(request: NextRequest) {
     const cached = getCached(cacheKey)
     if (cached) return NextResponse.json(cached)
 
-    const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
-    const rows = await db.$queryRawUnsafe<EntrepreneurRow[]>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${userScope}`
-    )
+    const rows = isVercel()
+      ? await getVercelWbTargets(user, entrepreneurId)
+      : await db.$queryRawUnsafe<EntrepreneurRow[]>(
+          `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${user.role === 'admin' ? '' : `AND userId = ${user.id}`}`
+        )
     const targets = parseEntrepreneurIds(entrepreneurId, rows).slice(0, 1)
     const errors: Array<{ id: number; name: string; error: string }> = []
     const notices: string[] = []

@@ -1,16 +1,11 @@
 import { db } from '@/lib/db'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { hashPassword, normalizeUsername, setSessionCookie, validatePassword, validateUsername } from '@/lib/auth'
+import { createStoredUser, hasUserStore } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    if (isVercel()) {
-      return NextResponse.json({
-        error: 'Регистрация на Vercel требует постоянной базы данных. Сейчас доступен только админский вход через ADMIN_USERNAME/ADMIN_PASSWORD.',
-      }, { status: 501 })
-    }
-
     const body = await request.json()
     const username = normalizeUsername(String(body.username || ''))
     const password = String(body.password || '')
@@ -20,6 +15,20 @@ export async function POST(request: NextRequest) {
 
     const passwordError = validatePassword(password)
     if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 })
+
+    if (isVercel()) {
+      if (!hasUserStore()) {
+        return NextResponse.json({
+          error: 'Постоянная база пользователей не настроена. Нужны Redis KV или Edge Config переменные.',
+        }, { status: 501 })
+      }
+
+      const passwordHash = hashPassword(password)
+      const user = await createStoredUser(username, passwordHash)
+      const response = NextResponse.json({ user: { id: user.id, username: user.username, role: user.role } })
+      setSessionCookie(response, user.id)
+      return response
+    }
 
     const existing = await db.$queryRawUnsafe<Array<{ id: number }>>(
       `SELECT id FROM User WHERE username = ? LIMIT 1`,
@@ -42,7 +51,7 @@ export async function POST(request: NextRequest) {
     setSessionCookie(response, userId)
     return response
   } catch (error: any) {
-    if (String(error?.message || '').includes('Unique constraint')) {
+    if (error?.message === 'USERNAME_TAKEN' || String(error?.message || '').includes('Unique constraint')) {
       return NextResponse.json({ error: 'Этот ник уже занят' }, { status: 409 })
     }
     console.error('Register error:', error)

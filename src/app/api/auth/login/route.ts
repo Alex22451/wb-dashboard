@@ -1,5 +1,7 @@
 import { db } from '@/lib/db'
 import { getEnvAdminUser, isEnvAdminCredentials, normalizeUsername, setSessionCookie, validatePassword, validateUsername, verifyPassword } from '@/lib/auth'
+import { isVercel } from '@/lib/entrepreneurs-config'
+import { getStoredUserByUsername } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
@@ -18,6 +20,16 @@ export async function POST(request: NextRequest) {
       const envAdmin = getEnvAdminUser()
       const response = NextResponse.json({ user: envAdmin })
       setSessionCookie(response, 0)
+      return response
+    }
+
+    if (isVercel()) {
+      const user = await getStoredUserByUsername(username).catch(() => null)
+      if (!user || !verifyPassword(password, user.passwordHash)) {
+        return NextResponse.json({ error: 'Неверный ник или пароль' }, { status: 401 })
+      }
+      const response = NextResponse.json({ user: { id: user.id, username: user.username, role: user.role } })
+      setSessionCookie(response, user.id)
       return response
     }
 

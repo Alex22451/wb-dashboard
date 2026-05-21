@@ -1,5 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
+import { isVercel } from '@/lib/entrepreneurs-config'
+import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   mapWbOrderToProductKey,
@@ -213,26 +215,31 @@ export async function GET(request: NextRequest) {
       return d.toISOString().split('T')[0]
     })()
 
-    // Get entrepreneurs with API keys
-    const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
-    const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${userScope}`
-    )
     let targets: Array<{ id: number; name: string; wbApiKey: string }>
 
-    if (entrepreneurId === 'all') {
-      targets = entResult
-    } else if (entrepreneurId.includes(',')) {
-      const entIds = new Set(
-        entrepreneurId
-          .split(',')
-          .map((id) => Number(id.trim()))
-          .filter((id) => Number.isFinite(id))
-      )
-      targets = entResult.filter(e => entIds.has(e.id))
+    if (isVercel()) {
+      targets = await getVercelWbTargets(user, entrepreneurId)
     } else {
-      const entId = Number(entrepreneurId)
-      targets = entResult.filter(e => e.id === entId)
+      // Get entrepreneurs with API keys
+      const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
+      const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
+        `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${userScope}`
+      )
+
+      if (entrepreneurId === 'all') {
+        targets = entResult
+      } else if (entrepreneurId.includes(',')) {
+        const entIds = new Set(
+          entrepreneurId
+            .split(',')
+            .map((id) => Number(id.trim()))
+            .filter((id) => Number.isFinite(id))
+        )
+        targets = entResult.filter(e => entIds.has(e.id))
+      } else {
+        const entId = Number(entrepreneurId)
+        targets = entResult.filter(e => e.id === entId)
+      }
     }
 
     if (targets.length === 0) {

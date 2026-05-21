@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { normalizeUsername } from './password'
+import { isVercel } from './entrepreneurs-config'
+import { getStoredUserById } from './user-store'
 export { hashPassword, normalizeUsername, validatePassword, validateUsername, verifyPassword } from './password'
 
 const SESSION_COOKIE = 'wb_session'
@@ -78,6 +80,16 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (Number(expiresRaw) < Date.now()) return null
 
   if (userIdRaw === '0') return getEnvAdminUser()
+
+  if (isVercel()) {
+    const storedUser = await getStoredUserById(Number(userIdRaw)).catch(() => null)
+    if (!storedUser) return null
+    return {
+      id: storedUser.id,
+      username: storedUser.username,
+      role: storedUser.role,
+    }
+  }
 
   const rows = await db.$queryRawUnsafe<Array<{ id: number; username: string; role: string }>>(
     `SELECT id, username, role FROM User WHERE id = ? LIMIT 1`,
