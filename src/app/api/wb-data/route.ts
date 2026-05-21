@@ -260,6 +260,7 @@ export async function GET(request: NextRequest) {
 
     const requestedDateFrom = searchParams.get('dateFrom') || defaultDateFrom
     const requestedDateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
+    const useExactSingleDayStats = requestedDateFrom === requestedDateTo
     let dateFrom = requestedDateFrom
     const dateTo = requestedDateTo
     if (section === 'daily' || section === 'production') {
@@ -378,7 +379,9 @@ export async function GET(request: NextRequest) {
           // including cancelled ones. Matching Excel requires keeping cancelled orders.
           // NOTE: WB API dateFrom filters by lastChangeDate, not order date.
           // We add a 2-day buffer and filter client-side by actual order date.
-          const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
+          const ordersUrl = useExactSingleDayStats
+            ? `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${requestedDateFrom}&flag=1`
+            : `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
           const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
           if (response.status === 429 || response.status === 461) {
@@ -390,7 +393,9 @@ export async function GET(request: NextRequest) {
           } else if (response.ok) {
             const allOrders = await response.json()
             if (Array.isArray(allOrders)) {
-              orders = filterToDateRange(allOrders, dateFrom, dateTo)
+              orders = useExactSingleDayStats
+                ? filterToDateRange(allOrders, requestedDateFrom, requestedDateTo)
+                : filterToDateRange(allOrders, dateFrom, dateTo)
             }
           } else {
             console.log(`WB API error for ${ent.name}: ${response.status}`)
@@ -402,7 +407,9 @@ export async function GET(request: NextRequest) {
         }
 
         try {
-          const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
+          const salesUrl = useExactSingleDayStats
+            ? `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${requestedDateFrom}&flag=1`
+            : `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
           const salesResponse = await fetch(salesUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
           if (salesResponse.status === 429 || salesResponse.status === 461) {
@@ -414,7 +421,11 @@ export async function GET(request: NextRequest) {
           } else if (salesResponse.ok) {
             const allSales = await salesResponse.json()
             if (Array.isArray(allSales)) {
-              returns = filterToDateRange(allSales, dateFrom, dateTo)
+              returns = filterToDateRange(
+                allSales,
+                useExactSingleDayStats ? requestedDateFrom : dateFrom,
+                useExactSingleDayStats ? requestedDateTo : dateTo
+              )
                 .filter(isReturnSale)
                 .map(saleReturnToOrder)
             }
