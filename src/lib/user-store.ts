@@ -12,6 +12,7 @@ export interface StoredUser {
 export interface UserApiKeys {
   apiKey: string | null
   promotionApiKey: string | null
+  sellerName: string | null
 }
 
 export interface UserPreferences {
@@ -181,11 +182,12 @@ export async function createStoredUser(username: string, passwordHash: string): 
 
 export async function getUserApiKeys(id: number): Promise<UserApiKeys> {
   const raw = await kvGet<string>(apiKeysKey(id))
-  if (!raw) return { apiKey: null, promotionApiKey: null }
+  if (!raw) return { apiKey: null, promotionApiKey: null, sellerName: null }
   const parsed = JSON.parse(raw)
   return {
     apiKey: parsed.apiKey || null,
     promotionApiKey: parsed.promotionApiKey || null,
+    sellerName: parsed.sellerName || null,
   }
 }
 
@@ -194,6 +196,7 @@ export async function saveUserApiKeys(id: number, keys: Partial<UserApiKeys>): P
   const next = {
     apiKey: keys.apiKey !== undefined ? keys.apiKey : existing.apiKey,
     promotionApiKey: keys.promotionApiKey !== undefined ? keys.promotionApiKey : existing.promotionApiKey,
+    sellerName: keys.sellerName !== undefined ? keys.sellerName : existing.sellerName,
   }
   await kvSet(apiKeysKey(id), JSON.stringify(next))
   return next
@@ -201,7 +204,7 @@ export async function saveUserApiKeys(id: number, keys: Partial<UserApiKeys>): P
 
 export async function clearUserApiKey(id: number): Promise<void> {
   const existing = await getUserApiKeys(id)
-  await kvSet(apiKeysKey(id), JSON.stringify({ ...existing, apiKey: null }))
+  await kvSet(apiKeysKey(id), JSON.stringify({ ...existing, apiKey: null, sellerName: null }))
 }
 
 export async function getUserPreferences(id: number): Promise<UserPreferences | null> {
@@ -228,7 +231,7 @@ export async function getVercelEntrepreneursForUser(user: CurrentUser) {
   const keys = await getUserApiKeys(user.id)
   return [{
     id: user.id,
-    name: user.username,
+    name: keys.sellerName || user.username,
     wbApiKey: keys.apiKey,
     totalOrders: 0,
     hasApiKey: !!keys.apiKey,
@@ -256,7 +259,7 @@ export async function getVercelWbTargets(user: CurrentUser, entrepreneurId: stri
   if (entrepreneurId && entrepreneurId !== 'all' && !entrepreneurId.split(',').includes(String(user.id))) return []
   return [{
     id: user.id,
-    name: user.username,
+    name: keys.sellerName || user.username,
     wbApiKey: keys.apiKey,
     wbPromotionApiKey: keys.promotionApiKey || keys.apiKey,
   }]
