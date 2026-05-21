@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v6:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v7:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -85,6 +85,7 @@ const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 r
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
+const FUNNEL_REQUEST_INTERVAL_MS = 21000
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -226,7 +227,7 @@ function saleReturnToOrder(record: any): any {
 }
 
 async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
-  const cacheKey = `funnel-products-raw:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+  const cacheKey = `funnel-products-raw-v2:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
     const allProducts: any[] = []
     let offset = 0
@@ -273,7 +274,7 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
     }
 
     return { products: allProducts }
-  }, true)
+  })
 }
 
 function addFunnelProductOrders(orders: any[], product: any, count: number, date: string) {
@@ -320,7 +321,7 @@ async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): 
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
     if (i < dates.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 2500))
+      await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
     }
   }
 
@@ -409,35 +410,7 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
   if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
   if (dates.length === 1) return fetchFunnelProductOrders(apiKey, from, to)
 
-  const orders: any[] = []
-  const errors: string[] = []
-  const maxHistoryDays = 3
-
-  for (let i = 0; i < dates.length; i += maxHistoryDays) {
-    const chunk = dates.slice(i, i + maxHistoryDays)
-    const result = chunk.length === 1
-      ? await fetchFunnelProductOrders(apiKey, chunk[0], chunk[0])
-      : await fetchFunnelHistoryOrders(apiKey, chunk[0], chunk[chunk.length - 1])
-
-    if (result.error && chunk.length > 1) {
-      const dailyFallback = await fetchFunnelProductOrdersByDate(apiKey, chunk)
-      if (dailyFallback.orders.length > 0) orders.push(...dailyFallback.orders)
-      if (dailyFallback.error) errors.push(dailyFallback.error)
-      if (dailyFallback.orders.length === 0 && !dailyFallback.error) errors.push(result.error)
-    } else if (result.orders.length > 0) {
-      orders.push(...result.orders)
-    } else if (result.error) {
-      errors.push(result.error)
-    }
-    if (i + maxHistoryDays < dates.length) {
-      await new Promise(resolve => setTimeout(resolve, 1800))
-    }
-  }
-
-  return {
-    orders,
-    error: errors.slice(0, 3).join('; ') || undefined,
-  }
+  return fetchFunnelProductOrdersByDate(apiKey, dates)
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
@@ -615,18 +588,13 @@ export async function GET(request: NextRequest) {
           const funnel = needDaily
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
-          if (funnel.orders.length > 0 || funnel.error) {
-            return {
-              entrepreneurId: ent.id,
-              entrepreneurName: ent.name,
-              orders: funnel.orders,
-              returns: [],
-              error: funnel.error,
-              returnError: undefined,
-            }
-          }
-          if (funnel.error) {
-            error = funnel.error
+          return {
+            entrepreneurId: ent.id,
+            entrepreneurName: ent.name,
+            orders: funnel.orders,
+            returns: [],
+            error: funnel.error,
+            returnError: undefined,
           }
         }
 
