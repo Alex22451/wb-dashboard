@@ -783,15 +783,27 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
               {comparisonChartData.length > 0 ? (
                 <div className="h-[260px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={comparisonChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                      <Line type="monotone" dataKey="current" name={periodLabel[dashboardPeriod]} stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
-                      <Line type="monotone" dataKey="previous" name={prevPeriodLabel[dashboardPeriod]} stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 2 }} />
-                    </LineChart>
+                    {data.orderSource === 'salesFunnel' ? (
+                      <BarChart data={comparisonChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                        <Bar dataKey="current" name={periodLabel[dashboardPeriod]} fill="#10b981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="previous" name={prevPeriodLabel[dashboardPeriod]} fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    ) : (
+                      <LineChart data={comparisonChartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="current" name={periodLabel[dashboardPeriod]} stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                        <Line type="monotone" dataKey="previous" name={prevPeriodLabel[dashboardPeriod]} stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 2 }} />
+                      </LineChart>
+                    )}
                   </ResponsiveContainer>
                 </div>
               ) : (
@@ -805,7 +817,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
+                  <CardTitle className="text-base">{data.orderSource === 'salesFunnel' ? 'Заказы из воронки продаж' : 'Заказы FBS / FBO'}</CardTitle>
                   <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="justify-start overflow-x-auto rounded-md border">
                     <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
                     <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
@@ -813,14 +825,31 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
                     <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
                   </ToggleGroup>
                 </div>
+                {data.orderSource !== 'salesFunnel' && (
                 <div className="flex items-center gap-2">
                   <Label htmlFor="chart-toggle" className="text-xs text-muted-foreground cursor-pointer">График</Label>
                   <Switch id="chart-toggle" checked={showChart} onCheckedChange={setShowChart} />
                 </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              {!showChart ? (
+              {data.orderSource === 'salesFunnel' ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Card className="border-border">
+                    <CardContent className="pt-3 pb-3">
+                      <div className="text-xs text-muted-foreground mb-1">Всего</div>
+                      <div className="text-xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-border">
+                    <CardContent className="pt-3 pb-3">
+                      <div className="text-xs text-muted-foreground mb-1">{prevPeriodLabel[dashboardPeriod]}</div>
+                      <div className="text-xl font-bold">{formatNumber(data.prevPeriodStats[dashboardPeriod].total)}</div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : !showChart ? (
                 /* Card view */
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Card className="border-border">
