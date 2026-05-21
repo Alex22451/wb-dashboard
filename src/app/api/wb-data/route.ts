@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v3:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v4:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -269,7 +269,7 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
       allProducts.push(...products)
       if (products.length < limit) break
       offset += limit
-      await new Promise(resolve => setTimeout(resolve, 1200))
+      await new Promise(resolve => setTimeout(resolve, 1800))
     }
 
     return { products: allProducts }
@@ -327,7 +327,7 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
 
   const orders: any[] = []
   const errors: string[] = []
-  const chunkSize = 100
+  const chunkSize = 20
 
   for (let offset = 0; offset < nmIds.length; offset += chunkSize) {
     const chunk = nmIds.slice(offset, offset + chunkSize)
@@ -391,7 +391,7 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
 
   const orders: any[] = []
   const errors: string[] = []
-  const maxHistoryDays = 5
+  const maxHistoryDays = 3
 
   for (let i = 0; i < dates.length; i += maxHistoryDays) {
     const chunk = dates.slice(i, i + maxHistoryDays)
@@ -402,7 +402,7 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
     if (i + maxHistoryDays < dates.length) {
-      await new Promise(resolve => setTimeout(resolve, 1200))
+      await new Promise(resolve => setTimeout(resolve, 1800))
     }
   }
 
