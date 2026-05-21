@@ -159,8 +159,22 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function dailyCacheKey(selection: string, date: string) {
-  return `wb-daily-cache-v1:${selection}:${date}`
+function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]) {
+  const selectedIds = selection === ALL_ENTREPRENEURS
+    ? entrepreneurs.filter((ent) => ent.hasApiKey).map((ent) => String(ent.id))
+    : selection.split(',').map((id) => id.trim()).filter(Boolean)
+  const byId = new Map(entrepreneurs.map((ent) => [String(ent.id), ent]))
+  return selectedIds
+    .sort((a, b) => Number(a) - Number(b))
+    .map((id) => {
+      const ent = byId.get(id)
+      return `${id}:${ent?.name || ''}:${ent?.wbApiKey || ''}`
+    })
+    .join('|')
+}
+
+function dailyCacheKey(scope: string, date: string) {
+  return `wb-daily-cache-v2:${scope}:${date}`
 }
 
 function endOfMonthIso(date: string) {
@@ -169,13 +183,13 @@ function endOfMonthIso(date: string) {
   return new Date(Date.UTC(year, month, 1)).toISOString()
 }
 
-function readDailyCache(selection: string, date: string): DailyOrdersData | null {
+function readDailyCache(scope: string, date: string): DailyOrdersData | null {
   try {
-    const raw = window.localStorage.getItem(dailyCacheKey(selection, date))
+    const raw = window.localStorage.getItem(dailyCacheKey(scope, date))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed.expiresAt && Date.now() > new Date(parsed.expiresAt).getTime()) {
-      window.localStorage.removeItem(dailyCacheKey(selection, date))
+      window.localStorage.removeItem(dailyCacheKey(scope, date))
       return null
     }
     return parsed.data || null
@@ -184,10 +198,10 @@ function readDailyCache(selection: string, date: string): DailyOrdersData | null
   }
 }
 
-function writeDailyCache(selection: string, date: string, data: DailyOrdersData) {
+function writeDailyCache(scope: string, date: string, data: DailyOrdersData) {
   try {
     const expiresAt = endOfMonthIso(date)
-    window.localStorage.setItem(dailyCacheKey(selection, date), JSON.stringify({
+    window.localStorage.setItem(dailyCacheKey(scope, date), JSON.stringify({
       cachedAt: new Date().toISOString(),
       expiresAt,
       data,
@@ -1551,10 +1565,11 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
       const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs)
 
       for (let i = 0; i < dates.length; i++) {
         const date = dates[i]
-        const cached = readDailyCache(selection, date)
+        const cached = readDailyCache(cacheScope, date)
         if (cached) {
           loadedDays.push(cached)
           setFetchedData(mergeDailyResponses(loadedDays, dates))
@@ -1571,7 +1586,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
         const json = await res.json()
         if (json.daily) {
           loadedDays.push(json.daily)
-          writeDailyCache(selection, date, json.daily)
+          writeDailyCache(cacheScope, date, json.daily)
           setFetchedData(mergeDailyResponses(loadedDays, dates))
         }
         if (json.rateLimitErrors) errors.push(...json.rateLimitErrors)
@@ -1584,7 +1599,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, mergeDailyResponses])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
 
@@ -4098,6 +4113,7 @@ export default function Home() {
       if (json.dashboard) {
         const baseDashboard = json.dashboard as DashboardData
         const selection = selectionToParam(selectedDashEnt)
+        const cacheScope = getDailyCacheScope(selection, entrepreneurs)
         const dailyByDate = new Map<string, DailyOrdersData>()
         const periodKeys: Array<keyof DashboardData['periodStats']> = ['yesterday', 'week', 'twoWeeks', 'month']
         const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
@@ -4178,7 +4194,7 @@ export default function Home() {
         }
 
         for (const date of dates) {
-          const cached = readDailyCache(selection, date)
+          const cached = readDailyCache(cacheScope, date)
           if (cached) dailyByDate.set(date, cached)
         }
         if (dailyByDate.size > 0) applyExactDashboard()
@@ -4195,7 +4211,7 @@ export default function Home() {
           const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
           const dayJson = await dayRes.json()
           if (dayJson.daily) {
-            writeDailyCache(selection, date, dayJson.daily)
+            writeDailyCache(cacheScope, date, dayJson.daily)
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
@@ -4210,7 +4226,7 @@ export default function Home() {
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt])
+  }, [selectedDashEnt, entrepreneurs])
 
   if (!authChecked) {
     return (
