@@ -170,8 +170,7 @@ function normalizeApiKey(apiKey: string): string {
 }
 
 function wbAuthHeader(apiKey: string): string {
-  const token = apiKey.trim()
-  return token.toLowerCase().startsWith('bearer ') ? token : `Bearer ${token}`
+  return normalizeApiKey(apiKey)
 }
 
 function getDirectProductName(order: any): string {
