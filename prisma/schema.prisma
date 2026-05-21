@@ -12,8 +12,19 @@ model Entrepreneur {
   name     String       @unique
   wbApiKey String?
   wbPromotionApiKey String?
+  userId   Int?
+  user     User?        @relation(fields: [userId], references: [id])
   orders   DailyOrder[]
   adSpends AdSpend[]
+}
+
+model User {
+  id           Int            @id @default(autoincrement())
+  username     String         @unique
+  passwordHash String
+  role         String         @default("user")
+  createdAt    DateTime       @default(now())
+  entrepreneurs Entrepreneur[]
 }
 
 model Product {

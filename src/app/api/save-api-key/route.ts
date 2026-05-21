@@ -1,8 +1,12 @@
 import { db } from '@/lib/db'
+import { forbidden, getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return unauthorized()
+
   // On Vercel, API keys are managed via environment variables, not the database
   if (isVercel()) {
     return NextResponse.json({
@@ -13,25 +17,31 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { entrepreneurId, apiKey } = body
+    const { entrepreneurId, apiKey, promotionApiKey } = body
 
-    if (!entrepreneurId || !apiKey) {
-      return NextResponse.json({ error: 'entrepreneurId и apiKey обязательны' }, { status: 400 })
+    if (!entrepreneurId || (!apiKey && !promotionApiKey)) {
+      return NextResponse.json({ error: 'entrepreneurId и хотя бы один API ключ обязательны' }, { status: 400 })
     }
 
     const entId = Number(entrepreneurId)
 
     // Verify entrepreneur exists
-    const entResult = await db.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM Entrepreneur WHERE id = ${entId}`
+    const entResult = await db.$queryRawUnsafe<Array<{ id: number; userId: number | null }>>(
+      `SELECT id, userId FROM Entrepreneur WHERE id = ${entId}`
     )
 
     if (!entResult.length) {
       return NextResponse.json({ error: 'ИП не найден' }, { status: 404 })
     }
+    if (user.role !== 'admin' && entResult[0].userId !== user.id) return forbidden()
 
     // Update API key using parameterized query to prevent corruption and SQL injection
-    await db.$executeRaw`UPDATE Entrepreneur SET wbApiKey = ${apiKey} WHERE id = ${entId}`
+    if (apiKey) {
+      await db.$executeRaw`UPDATE Entrepreneur SET wbApiKey = ${String(apiKey).trim()} WHERE id = ${entId}`
+    }
+    if (promotionApiKey) {
+      await db.$executeRaw`UPDATE Entrepreneur SET wbPromotionApiKey = ${String(promotionApiKey).trim()} WHERE id = ${entId}`
+    }
 
     return NextResponse.json({ success: true, entrepreneurId: entId })
   } catch (error) {
@@ -41,6 +51,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return unauthorized()
+
   // On Vercel, API keys are managed via environment variables, not the database
   if (isVercel()) {
     return NextResponse.json({
@@ -58,6 +71,12 @@ export async function DELETE(request: NextRequest) {
     }
 
     const entId = Number(entrepreneurId)
+
+    const entResult = await db.$queryRawUnsafe<Array<{ id: number; userId: number | null }>>(
+      `SELECT id, userId FROM Entrepreneur WHERE id = ${entId}`
+    )
+    if (!entResult.length) return NextResponse.json({ error: 'ИП не найден' }, { status: 404 })
+    if (user.role !== 'admin' && entResult[0].userId !== user.id) return forbidden()
 
     await db.$executeRaw`UPDATE Entrepreneur SET wbApiKey = NULL WHERE id = ${entId}`
 

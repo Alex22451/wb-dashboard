@@ -23,6 +23,9 @@ import {
   Truck,
   RefreshCw,
   MapPin,
+  LogOut,
+  User,
+  Lock,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -129,6 +132,12 @@ interface EntrepreneurInfo {
   wbApiKey: string | null
   totalOrders: number
   hasApiKey: boolean
+}
+
+interface AuthUser {
+  id: number
+  username: string
+  role: 'admin' | 'user'
 }
 
 interface MonthlyData {
@@ -343,6 +352,97 @@ function EmptyState({ message, icon }: { message: string; icon?: React.ReactNode
         <p className="text-muted-foreground text-lg font-medium">{message}</p>
       </CardContent>
     </Card>
+  )
+}
+
+function AuthScreen({ onAuth }: { onAuth: (user: AuthUser) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error || 'Ошибка авторизации')
+        return
+      }
+      onAuth(json.user)
+    } catch {
+      setError('Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <div className="h-10 w-10 rounded-lg bg-emerald-600 flex items-center justify-center mb-2">
+            <Package className="h-5 w-5 text-white" />
+          </div>
+          <CardTitle>{mode === 'login' ? 'Вход в WB Отчёты' : 'Создать аккаунт'}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <div className="space-y-2">
+            <Label>Ник</Label>
+            <div className="relative">
+              <User className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+                className="pl-9"
+                autoComplete="username"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Пароль</Label>
+            <div className="relative">
+              <Lock className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+                className="pl-9"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              />
+            </div>
+          </div>
+          <Button onClick={submit} disabled={loading || !username.trim() || !password} className="w-full">
+            {loading ? 'Проверка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login')
+              setError(null)
+            }}
+          >
+            {mode === 'login' ? 'Создать новый аккаунт' : 'Уже есть аккаунт'}
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 
@@ -3387,21 +3487,27 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogEntId, setDialogEntId] = useState<string>('')
   const [dialogKey, setDialogKey] = useState<string>('')
+  const [dialogPromotionKey, setDialogPromotionKey] = useState<string>('')
   const [dialogSaving, setDialogSaving] = useState(false)
 
-  const handleSave = async (entId: number, apiKey: string) => {
-    if (!apiKey.trim()) return
+  const handleSave = async (entId: number, apiKey: string, promotionApiKey: string) => {
+    if (!apiKey.trim() && !promotionApiKey.trim()) return
     setDialogSaving(true)
     try {
       const res = await fetch('/api/save-api-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entrepreneurId: entId, apiKey: apiKey.trim() }),
+        body: JSON.stringify({
+          entrepreneurId: entId,
+          apiKey: apiKey.trim(),
+          promotionApiKey: promotionApiKey.trim(),
+        }),
       })
       if (res.ok) {
         onRefresh()
         setDialogOpen(false)
         setDialogKey('')
+        setDialogPromotionKey('')
         setDialogEntId('')
       }
     } catch (e) {
@@ -3432,6 +3538,7 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
       setDialogEntId('')
     }
     setDialogKey('')
+    setDialogPromotionKey('')
     setDialogOpen(true)
   }
 
@@ -3490,12 +3597,22 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>API Ключ</Label>
+                <Label>API ключ Статистика</Label>
                 <Input
                   type="text"
-                  placeholder="Вставьте API ключ..."
+                  placeholder="Для заказов, остатков и поставок"
                   value={dialogKey}
                   onChange={(e) => setDialogKey(e.target.value)}
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>API ключ Продвижение</Label>
+                <Input
+                  type="text"
+                  placeholder="Для рекламы и роста, можно оставить пустым"
+                  value={dialogPromotionKey}
+                  onChange={(e) => setDialogPromotionKey(e.target.value)}
                   className="font-mono text-sm"
                 />
               </div>
@@ -3503,8 +3620,8 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Отмена</Button>
               <Button
-                onClick={() => handleSave(Number(dialogEntId), dialogKey)}
-                disabled={!dialogEntId || !dialogKey.trim() || dialogSaving}
+                onClick={() => handleSave(Number(dialogEntId), dialogKey, dialogPromotionKey)}
+                disabled={!dialogEntId || (!dialogKey.trim() && !dialogPromotionKey.trim()) || dialogSaving}
                 className="gap-2"
               >
                 <Save className="h-4 w-4" />
@@ -3630,6 +3747,8 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
 
 // --- Main Page ---
 export default function Home() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [entrepreneurs, setEntrepreneurs] = useState<EntrepreneurInfo[]>([])
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -3638,13 +3757,37 @@ export default function Home() {
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
 
-  // Fetch entrepreneurs list on mount (local DB only, no WB API)
-  useEffect(() => {
-    fetch('/api/entrepreneurs').then((r) => r.json()).then(setEntrepreneurs).catch(console.error)
+  const refreshEntrepreneurs = useCallback(() => {
+    fetch('/api/entrepreneurs')
+      .then((r) => r.ok ? r.json() : [])
+      .then(setEntrepreneurs)
+      .catch(console.error)
   }, [])
 
-  const refreshEntrepreneurs = useCallback(() => {
-    fetch('/api/entrepreneurs').then((r) => r.json()).then(setEntrepreneurs).catch(console.error)
+  // Fetch current user, then entrepreneurs list (local DB only, no WB API)
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((json) => {
+        setAuthUser(json.user)
+        if (json.user) refreshEntrepreneurs()
+      })
+      .catch(console.error)
+      .finally(() => setAuthChecked(true))
+  }, [refreshEntrepreneurs])
+
+  const handleAuth = useCallback((user: AuthUser) => {
+    setAuthUser(user)
+    refreshEntrepreneurs()
+  }, [refreshEntrepreneurs])
+
+  const handleLogout = useCallback(async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    setAuthUser(null)
+    setEntrepreneurs([])
+    setDashboard(null)
+    setSelectedDashEnt([])
+    setActiveTab('dashboard')
   }, [])
 
   // Explicit dashboard data load — only triggered by user clicking "Загрузить"
@@ -3670,6 +3813,18 @@ export default function Home() {
     }
   }, [selectedDashEnt])
 
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Skeleton className="h-12 w-64" />
+      </div>
+    )
+  }
+
+  if (!authUser) return <AuthScreen onAuth={handleAuth} />
+
+  const isAdmin = authUser.role === 'admin'
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -3683,11 +3838,20 @@ export default function Home() {
               <p className="hidden text-xs text-muted-foreground sm:block">Ежедневная аналитика заказов • 2026</p>
             </div>
           </div>
-          {dashboard?.latestDate && (
-            <Badge variant="outline" className="shrink-0 text-[10px] sm:text-xs">
-              Данные по: {formatDateFull(dashboard.latestDate)}
+          <div className="flex items-center gap-2">
+            {dashboard?.latestDate && (
+              <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex sm:text-xs">
+                Данные по: {formatDateFull(dashboard.latestDate)}
+              </Badge>
+            )}
+            <Badge variant={isAdmin ? 'default' : 'outline'} className="shrink-0 text-[10px] sm:text-xs">
+              {authUser.username}{isAdmin ? ' · админ' : ''}
             </Badge>
-          )}
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Выйти</span>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -3723,10 +3887,12 @@ export default function Home() {
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Рост</span>
             </TabsTrigger>
-            <TabsTrigger value="compare" className="h-9 gap-2 px-3">
-              <GitCompare className="h-4 w-4" />
-              <span className="hidden sm:inline">API vs Excel</span>
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="compare" className="h-9 gap-2 px-3">
+                <GitCompare className="h-4 w-4" />
+                <span className="hidden sm:inline">API vs Excel</span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="apikeys" className="h-9 gap-2 px-3">
               <Key className="h-4 w-4" />
               <span className="hidden sm:inline">API Ключи</span>
@@ -3765,9 +3931,11 @@ export default function Home() {
           <TabsContent value="growth">
             <GrowthPotentialTab entrepreneurs={entrepreneurs} />
           </TabsContent>
-          <TabsContent value="compare">
-            <WbCompareTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
+          {isAdmin && (
+            <TabsContent value="compare">
+              <WbCompareTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
           <TabsContent value="apikeys">
             <ApiKeyTab entrepreneurs={entrepreneurs} onRefresh={refreshEntrepreneurs} />
           </TabsContent>

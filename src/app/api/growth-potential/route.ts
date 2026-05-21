@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface EntrepreneurRow {
@@ -188,6 +189,9 @@ function median(values: number[]): number {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user) return unauthorized()
+
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId')
     const dateTo = searchParams.get('dateTo') || new Date().toISOString().split('T')[0]
@@ -202,8 +206,9 @@ export async function GET(request: NextRequest) {
     const cached = getCached(cacheKey)
     if (cached) return NextResponse.json(cached)
 
+    const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
     const rows = await db.$queryRawUnsafe<EntrepreneurRow[]>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
+      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${userScope}`
     )
     const targets = parseEntrepreneurIds(entrepreneurId, rows).slice(0, 1)
     const errors: Array<{ id: number; name: string; error: string }> = []

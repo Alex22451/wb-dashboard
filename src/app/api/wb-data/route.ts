@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   mapWbOrderToProductKey,
@@ -154,6 +155,9 @@ async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<n
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user) return unauthorized()
+
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
@@ -210,8 +214,9 @@ export async function GET(request: NextRequest) {
     })()
 
     // Get entrepreneurs with API keys
+    const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
     const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != ''`
+      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${userScope}`
     )
     let targets: Array<{ id: number; name: string; wbApiKey: string }>
 

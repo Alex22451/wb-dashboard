@@ -51,5 +51,6 @@ prompt
 
 server.log
 db/*.db
+upload/
 # Skills directory
 /skills/

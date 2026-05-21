@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { forbidden, getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -485,6 +486,9 @@ async function fetchSalesFunnel(
 // ─── Main Compare Logic ─────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user) return unauthorized()
+
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId')
     const dateFrom = searchParams.get('dateFrom')
@@ -507,13 +511,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Get API key
-    const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string }>>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur WHERE id = ${entId}`
+    const entResult = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string; userId: number | null }>>(
+      `SELECT id, name, wbApiKey, userId FROM Entrepreneur WHERE id = ${entId}`
     )
 
     if (!entResult.length || !entResult[0].wbApiKey) {
       return NextResponse.json({ error: 'API ключ не найден для данного ИП' }, { status: 404 })
     }
+    if (user.role !== 'admin' && entResult[0].userId !== user.id) return forbidden()
 
     const entrepreneur = entResult[0]
     const apiKey = entrepreneur.wbApiKey

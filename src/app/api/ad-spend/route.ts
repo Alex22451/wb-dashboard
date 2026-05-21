@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs } from '@/lib/entrepreneurs-config'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -54,10 +55,11 @@ async function fetchWbAdCosts(apiKey: string, from: string, to: string): Promise
   return Array.isArray(data) ? data : []
 }
 
-async function getLocalEntrepreneurs(): Promise<EntrepreneurWithPromotionKey[]> {
+async function getLocalEntrepreneurs(userId?: number): Promise<EntrepreneurWithPromotionKey[]> {
   try {
+    const scope = userId ? `WHERE userId = ${userId}` : ''
     const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string | null; wbPromotionApiKey: string | null }>>(
-      `SELECT id, name, wbApiKey, wbPromotionApiKey FROM Entrepreneur ORDER BY id`
+      `SELECT id, name, wbApiKey, wbPromotionApiKey FROM Entrepreneur ${scope} ORDER BY id`
     )
     return rows.map((row) => ({
       id: row.id,
@@ -65,8 +67,9 @@ async function getLocalEntrepreneurs(): Promise<EntrepreneurWithPromotionKey[]> 
       promotionApiKey: row.wbPromotionApiKey || row.wbApiKey,
     }))
   } catch {
+    const scope = userId ? `WHERE userId = ${userId}` : ''
     const rows = await db.$queryRawUnsafe<Array<{ id: number; name: string; wbApiKey: string | null }>>(
-      `SELECT id, name, wbApiKey FROM Entrepreneur ORDER BY id`
+      `SELECT id, name, wbApiKey FROM Entrepreneur ${scope} ORDER BY id`
     )
     return rows.map((row) => ({
       id: row.id,
@@ -86,9 +89,14 @@ function getVercelEntrepreneurs(): EntrepreneurWithPromotionKey[] {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getCurrentUser()
+    if (!user) return unauthorized()
+
     const year = Number(request.nextUrl.searchParams.get('year')) || 2026
     const isVercel = !!process.env.VERCEL
-    const entrepreneurs = isVercel ? getVercelEntrepreneurs() : await getLocalEntrepreneurs()
+    const entrepreneurs = isVercel
+      ? (user.role === 'admin' ? getVercelEntrepreneurs() : [])
+      : await getLocalEntrepreneurs(user.role === 'admin' ? undefined : user.id)
     const months = getAvailableMonths(year)
 
     const grouped: Record<number, {
