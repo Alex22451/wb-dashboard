@@ -84,6 +84,7 @@ const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 request/min per seller account
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
+const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -224,10 +225,10 @@ function saleReturnToOrder(record: any): any {
   }
 }
 
-async function fetchFunnelProductOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
-  const cacheKey = `funnel-products:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
+  const cacheKey = `funnel-products-raw:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
-    const orders: any[] = []
+    const allProducts: any[] = []
     let offset = 0
     const limit = 1000
 
@@ -253,76 +254,141 @@ async function fetchFunnelProductOrders(apiKey: string, from: string, to: string
       })
 
       if (response.status === 429 || response.status === 461) {
-        return { orders, error: 'WB Analytics API ограничил загрузку воронки продаж. Подождите минуту и повторите.' }
+        return { products: allProducts, error: 'WB Analytics API ограничил загрузку воронки продаж. Подождите минуту и повторите.' }
       }
       if (response.status === 401 || response.status === 403) {
-        return { orders, error: `Нет доступа к воронке продаж (${response.status})` }
+        return { products: allProducts, error: `Нет доступа к воронке продаж (${response.status})` }
       }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
-        return { orders, error: `Ошибка воронки продаж (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}` }
+        return { products: allProducts, error: `Ошибка воронки продаж (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}` }
       }
 
       const data = await response.json()
       const products = data?.data?.products || []
-      for (const product of products) {
-        const count = Number(product?.statistic?.selected?.orderCount) || 0
-        if (count <= 0) continue
-        const item = product.product || {}
-        for (let i = 0; i < count; i++) {
-          orders.push({
-            date: `${to}T12:00:00`,
-            lastChangeDate: `${to}T12:00:00`,
-            supplierArticle: item.vendorCode || '',
-            nmId: item.nmId || 0,
-            subject: item.subjectName || '',
-            brand: item.brandName || '',
-            techSize: '',
-            warehouseType: '',
-            finishedPrice: 0,
-            priceWithDisc: 0,
-            totalPrice: 0,
-            forPay: 0,
-            odid: `funnel:${item.nmId || item.vendorCode || 'unknown'}:${i}`,
-            isFunnelOrder: true,
-          })
-        }
-      }
-
+      allProducts.push(...products)
       if (products.length < limit) break
       offset += limit
       await new Promise(resolve => setTimeout(resolve, 1200))
     }
 
-    return { orders }
+    return { products: allProducts }
   }, true)
 }
 
-async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
-  const dates = getDateRange(from, to)
-  if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
+function addFunnelProductOrders(orders: any[], product: any, count: number, date: string) {
+  if (count <= 0) return
+  const item = product.product || {}
+  for (let i = 0; i < count; i++) {
+    orders.push({
+      date: `${date}T12:00:00`,
+      lastChangeDate: `${date}T12:00:00`,
+      supplierArticle: item.vendorCode || '',
+      nmId: item.nmId || 0,
+      subject: item.subjectName || '',
+      brand: item.brandName || '',
+      techSize: '',
+      warehouseType: '',
+      finishedPrice: 0,
+      priceWithDisc: 0,
+      totalPrice: 0,
+      forPay: 0,
+      odid: `funnel:${item.nmId || item.vendorCode || 'unknown'}:${date}:${i}`,
+      isFunnelOrder: true,
+    })
+  }
+}
+
+async function fetchFunnelProductOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const result = await fetchFunnelProducts(apiKey, from, to)
+  const orders: any[] = []
+
+  for (const product of result.products) {
+    addFunnelProductOrders(orders, product, Number(product?.statistic?.selected?.orderCount) || 0, to)
+  }
+
+  return { orders, error: result.error }
+}
+
+async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const productsResult = await fetchFunnelProducts(apiKey, from, to)
+  const nmIds = [...new Set(
+    productsResult.products
+      .map(product => Number(product?.product?.nmId) || 0)
+      .filter(Boolean)
+  )]
+  if (nmIds.length === 0) return { orders: [], error: productsResult.error }
+
+  const productByNmId = new Map<number, any>()
+  for (const product of productsResult.products) {
+    const nmId = Number(product?.product?.nmId) || 0
+    if (nmId && !productByNmId.has(nmId)) productByNmId.set(nmId, product)
+  }
 
   const orders: any[] = []
   const errors: string[] = []
+  const chunkSize = 100
 
-  for (let i = 0; i < dates.length; i++) {
-    const day = dates[i]
-    const result = await fetchFunnelProductOrders(apiKey, day, day)
-    if (result.orders.length > 0) {
-      orders.push(...result.orders)
+  for (let offset = 0; offset < nmIds.length; offset += chunkSize) {
+    const chunk = nmIds.slice(offset, offset + chunkSize)
+    const response = await fetch(FUNNEL_PRODUCTS_HISTORY_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        selectedPeriod: { start: from, end: to },
+        nmIds: chunk,
+        skipDeletedNm: false,
+        aggregationLevel: 'day',
+      }),
+      signal: AbortSignal.timeout(45000),
+    })
+
+    if (response.status === 429 || response.status === 461) {
+      errors.push('WB Analytics API ограничил загрузку истории воронки. Подождите минуту и повторите.')
+      break
     }
-    if (result.error) {
-      errors.push(`${day}: ${result.error}`)
+    if (response.status === 401 || response.status === 403) {
+      errors.push(`Нет доступа к истории воронки продаж (${response.status})`)
+      break
     }
-    if (i < dates.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 700))
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      errors.push(`Ошибка истории воронки (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}`)
+      break
+    }
+
+    const rows = await response.json()
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const nmId = Number(row?.product?.nmId) || 0
+        const product = productByNmId.get(nmId) || row
+        for (const day of row?.history || []) {
+          const count = Number(day?.orderCount) || 0
+          const date = String(day?.date || '').slice(0, 10)
+          if (date >= from && date <= to) addFunnelProductOrders(orders, product, count, date)
+        }
+      }
+    }
+
+    if (offset + chunkSize < nmIds.length) {
+      await new Promise(resolve => setTimeout(resolve, 1200))
     }
   }
 
   return {
     orders,
-    error: errors.length > 0 ? errors.slice(0, 3).join('; ') : undefined,
+    error: [...(productsResult.error ? [productsResult.error] : []), ...errors].slice(0, 3).join('; ') || undefined,
   }
+}
+
+async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const dates = getDateRange(from, to)
+  if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
+  if (dates.length === 1) return fetchFunnelProductOrders(apiKey, from, to)
+  return fetchFunnelHistoryOrders(apiKey, from, to)
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
