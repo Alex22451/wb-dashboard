@@ -193,39 +193,26 @@ function getDirectProductName(order: any): string {
   return 'Товар без артикула'
 }
 
-async function fetchSalesFunnelSummary(
-  apiKey: string,
-  from: string,
-  to: string,
-  pastFrom?: string,
-  pastTo?: string
-): Promise<{ orders: number; revenue: number; pastOrders: number; pastRevenue: number }> {
-  const cacheKey = `funnel:${apiKeyFingerprint(apiKey)}:${from}:${to}:${pastFrom || ''}:${pastTo || ''}`
+async function fetchSalesFunnelSummary(apiKey: string, from: string, to: string): Promise<{ orders: number; revenue: number }> {
+  const cacheKey = `funnel:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DASHBOARD, async () => {
     let page = 1
     let orders = 0
     let revenue = 0
-    let pastOrders = 0
-    let pastRevenue = 0
 
     while (page <= 50) {
-      const body: Record<string, any> = {
-        page,
-        pageSize: 100,
-        selectedPeriod: { start: from, end: to },
-        orderBy: { field: 'orderCount', mode: 'desc' },
-      }
-      if (pastFrom && pastTo) {
-        body.pastPeriod = { start: pastFrom, end: pastTo }
-      }
-
       const response = await fetch(FUNNEL_API_URL, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          page,
+          pageSize: 100,
+          selectedPeriod: { start: from, end: to },
+          orderBy: { field: 'orderCount', mode: 'desc' },
+        }),
         signal: AbortSignal.timeout(30000),
       })
 
@@ -239,14 +226,12 @@ async function fetchSalesFunnelSummary(
       for (const product of products) {
         orders += Number(product?.statistic?.selected?.orderCount) || 0
         revenue += Number(product?.statistic?.selected?.orderSum) || 0
-        pastOrders += Number(product?.statistic?.past?.orderCount) || 0
-        pastRevenue += Number(product?.statistic?.past?.orderSum) || 0
       }
       if (products.length < 100) break
       page += 1
     }
 
-    return { orders, revenue: Math.round(revenue), pastOrders, pastRevenue: Math.round(pastRevenue) }
+    return { orders, revenue: Math.round(revenue) }
   })
 }
 
@@ -271,10 +256,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
-    const dashboardPeriodParam = searchParams.get('dashboardPeriod') || 'yesterday'
-    const dashboardPeriod = ['yesterday', 'week', 'twoWeeks', 'month'].includes(dashboardPeriodParam)
-      ? dashboardPeriodParam as 'yesterday' | 'week' | 'twoWeeks' | 'month'
-      : 'yesterday'
 
     // Calculate date range based on section
     const mskOffset = 3 * 60 * 60 * 1000
@@ -538,41 +519,31 @@ export async function GET(request: NextRequest) {
     if (needDashboard) {
       const useFunnelTotals = user.role === 'admin'
       const funnelErrors: Array<{ id: number; name: string; error: string }> = []
-      const funnelSummaryCache = new Map<string, {
-        total: number
-        revenue: number
-        pastTotal: number
-        pastRevenue: number
-        byEntrepreneur: Record<number, { orders: number; revenue: number; pastOrders: number; pastRevenue: number }>
-      }>()
-      const getFunnelSummaryForTargets = async (from: string, to: string, pastFrom?: string, pastTo?: string) => {
-        const key = `${from}:${to}:${pastFrom || ''}:${pastTo || ''}`
+      const funnelSummaryCache = new Map<string, { total: number; revenue: number; byEntrepreneur: Record<number, { orders: number; revenue: number }> }>()
+      const getFunnelSummaryForTargets = async (from: string, to: string) => {
+        const key = `${from}:${to}`
         const cached = funnelSummaryCache.get(key)
         if (cached) return cached
 
-        const byEntrepreneur: Record<number, { orders: number; revenue: number; pastOrders: number; pastRevenue: number }> = {}
+        const byEntrepreneur: Record<number, { orders: number; revenue: number }> = {}
         let total = 0
         let revenue = 0
-        let pastTotal = 0
-        let pastRevenue = 0
 
         for (const ent of targets) {
           try {
-            const summary = await fetchSalesFunnelSummary(ent.wbApiKey, from, to, pastFrom, pastTo)
+            const summary = await fetchSalesFunnelSummary(ent.wbApiKey, from, to)
             byEntrepreneur[ent.id] = summary
             total += summary.orders
             revenue += summary.revenue
-            pastTotal += summary.pastOrders
-            pastRevenue += summary.pastRevenue
             await new Promise(resolve => setTimeout(resolve, 300))
           } catch (error: any) {
             const message = `Воронка продаж: ${error.message || 'ошибка API'}`
             funnelErrors.push({ id: ent.id, name: ent.name, error: message })
-            byEntrepreneur[ent.id] = { orders: 0, revenue: 0, pastOrders: 0, pastRevenue: 0 }
+            byEntrepreneur[ent.id] = { orders: 0, revenue: 0 }
           }
         }
 
-        const result = { total, revenue, pastTotal, pastRevenue, byEntrepreneur }
+        const result = { total, revenue, byEntrepreneur }
         funnelSummaryCache.set(key, result)
         return result
       }
@@ -588,31 +559,6 @@ export async function GET(request: NextRequest) {
       const prevMonthDate = new Date(mskNow)
       prevMonthDate.setMonth(prevMonthDate.getMonth() - 1)
       const prevMonth = prevMonthDate.toISOString().substring(0, 7)
-      const getPeriodRange = (days: number) => {
-        const from = new Date(mskNow.getTime() - days * 86400000).toISOString().split('T')[0]
-        return { from, to: yesterdayMsk }
-      }
-      const getPreviousPeriodRange = (days: number) => {
-        const to = new Date(mskNow.getTime() - (days + 1) * 86400000).toISOString().split('T')[0]
-        const from = new Date(mskNow.getTime() - (days * 2) * 86400000).toISOString().split('T')[0]
-        return { from, to }
-      }
-      const periodDays: Record<typeof dashboardPeriod, number> = {
-        yesterday: 1,
-        week: 7,
-        twoWeeks: 14,
-        month: 30,
-      }
-      const selectedPeriodRange = getPeriodRange(periodDays[dashboardPeriod])
-      const selectedPreviousRange = getPreviousPeriodRange(periodDays[dashboardPeriod])
-      const selectedFunnelSummary = useFunnelTotals
-        ? await getFunnelSummaryForTargets(
-            selectedPeriodRange.from,
-            selectedPeriodRange.to,
-            selectedPreviousRange.from,
-            selectedPreviousRange.to
-          )
-        : null
 
       let totalOrders = allMappedOrders.length
       const yesterdayOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk).length
@@ -621,7 +567,7 @@ export async function GET(request: NextRequest) {
       const prevMonthOrders = allMappedOrders.filter(o => o.monthStr === prevMonth).length
 
       if (useFunnelTotals) {
-        totalOrders = selectedFunnelSummary?.total || 0
+        totalOrders = (await getFunnelSummaryForTargets(requestedDateFrom, requestedDateTo)).total
       }
 
       // FBS/FBO breakdown for yesterday and day before
@@ -647,8 +593,9 @@ export async function GET(request: NextRequest) {
         entStats[ent.id] = { id: ent.id, name: ent.name, totalOrders: 0 }
       }
       if (useFunnelTotals) {
+        const funnelTotal = await getFunnelSummaryForTargets(requestedDateFrom, requestedDateTo)
         for (const ent of targets) {
-          entStats[ent.id].totalOrders = selectedFunnelSummary?.byEntrepreneur[ent.id]?.orders || 0
+          entStats[ent.id].totalOrders = funnelTotal.byEntrepreneur[ent.id]?.orders || 0
         }
       } else {
         for (const o of allMappedOrders) {
@@ -698,7 +645,7 @@ export async function GET(request: NextRequest) {
 
       // Period summary stats (total, fbs, fbo for different periods)
       const calcPeriodStats = (days: number) => {
-        const { from } = getPeriodRange(days)
+        const from = new Date(mskNow.getTime() - days * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= from && o.dateStr <= yesterdayMsk)
         return {
           total: periodOrders.length,
@@ -712,7 +659,8 @@ export async function GET(request: NextRequest) {
 
       // Previous period stats (same length, just shifted back)
       const calcPrevPeriodStats = (days: number) => {
-        const { from: prevFrom, to: prevTo } = getPreviousPeriodRange(days)
+        const prevTo = new Date(mskNow.getTime() - (days + 1) * 86400000).toISOString().split('T')[0]
+        const prevFrom = new Date(mskNow.getTime() - (days * 2) * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= prevFrom && o.dateStr <= prevTo)
         return {
           total: periodOrders.length,
@@ -735,18 +683,6 @@ export async function GET(request: NextRequest) {
         week: calcPrevPeriodStats(7),
         twoWeeks: calcPrevPeriodStats(14),
         month: calcPrevPeriodStats(30),
-      }
-      if (useFunnelTotals && selectedFunnelSummary) {
-        dashboardPeriodStats[dashboardPeriod] = {
-          ...dashboardPeriodStats[dashboardPeriod],
-          total: selectedFunnelSummary.total,
-          revenue: selectedFunnelSummary.revenue,
-        }
-        dashboardPrevPeriodStats[dashboardPeriod] = {
-          ...dashboardPrevPeriodStats[dashboardPeriod],
-          total: selectedFunnelSummary.pastTotal,
-          revenue: selectedFunnelSummary.pastRevenue,
-        }
       }
 
       const calcProductDynamics = (period: keyof typeof dashboardPeriodStats) => {
@@ -859,7 +795,6 @@ export async function GET(request: NextRequest) {
         prevPeriodStats: dashboardPrevPeriodStats,
         adSpendByPeriod,
         productDynamics,
-        orderSource: useFunnelTotals ? 'salesFunnel' : 'orders',
       }
     }
 
