@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v4:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v5:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -310,6 +310,26 @@ async function fetchFunnelProductOrders(apiKey: string, from: string, to: string
   return { orders, error: result.error }
 }
 
+async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): Promise<{ orders: any[]; error?: string }> {
+  const orders: any[] = []
+  const errors: string[] = []
+
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i]
+    const result = await fetchFunnelProductOrders(apiKey, date, date)
+    if (result.orders.length > 0) orders.push(...result.orders)
+    if (result.error) errors.push(result.error)
+    if (i < dates.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 2500))
+    }
+  }
+
+  return {
+    orders,
+    error: errors.slice(0, 3).join('; ') || undefined,
+  }
+}
+
 async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
   const productsResult = await fetchFunnelProducts(apiKey, from, to)
   const nmIds = [...new Set(
@@ -399,8 +419,16 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
       ? await fetchFunnelProductOrders(apiKey, chunk[0], chunk[0])
       : await fetchFunnelHistoryOrders(apiKey, chunk[0], chunk[chunk.length - 1])
 
-    if (result.orders.length > 0) orders.push(...result.orders)
-    if (result.error) errors.push(result.error)
+    if (result.orders.length > 0) {
+      orders.push(...result.orders)
+    } else if (result.error && chunk.length > 1) {
+      const dailyFallback = await fetchFunnelProductOrdersByDate(apiKey, chunk)
+      if (dailyFallback.orders.length > 0) orders.push(...dailyFallback.orders)
+      if (dailyFallback.error) errors.push(dailyFallback.error)
+      if (dailyFallback.orders.length === 0 && !dailyFallback.error) errors.push(result.error)
+    } else if (result.error) {
+      errors.push(result.error)
+    }
     if (i + maxHistoryDays < dates.length) {
       await new Promise(resolve => setTimeout(resolve, 1800))
     }
@@ -587,7 +615,7 @@ export async function GET(request: NextRequest) {
           const funnel = needDaily
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
-          if (funnel.orders.length > 0) {
+          if (funnel.orders.length > 0 || funnel.error) {
             return {
               entrepreneurId: ent.id,
               entrepreneurName: ent.name,
