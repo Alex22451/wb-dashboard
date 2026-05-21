@@ -61,6 +61,7 @@ import { ru } from 'date-fns/locale'
 
 // Types
 interface DashboardData {
+  orderSource?: 'salesFunnel' | 'orders'
   totalOrders: number
   yesterdayOrders: number
   dayBeforeYesterdayOrders: number
@@ -575,7 +576,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
   selectedEnt: string[]
   onSelectEnt: (ids: string[]) => void
   dataSource?: 'excel' | 'wbapi'
-  onLoad: () => void
+  onLoad: (period?: 'yesterday' | 'week' | 'twoWeeks' | 'month') => void
   loading: boolean
   rateLimitErrors: RateLimitError[]
 }) {
@@ -584,7 +585,10 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
 
   // Period change is purely client-side — periodStats for all periods are already in data
   const handlePeriodChange = (v: string) => {
-    if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month')
+    if (!v) return
+    const next = v as 'yesterday' | 'week' | 'twoWeeks' | 'month'
+    setDashboardPeriod(next)
+    if (data && selectedEnt.length > 0) onLoad(next)
   }
 
   // Current period stats
@@ -620,6 +624,13 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
     : []
 
   const comparisonChartData = data && currentPeriod && prevPeriod ? (() => {
+    if (data.orderSource === 'salesFunnel') {
+      return [{
+        date: 'Итого',
+        current: currentPeriod.total,
+        previous: prevPeriod.total,
+      }]
+    }
     const currentDates = data.chartDates.filter(d => d >= currentPeriod.dateFrom && d <= currentPeriod.dateTo)
     const previousDates = data.chartDates.filter(d => d >= prevPeriod.dateFrom && d <= prevPeriod.dateTo)
     const len = Math.max(currentDates.length, previousDates.length)
@@ -660,7 +671,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSourc
           <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
           <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
         </ToggleGroup>
-        <Button onClick={onLoad} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
+        <Button onClick={() => onLoad(dashboardPeriod)} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -3896,7 +3907,7 @@ export default function Home() {
   }, [])
 
   // Explicit dashboard data load — only triggered by user clicking "Загрузить"
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (period: 'yesterday' | 'week' | 'twoWeeks' | 'month' = 'yesterday') => {
     if (selectedDashEnt.length === 0) return
     setDashboardLoading(true)
     setRateLimitErrors([])
@@ -3904,6 +3915,7 @@ export default function Home() {
       const params = new URLSearchParams()
       params.set('entrepreneurId', selectionToParam(selectedDashEnt))
       params.set('section', 'dashboard')
+      params.set('dashboardPeriod', period)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       if (json.dashboard) {
