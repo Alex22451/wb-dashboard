@@ -20,6 +20,7 @@ interface CacheEntry {
 }
 
 const apiCache = new Map<string, CacheEntry>()
+const inFlightRequests = new Map<string, Promise<any>>()
 
 function getCacheKey(entId: number, dateFrom: string, dateTo: string): string {
   return `${entId}:orders:${dateFrom}:${dateTo}`
@@ -50,10 +51,32 @@ function setCache(key: string, data: any, ttlMs: number): void {
   }
 }
 
+async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promise<T>, cacheErrors = false): Promise<T> {
+  const cached = getCached(key)
+  if (cached) return cached
+
+  const inFlight = inFlightRequests.get(key)
+  if (inFlight) return inFlight
+
+  const promise = loader()
+    .then((result: any) => {
+      const ttl = result?.error ? CACHE_TTL_RATE_LIMIT : ttlMs
+      if (cacheErrors || !result?.error) setCache(key, result, ttl)
+      return result
+    })
+    .finally(() => {
+      inFlightRequests.delete(key)
+    })
+
+  inFlightRequests.set(key, promise)
+  return promise
+}
+
 const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
 const CACHE_TTL_DAILY = 2 * 60 * 1000       // 2 min
 const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
+const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 request/min per seller account
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
@@ -313,64 +336,53 @@ export async function GET(request: NextRequest) {
       const ent = targets[i]
       const cacheKey = getCacheKey(ent.id, apiDateFrom, dateTo)
 
-      // Check cache first
-      const cached = getCached(cacheKey)
-      if (cached) {
-        results.push(cached)
-        continue
-      }
-
-      const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
-
       // Delay between entrepreneurs (1s) to respect rate limits
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
 
-      let orders: any[] = []
-      let error: string | undefined
+      const result = await cachedRequest(cacheKey, cacheTtl, async () => {
+        const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
+        let orders: any[] = []
+        let error: string | undefined
 
-      try {
-        // flag=0 returns the complete dataset filtered by lastChangeDate (not order date).
-        // We use flag=0 instead of flag=1 because flag=1 returns a tiny broken subset.
-        // We do NOT filter out isCancel because Excel "Воронка продаж" counts ALL orders
-        // including cancelled ones. Matching Excel requires keeping cancelled orders.
-        // NOTE: WB API dateFrom filters by lastChangeDate, not order date.
-        // We add a 2-day buffer and filter client-side by actual order date.
-        const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
-        const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+        try {
+          // flag=0 returns the complete dataset filtered by lastChangeDate (not order date).
+          // We use flag=0 instead of flag=1 because flag=1 returns a tiny broken subset.
+          // We do NOT filter out isCancel because Excel "Воронка продаж" counts ALL orders
+          // including cancelled ones. Matching Excel requires keeping cancelled orders.
+          // NOTE: WB API dateFrom filters by lastChangeDate, not order date.
+          // We add a 2-day buffer and filter client-side by actual order date.
+          const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
+          const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
 
-        if (response.status === 429 || response.status === 461) {
-          console.log(`WB API rate limited for ${ent.name}, skipping (429)`)
-          error = 'Превышен лимит запросов (429), попробуйте позже'
-        } else if (response.status === 401) {
-          console.log(`WB API unauthorized for ${ent.name} (401)`)
-          error = 'Неверный API ключ (401)'
-        } else if (response.ok) {
-          const allOrders = await response.json()
-          if (Array.isArray(allOrders)) {
-            orders = filterToDateRange(allOrders, dateFrom, dateTo)
+          if (response.status === 429 || response.status === 461) {
+            console.log(`WB API rate limited for ${ent.name}, skipping (429)`)
+            error = 'WB API разрешает только 1 запрос в минуту к заказам. Подождите минуту и повторите.'
+          } else if (response.status === 401) {
+            console.log(`WB API unauthorized for ${ent.name} (401)`)
+            error = 'Неверный API ключ (401)'
+          } else if (response.ok) {
+            const allOrders = await response.json()
+            if (Array.isArray(allOrders)) {
+              orders = filterToDateRange(allOrders, dateFrom, dateTo)
+            }
+          } else {
+            console.log(`WB API error for ${ent.name}: ${response.status}`)
+            error = `Ошибка API (${response.status})`
           }
-        } else {
-          console.log(`WB API error for ${ent.name}: ${response.status}`)
-          error = `Ошибка API (${response.status})`
+        } catch (_e) {
+          console.log(`WB API network error for ${ent.name}`)
+          error = 'Ошибка сети'
         }
-      } catch (_e) {
-        console.log(`WB API network error for ${ent.name}`)
-        error = 'Ошибка сети'
-      }
 
-      const result = {
-        entrepreneurId: ent.id,
-        entrepreneurName: ent.name,
-        orders,
-        error,
-      }
-
-      // Cache only successful results (with orders)
-      if (!error) {
-        setCache(cacheKey, result, cacheTtl)
-      }
+        return {
+          entrepreneurId: ent.id,
+          entrepreneurName: ent.name,
+          orders,
+          error,
+        }
+      }, true)
 
       results.push(result)
     }
