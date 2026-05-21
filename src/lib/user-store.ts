@@ -14,6 +14,10 @@ export interface UserApiKeys {
   promotionApiKey: string | null
 }
 
+export interface UserPreferences {
+  visibleTabs: string[]
+}
+
 export interface WbTarget {
   id: number
   name: string
@@ -140,6 +144,10 @@ function apiKeysKey(id: number) {
   return `wb_user_${id}_api_keys`
 }
 
+function preferencesKey(id: number) {
+  return `wb_user_${id}_preferences`
+}
+
 export async function getStoredUserById(id: number): Promise<StoredUser | null> {
   const raw = await kvGet<string>(userKey(id))
   return raw ? JSON.parse(raw) : null
@@ -194,6 +202,16 @@ export async function saveUserApiKeys(id: number, keys: Partial<UserApiKeys>): P
 export async function clearUserApiKey(id: number): Promise<void> {
   const existing = await getUserApiKeys(id)
   await kvSet(apiKeysKey(id), JSON.stringify({ ...existing, apiKey: null }))
+}
+
+export async function getUserPreferences(id: number): Promise<UserPreferences | null> {
+  const raw = await kvGet<string>(preferencesKey(id))
+  return raw ? JSON.parse(raw) : null
+}
+
+export async function saveUserPreferences(id: number, preferences: UserPreferences): Promise<UserPreferences> {
+  await kvSet(preferencesKey(id), JSON.stringify(preferences))
+  return preferences
 }
 
 export async function getVercelEntrepreneursForUser(user: CurrentUser) {

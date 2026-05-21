@@ -26,6 +26,7 @@ import {
   LogOut,
   User,
   Lock,
+  Settings2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -138,6 +139,21 @@ interface AuthUser {
   id: number
   username: string
   role: 'admin' | 'user'
+}
+
+const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'compare'] as const
+type OptionalTabId = typeof OPTIONAL_TAB_IDS[number]
+
+const DEFAULT_VISIBLE_OPTIONAL_TABS: OptionalTabId[] = [...OPTIONAL_TAB_IDS]
+
+const OPTIONAL_TAB_LABELS: Record<OptionalTabId, string> = {
+  daily: 'Ежедневные',
+  production: 'Нагрузка на производство',
+  supply: 'Поставки',
+  monthly: 'Динамика',
+  ads: 'Реклама',
+  growth: 'Рост',
+  compare: 'API vs Excel',
 }
 
 interface MonthlyData {
@@ -3780,6 +3796,12 @@ export default function Home() {
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
+  const [visibleOptionalTabs, setVisibleOptionalTabs] = useState<OptionalTabId[]>(DEFAULT_VISIBLE_OPTIONAL_TABS)
+  const isAdmin = authUser?.role === 'admin'
+  const tabEnabled = useCallback((tabId: OptionalTabId) => {
+    if (tabId === 'compare' && !isAdmin) return false
+    return visibleOptionalTabs.includes(tabId)
+  }, [isAdmin, visibleOptionalTabs])
 
   const refreshEntrepreneurs = useCallback(() => {
     fetch('/api/entrepreneurs')
@@ -3805,12 +3827,71 @@ export default function Home() {
     refreshEntrepreneurs()
   }, [refreshEntrepreneurs])
 
+  useEffect(() => {
+    if (!authUser) return
+
+    const storageKey = `wb-visible-tabs-${authUser.id}`
+    const normalizeTabs = (tabs: unknown): OptionalTabId[] => {
+      if (!Array.isArray(tabs)) return DEFAULT_VISIBLE_OPTIONAL_TABS.filter((tab) => isAdmin || tab !== 'compare')
+      const allowed = new Set<OptionalTabId>(OPTIONAL_TAB_IDS)
+      return [...new Set(tabs)]
+        .filter((tab): tab is OptionalTabId => typeof tab === 'string' && allowed.has(tab as OptionalTabId))
+        .filter((tab) => isAdmin || tab !== 'compare')
+    }
+    const readLocalTabs = () => {
+      try {
+        const localTabs = window.localStorage.getItem(storageKey)
+        return localTabs ? normalizeTabs(JSON.parse(localTabs)) : normalizeTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
+      } catch {
+        return normalizeTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
+      }
+    }
+
+    fetch('/api/user-preferences')
+      .then((r) => r.ok ? r.json() : null)
+      .then((json) => {
+        const serverTabs = json?.preferences?.visibleTabs
+        if (serverTabs) {
+          setVisibleOptionalTabs(normalizeTabs(serverTabs))
+          return
+        }
+        setVisibleOptionalTabs(readLocalTabs())
+      })
+      .catch(() => {
+        setVisibleOptionalTabs(readLocalTabs())
+      })
+  }, [authUser, isAdmin])
+
+  useEffect(() => {
+    if (!authUser) return
+    const visibleTabs = new Set(['dashboard', 'apikeys', ...visibleOptionalTabs.filter((tab) => tab !== 'compare' || isAdmin)])
+    if (!visibleTabs.has(activeTab)) setActiveTab('dashboard')
+  }, [activeTab, authUser, isAdmin, visibleOptionalTabs])
+
+  const updateVisibleTab = useCallback((tabId: OptionalTabId, enabled: boolean) => {
+    if (tabId === 'compare' && !isAdmin) return
+    const next = enabled
+      ? ([...new Set([...visibleOptionalTabs, tabId])] as OptionalTabId[])
+      : visibleOptionalTabs.filter((tab) => tab !== tabId)
+
+    setVisibleOptionalTabs(next)
+    if (authUser) {
+      window.localStorage.setItem(`wb-visible-tabs-${authUser.id}`, JSON.stringify(next))
+    }
+    fetch('/api/user-preferences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visibleTabs: next }),
+    }).catch(console.error)
+  }, [authUser, isAdmin, visibleOptionalTabs])
+
   const handleLogout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
     setAuthUser(null)
     setEntrepreneurs([])
     setDashboard(null)
     setSelectedDashEnt([])
+    setVisibleOptionalTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
     setActiveTab('dashboard')
   }, [])
 
@@ -3847,8 +3928,6 @@ export default function Home() {
 
   if (!authUser) return <AuthScreen onAuth={handleAuth} />
 
-  const isAdmin = authUser.role === 'admin'
-
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -3871,6 +3950,33 @@ export default function Home() {
             <Badge variant={isAdmin ? 'default' : 'outline'} className="shrink-0 text-[10px] sm:text-xs">
               {authUser.username}{isAdmin ? ' · админ' : ''}
             </Badge>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-2">
+                  <Settings2 className="h-4 w-4" />
+                  <span className="hidden sm:inline">Разделы</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Разделы</DialogTitle>
+                  <DialogDescription>
+                    Выберите вкладки, которые будут показываться в вашем аккаунте.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                  {OPTIONAL_TAB_IDS.filter((tabId) => isAdmin || tabId !== 'compare').map((tabId) => (
+                    <label key={tabId} className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+                      <span className="text-sm font-medium">{OPTIONAL_TAB_LABELS[tabId]}</span>
+                      <Switch
+                        checked={tabEnabled(tabId)}
+                        onCheckedChange={(checked) => updateVisibleTab(tabId, checked)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2">
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Выйти</span>
@@ -3887,31 +3993,43 @@ export default function Home() {
               <LayoutDashboard className="h-4 w-4" />
               <span className="hidden sm:inline">Сводка</span>
             </TabsTrigger>
-            <TabsTrigger value="daily" className="h-9 gap-2 px-3">
-              <Table2 className="h-4 w-4" />
-              <span className="hidden sm:inline">Ежедневные</span>
-            </TabsTrigger>
-            <TabsTrigger value="production" className="h-9 gap-2 px-3">
-              <Thermometer className="h-4 w-4" />
-              <span className="hidden sm:inline">Нагрузка</span>
-            </TabsTrigger>
-            <TabsTrigger value="supply" className="h-9 gap-2 px-3">
-              <Truck className="h-4 w-4" />
-              <span className="hidden sm:inline">Поставки</span>
-            </TabsTrigger>
-            <TabsTrigger value="monthly" className="h-9 gap-2 px-3">
-              <Calendar className="h-4 w-4" />
-              <span className="hidden sm:inline">Динамика</span>
-            </TabsTrigger>
-            <TabsTrigger value="ads" className="h-9 gap-2 px-3">
-              <Megaphone className="h-4 w-4" />
-              <span className="hidden sm:inline">Реклама</span>
-            </TabsTrigger>
-            <TabsTrigger value="growth" className="h-9 gap-2 px-3">
-              <TrendingUp className="h-4 w-4" />
-              <span className="hidden sm:inline">Рост</span>
-            </TabsTrigger>
-            {isAdmin && (
+            {tabEnabled('daily') && (
+              <TabsTrigger value="daily" className="h-9 gap-2 px-3">
+                <Table2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Ежедневные</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('production') && (
+              <TabsTrigger value="production" className="h-9 gap-2 px-3">
+                <Thermometer className="h-4 w-4" />
+                <span className="hidden sm:inline">Нагрузка</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('supply') && (
+              <TabsTrigger value="supply" className="h-9 gap-2 px-3">
+                <Truck className="h-4 w-4" />
+                <span className="hidden sm:inline">Поставки</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('monthly') && (
+              <TabsTrigger value="monthly" className="h-9 gap-2 px-3">
+                <Calendar className="h-4 w-4" />
+                <span className="hidden sm:inline">Динамика</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('ads') && (
+              <TabsTrigger value="ads" className="h-9 gap-2 px-3">
+                <Megaphone className="h-4 w-4" />
+                <span className="hidden sm:inline">Реклама</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('growth') && (
+              <TabsTrigger value="growth" className="h-9 gap-2 px-3">
+                <TrendingUp className="h-4 w-4" />
+                <span className="hidden sm:inline">Рост</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('compare') && (
               <TabsTrigger value="compare" className="h-9 gap-2 px-3">
                 <GitCompare className="h-4 w-4" />
                 <span className="hidden sm:inline">API vs Excel</span>
@@ -3937,25 +4055,37 @@ export default function Home() {
               rateLimitErrors={rateLimitErrors}
             />
           </TabsContent>
-          <TabsContent value="daily">
-            <DailyOrdersTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
-          <TabsContent value="production">
-            <ProductionLoadTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
-          <TabsContent value="supply">
-            <SupplyTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
-          <TabsContent value="monthly">
-            <MonthlyTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
-          <TabsContent value="ads">
-            <AdSpendTab />
-          </TabsContent>
-          <TabsContent value="growth">
-            <GrowthPotentialTab entrepreneurs={entrepreneurs} />
-          </TabsContent>
-          {isAdmin && (
+          {tabEnabled('daily') && (
+            <TabsContent value="daily">
+              <DailyOrdersTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {tabEnabled('production') && (
+            <TabsContent value="production">
+              <ProductionLoadTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {tabEnabled('supply') && (
+            <TabsContent value="supply">
+              <SupplyTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {tabEnabled('monthly') && (
+            <TabsContent value="monthly">
+              <MonthlyTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {tabEnabled('ads') && (
+            <TabsContent value="ads">
+              <AdSpendTab />
+            </TabsContent>
+          )}
+          {tabEnabled('growth') && (
+            <TabsContent value="growth">
+              <GrowthPotentialTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {tabEnabled('compare') && (
             <TabsContent value="compare">
               <WbCompareTab entrepreneurs={entrepreneurs} />
             </TabsContent>
