@@ -193,6 +193,20 @@ function getDirectProductName(order: any): string {
   return 'Товар без артикула'
 }
 
+function getDateRange(from: string, to: string, maxDays = 120): string[] {
+  const start = new Date(`${from}T00:00:00Z`)
+  const end = new Date(`${to}T00:00:00Z`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return []
+
+  const dates: string[] = []
+  const cursor = new Date(start)
+  while (cursor <= end && dates.length < maxDays) {
+    dates.push(cursor.toISOString().split('T')[0])
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return dates
+}
+
 function isReturnSale(record: any): boolean {
   const saleId = String(record.saleID || record.saleId || '')
   return saleId.startsWith('R')
@@ -282,6 +296,33 @@ async function fetchFunnelProductOrders(apiKey: string, from: string, to: string
 
     return { orders }
   }, true)
+}
+
+async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const dates = getDateRange(from, to)
+  if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
+
+  const orders: any[] = []
+  const errors: string[] = []
+
+  for (let i = 0; i < dates.length; i++) {
+    const day = dates[i]
+    const result = await fetchFunnelProductOrders(apiKey, day, day)
+    if (result.orders.length > 0) {
+      orders.push(...result.orders)
+    }
+    if (result.error) {
+      errors.push(`${day}: ${result.error}`)
+    }
+    if (i < dates.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 700))
+    }
+  }
+
+  return {
+    orders,
+    error: errors.length > 0 ? errors.slice(0, 3).join('; ') : undefined,
+  }
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
@@ -424,6 +465,9 @@ export async function GET(request: NextRequest) {
     const needMonthly = !section || section === 'monthly'
     const needProduction = !section || section === 'production'
     const needSupply = !section || section === 'supply'
+    const shouldUseFunnelOrders = !needProduction && !needSupply && (
+      needDaily || (useExactSingleDayStats && (needDashboard || needMonthly))
+    )
 
     // Fetch orders for each entrepreneur SEQUENTIALLY with delays
     // Use cache to avoid repeated API calls
@@ -452,15 +496,17 @@ export async function GET(request: NextRequest) {
         let error: string | undefined
         let returnError: string | undefined
 
-        if (useExactSingleDayStats && (needDashboard || needDaily || needMonthly)) {
-          const funnel = await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
-          if (funnel.orders.length > 0 && !funnel.error) {
+        if (shouldUseFunnelOrders) {
+          const funnel = needDaily
+            ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
+            : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
+          if (funnel.orders.length > 0) {
             return {
               entrepreneurId: ent.id,
               entrepreneurName: ent.name,
               orders: funnel.orders,
               returns: [],
-              error: undefined,
+              error: funnel.error,
               returnError: undefined,
             }
           }
