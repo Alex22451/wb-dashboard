@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { normalizeUsername, setSessionCookie, validatePassword, validateUsername, verifyPassword } from '@/lib/auth'
+import { getEnvAdminUser, isEnvAdminCredentials, normalizeUsername, setSessionCookie, validatePassword, validateUsername, verifyPassword } from '@/lib/auth'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
@@ -13,6 +13,13 @@ export async function POST(request: NextRequest) {
 
     const passwordError = validatePassword(password)
     if (passwordError) return NextResponse.json({ error: 'Неверный ник или пароль' }, { status: 401 })
+
+    if (isEnvAdminCredentials(username, password)) {
+      const envAdmin = getEnvAdminUser()
+      const response = NextResponse.json({ user: envAdmin })
+      setSessionCookie(response, 0)
+      return response
+    }
 
     const rows = await db.$queryRawUnsafe<Array<{ id: number; username: string; passwordHash: string; role: string }>>(
       `SELECT id, username, passwordHash, role FROM User WHERE username = ? LIMIT 1`,

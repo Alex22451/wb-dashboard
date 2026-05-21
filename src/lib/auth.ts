@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
+import { normalizeUsername } from './password'
 export { hashPassword, normalizeUsername, validatePassword, validateUsername, verifyPassword } from './password'
 
 const SESSION_COOKIE = 'wb_session'
@@ -15,6 +16,19 @@ export interface CurrentUser {
 
 function getAuthSecret(): string {
   return process.env.AUTH_SECRET || 'dev-only-change-this-secret'
+}
+
+export function getEnvAdminUser(): CurrentUser | null {
+  const username = normalizeUsername(process.env.ADMIN_USERNAME || 'admin')
+  if (!process.env.ADMIN_PASSWORD) return null
+  return { id: 0, username, role: 'admin' }
+}
+
+export function isEnvAdminCredentials(username: string, password: string): boolean {
+  const envPassword = process.env.ADMIN_PASSWORD
+  if (!envPassword) return false
+  const envUsername = normalizeUsername(process.env.ADMIN_USERNAME || 'admin')
+  return normalizeUsername(username) === envUsername && safeEqual(password, envPassword)
 }
 
 function signPayload(payload: string): string {
@@ -62,6 +76,8 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const payload = `${userIdRaw}.${expiresRaw}`
   if (!safeEqual(signPayload(payload), signature)) return null
   if (Number(expiresRaw) < Date.now()) return null
+
+  if (userIdRaw === '0') return getEnvAdminUser()
 
   const rows = await db.$queryRawUnsafe<Array<{ id: number; username: string; role: string }>>(
     `SELECT id, username, role FROM User WHERE id = ? LIMIT 1`,
