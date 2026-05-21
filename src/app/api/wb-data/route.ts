@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v2:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -83,6 +83,7 @@ const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 request/min per seller account
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
+const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -207,6 +208,80 @@ function saleReturnToOrder(record: any): any {
     isCancel: false,
     odid: `return:${record.saleID || record.srid || record.gNumber || `${record.supplierArticle || ''}:${record.nmId || ''}:${record.date || ''}`}`,
   }
+}
+
+async function fetchFunnelProductOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const cacheKey = `funnel-products:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+  return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
+    const orders: any[] = []
+    let offset = 0
+    const limit = 1000
+
+    while (offset < 250000) {
+      const response = await fetch(FUNNEL_PRODUCTS_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selectedPeriod: { start: from, end: to },
+          nmIds: [],
+          brandNames: [],
+          subjectIds: [],
+          tagIds: [],
+          skipDeletedNm: false,
+          orderBy: { field: 'orderCount', mode: 'desc' },
+          limit,
+          offset,
+        }),
+        signal: AbortSignal.timeout(45000),
+      })
+
+      if (response.status === 429 || response.status === 461) {
+        return { orders, error: 'WB Analytics API ограничил загрузку воронки продаж. Подождите минуту и повторите.' }
+      }
+      if (response.status === 401 || response.status === 403) {
+        return { orders, error: `Нет доступа к воронке продаж (${response.status})` }
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        return { orders, error: `Ошибка воронки продаж (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}` }
+      }
+
+      const data = await response.json()
+      const products = data?.data?.products || []
+      for (const product of products) {
+        const count = Number(product?.statistic?.selected?.orderCount) || 0
+        if (count <= 0) continue
+        const item = product.product || {}
+        for (let i = 0; i < count; i++) {
+          orders.push({
+            date: `${to}T12:00:00`,
+            lastChangeDate: `${to}T12:00:00`,
+            supplierArticle: item.vendorCode || '',
+            nmId: item.nmId || 0,
+            subject: item.subjectName || '',
+            brand: item.brandName || '',
+            techSize: '',
+            warehouseType: '',
+            finishedPrice: 0,
+            priceWithDisc: 0,
+            totalPrice: 0,
+            forPay: 0,
+            odid: `funnel:${item.nmId || item.vendorCode || 'unknown'}:${i}`,
+            isFunnelOrder: true,
+          })
+        }
+      }
+
+      if (products.length < limit) break
+      offset += limit
+      await new Promise(resolve => setTimeout(resolve, 1200))
+    }
+
+    return { orders }
+  }, true)
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
@@ -344,6 +419,11 @@ export async function GET(request: NextRequest) {
       : section === 'production' ? CACHE_TTL_PRODUCTION
       : section === 'supply' ? CACHE_TTL_SUPPLY
       : CACHE_TTL_DASHBOARD
+    const needDashboard = !section || section === 'dashboard'
+    const needDaily = !section || section === 'daily'
+    const needMonthly = !section || section === 'monthly'
+    const needProduction = !section || section === 'production'
+    const needSupply = !section || section === 'supply'
 
     // Fetch orders for each entrepreneur SEQUENTIALLY with delays
     // Use cache to avoid repeated API calls
@@ -371,6 +451,23 @@ export async function GET(request: NextRequest) {
         let returns: any[] = []
         let error: string | undefined
         let returnError: string | undefined
+
+        if (useExactSingleDayStats && (needDashboard || needDaily || needMonthly)) {
+          const funnel = await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
+          if (funnel.orders.length > 0 && !funnel.error) {
+            return {
+              entrepreneurId: ent.id,
+              entrepreneurName: ent.name,
+              orders: funnel.orders,
+              returns: [],
+              error: undefined,
+              returnError: undefined,
+            }
+          }
+          if (funnel.error) {
+            error = funnel.error
+          }
+        }
 
         try {
           // flag=0 returns the complete dataset filtered by lastChangeDate (not order date).
@@ -521,12 +618,6 @@ export async function GET(request: NextRequest) {
       })
 
     // Build response based on requested section(s)
-    const needDashboard = !section || section === 'dashboard'
-    const needDaily = !section || section === 'daily'
-    const needMonthly = !section || section === 'monthly'
-    const needProduction = !section || section === 'production'
-    const needSupply = !section || section === 'supply'
-
     // Product types (shared across sections)
     const productTypes = [...new Set(allMappedOrders.map(o => o.mappedType))]
 
