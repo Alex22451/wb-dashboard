@@ -26,6 +26,11 @@ export interface WbTarget {
   wbPromotionApiKey?: string | null
 }
 
+export interface FunnelProductsCacheEntry {
+  products: any[]
+  cachedAt: string
+}
+
 function getRedisConfig() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
@@ -149,6 +154,10 @@ function preferencesKey(id: number) {
   return `wb_user_${id}_preferences`
 }
 
+function funnelProductsKey(apiKeyFingerprint: string, date: string) {
+  return `wb_funnel_products_${apiKeyFingerprint}_${date}`
+}
+
 export async function getStoredUserById(id: number): Promise<StoredUser | null> {
   const raw = await kvGet<string>(userKey(id))
   return raw ? JSON.parse(raw) : null
@@ -215,6 +224,18 @@ export async function getUserPreferences(id: number): Promise<UserPreferences | 
 export async function saveUserPreferences(id: number, preferences: UserPreferences): Promise<UserPreferences> {
   await kvSet(preferencesKey(id), JSON.stringify(preferences))
   return preferences
+}
+
+export async function getCachedFunnelProducts(apiKeyFingerprint: string, date: string): Promise<FunnelProductsCacheEntry | null> {
+  const raw = await kvGet<string>(funnelProductsKey(apiKeyFingerprint, date))
+  return raw ? JSON.parse(raw) : null
+}
+
+export async function saveCachedFunnelProducts(apiKeyFingerprint: string, date: string, products: any[]): Promise<void> {
+  await kvSet(funnelProductsKey(apiKeyFingerprint, date), JSON.stringify({
+    products,
+    cachedAt: new Date().toISOString(),
+  }))
 }
 
 export async function getVercelEntrepreneursForUser(user: CurrentUser) {
