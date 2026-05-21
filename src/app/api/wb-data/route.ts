@@ -83,6 +83,7 @@ const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
 const CACHE_TTL_STOCKS = 15 * 60 * 1000     // 15 min
 const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 request/min per seller account
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
+const FUNNEL_API_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -190,6 +191,48 @@ function getDirectProductName(order: any): string {
   if (subject) return subject
   if (nmId) return `nmId ${nmId}`
   return 'Товар без артикула'
+}
+
+async function fetchSalesFunnelSummary(apiKey: string, from: string, to: string): Promise<{ orders: number; revenue: number }> {
+  const cacheKey = `funnel:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+  return cachedRequest(cacheKey, CACHE_TTL_DASHBOARD, async () => {
+    let page = 1
+    let orders = 0
+    let revenue = 0
+
+    while (page <= 50) {
+      const response = await fetch(FUNNEL_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          page,
+          pageSize: 100,
+          selectedPeriod: { start: from, end: to },
+          orderBy: { field: 'orderCount', mode: 'desc' },
+        }),
+        signal: AbortSignal.timeout(30000),
+      })
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(`${response.status}: ${body.detail || body.title || body.message || 'ошибка воронки продаж'}`)
+      }
+
+      const data = await response.json()
+      const products = data?.data?.products || []
+      for (const product of products) {
+        orders += Number(product?.statistic?.selected?.orderCount) || 0
+        revenue += Number(product?.statistic?.selected?.orderSum) || 0
+      }
+      if (products.length < 100) break
+      page += 1
+    }
+
+    return { orders, revenue: Math.round(revenue) }
+  })
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
@@ -474,6 +517,37 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Dashboard ───
     if (needDashboard) {
+      const useFunnelTotals = user.role === 'admin'
+      const funnelErrors: Array<{ id: number; name: string; error: string }> = []
+      const funnelSummaryCache = new Map<string, { total: number; revenue: number; byEntrepreneur: Record<number, { orders: number; revenue: number }> }>()
+      const getFunnelSummaryForTargets = async (from: string, to: string) => {
+        const key = `${from}:${to}`
+        const cached = funnelSummaryCache.get(key)
+        if (cached) return cached
+
+        const byEntrepreneur: Record<number, { orders: number; revenue: number }> = {}
+        let total = 0
+        let revenue = 0
+
+        for (const ent of targets) {
+          try {
+            const summary = await fetchSalesFunnelSummary(ent.wbApiKey, from, to)
+            byEntrepreneur[ent.id] = summary
+            total += summary.orders
+            revenue += summary.revenue
+            await new Promise(resolve => setTimeout(resolve, 300))
+          } catch (error: any) {
+            const message = `Воронка продаж: ${error.message || 'ошибка API'}`
+            funnelErrors.push({ id: ent.id, name: ent.name, error: message })
+            byEntrepreneur[ent.id] = { orders: 0, revenue: 0 }
+          }
+        }
+
+        const result = { total, revenue, byEntrepreneur }
+        funnelSummaryCache.set(key, result)
+        return result
+      }
+
       // All dates in Moscow timezone (UTC+3)
       const mskOffset = 3 * 3600000
       const mskNow = new Date(Date.now() + mskOffset)
@@ -486,11 +560,19 @@ export async function GET(request: NextRequest) {
       prevMonthDate.setMonth(prevMonthDate.getMonth() - 1)
       const prevMonth = prevMonthDate.toISOString().substring(0, 7)
 
-      const totalOrders = allMappedOrders.length
-      const yesterdayOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk).length
-      const dayBeforeYesterdayOrders = allMappedOrders.filter(o => o.dateStr === dayBeforeMsk).length
-      const monthOrders = allMappedOrders.filter(o => o.monthStr === currentMonth).length
-      const prevMonthOrders = allMappedOrders.filter(o => o.monthStr === prevMonth).length
+      let totalOrders = allMappedOrders.length
+      let yesterdayOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk).length
+      let dayBeforeYesterdayOrders = allMappedOrders.filter(o => o.dateStr === dayBeforeMsk).length
+      let monthOrders = allMappedOrders.filter(o => o.monthStr === currentMonth).length
+      let prevMonthOrders = allMappedOrders.filter(o => o.monthStr === prevMonth).length
+
+      if (useFunnelTotals) {
+        totalOrders = (await getFunnelSummaryForTargets(requestedDateFrom, requestedDateTo)).total
+        yesterdayOrders = (await getFunnelSummaryForTargets(yesterdayMsk, yesterdayMsk)).total
+        dayBeforeYesterdayOrders = (await getFunnelSummaryForTargets(dayBeforeMsk, dayBeforeMsk)).total
+        monthOrders = (await getFunnelSummaryForTargets(`${currentMonth}-01`, yesterdayMsk)).total
+        prevMonthOrders = (await getFunnelSummaryForTargets(`${prevMonth}-01`, new Date(Date.UTC(Number(prevMonth.slice(0, 4)), Number(prevMonth.slice(5, 7)), 0)).toISOString().split('T')[0])).total
+      }
 
       // FBS/FBO breakdown for yesterday and day before
       const yesterdayFbsOrders = allMappedOrders.filter(o => o.dateStr === yesterdayMsk && o.isFbs).length
@@ -514,11 +596,18 @@ export async function GET(request: NextRequest) {
       for (const ent of targets) {
         entStats[ent.id] = { id: ent.id, name: ent.name, totalOrders: 0 }
       }
-      for (const o of allMappedOrders) {
-        if (!entStats[o.entrepreneurId]) {
-          entStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
+      if (useFunnelTotals) {
+        const funnelTotal = await getFunnelSummaryForTargets(requestedDateFrom, requestedDateTo)
+        for (const ent of targets) {
+          entStats[ent.id].totalOrders = funnelTotal.byEntrepreneur[ent.id]?.orders || 0
         }
-        entStats[o.entrepreneurId].totalOrders++
+      } else {
+        for (const o of allMappedOrders) {
+          if (!entStats[o.entrepreneurId]) {
+            entStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
+          }
+          entStats[o.entrepreneurId].totalOrders++
+        }
       }
 
       // Entrepreneur stats for rolling 7 days ending yesterday
@@ -530,11 +619,18 @@ export async function GET(request: NextRequest) {
       for (const ent of targets) {
         weekEntStats[ent.id] = { id: ent.id, name: ent.name, totalOrders: 0 }
       }
-      for (const o of weekOrders) {
-        if (!weekEntStats[o.entrepreneurId]) {
-          weekEntStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
+      if (useFunnelTotals) {
+        const funnelWeek = await getFunnelSummaryForTargets(weekFromDate, yesterdayMsk)
+        for (const ent of targets) {
+          weekEntStats[ent.id].totalOrders = funnelWeek.byEntrepreneur[ent.id]?.orders || 0
         }
-        weekEntStats[o.entrepreneurId].totalOrders++
+      } else {
+        for (const o of weekOrders) {
+          if (!weekEntStats[o.entrepreneurId]) {
+            weekEntStats[o.entrepreneurId] = { id: o.entrepreneurId, name: o.entrepreneurName, totalOrders: 0 }
+          }
+          weekEntStats[o.entrepreneurId].totalOrders++
+        }
       }
 
       // FBS/FBO daily breakdown for chart (last 60 days ending yesterday)
@@ -559,45 +655,47 @@ export async function GET(request: NextRequest) {
       }
 
       // Period summary stats (total, fbs, fbo for different periods)
-      const calcPeriodStats = (days: number) => {
+      const calcPeriodStats = async (days: number) => {
         const from = new Date(mskNow.getTime() - days * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= from && o.dateStr <= yesterdayMsk)
+        const funnel = useFunnelTotals ? await getFunnelSummaryForTargets(from, yesterdayMsk) : null
         return {
-          total: periodOrders.length,
+          total: funnel?.total ?? periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
-          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
+          revenue: funnel?.revenue ?? Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: from,
           dateTo: yesterdayMsk,
         }
       }
 
       // Previous period stats (same length, just shifted back)
-      const calcPrevPeriodStats = (days: number) => {
+      const calcPrevPeriodStats = async (days: number) => {
         const prevTo = new Date(mskNow.getTime() - (days + 1) * 86400000).toISOString().split('T')[0]
         const prevFrom = new Date(mskNow.getTime() - (days * 2) * 86400000).toISOString().split('T')[0]
         const periodOrders = allMappedOrders.filter(o => o.dateStr >= prevFrom && o.dateStr <= prevTo)
+        const funnel = useFunnelTotals ? await getFunnelSummaryForTargets(prevFrom, prevTo) : null
         return {
-          total: periodOrders.length,
+          total: funnel?.total ?? periodOrders.length,
           fbs: periodOrders.filter(o => o.isFbs).length,
           fbo: periodOrders.filter(o => !o.isFbs).length,
-          revenue: Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
+          revenue: funnel?.revenue ?? Math.round(periodOrders.reduce((sum, o) => sum + getOrderRevenue(o.order), 0)),
           dateFrom: prevFrom,
           dateTo: prevTo,
         }
       }
 
       const dashboardPeriodStats = {
-        yesterday: calcPeriodStats(1),
-        week: calcPeriodStats(7),
-        twoWeeks: calcPeriodStats(14),
-        month: calcPeriodStats(30),
+        yesterday: await calcPeriodStats(1),
+        week: await calcPeriodStats(7),
+        twoWeeks: await calcPeriodStats(14),
+        month: await calcPeriodStats(30),
       }
       const dashboardPrevPeriodStats = {
-        yesterday: calcPrevPeriodStats(1),
-        week: calcPrevPeriodStats(7),
-        twoWeeks: calcPrevPeriodStats(14),
-        month: calcPrevPeriodStats(30),
+        yesterday: await calcPrevPeriodStats(1),
+        week: await calcPrevPeriodStats(7),
+        twoWeeks: await calcPrevPeriodStats(14),
+        month: await calcPrevPeriodStats(30),
       }
 
       const calcProductDynamics = (period: keyof typeof dashboardPeriodStats) => {
@@ -681,6 +779,7 @@ export async function GET(request: NextRequest) {
         twoWeeks: calcProductDynamics('twoWeeks'),
         month: calcProductDynamics('month'),
       }
+      rateLimitErrors.push(...funnelErrors)
 
       response.dashboard = {
         totalOrders,
