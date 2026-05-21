@@ -176,7 +176,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v3:${scope}:${date}`
+  return `wb-daily-cache-v4:${scope}:${date}`
 }
 
 function endOfMonthIso(date: string) {
@@ -1586,12 +1586,13 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
 
         const res = await fetch(`/api/wb-data?${params.toString()}`)
         const json = await res.json()
-        if (json.daily) {
+        const dayErrors = json.rateLimitErrors || []
+        if (dayErrors.length) errors.push(...dayErrors)
+        if (json.daily && dayErrors.length === 0) {
           loadedDays.push(json.daily)
           writeDailyCache(cacheScope, date, json.daily)
           setFetchedData(mergeDailyResponses(loadedDays, dates))
         }
-        if (json.rateLimitErrors) errors.push(...json.rateLimitErrors)
         if (dateMode === 'range' && i < dates.length - 1) await sleep(21000)
       }
 
@@ -4212,13 +4213,14 @@ export default function Home() {
           dayParams.set('dateTo', date)
           const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
           const dayJson = await dayRes.json()
-          if (dayJson.daily) {
+          const dayErrors = dayJson.rateLimitErrors || []
+          if (dayErrors.length) {
+            setRateLimitErrors((current) => [...current, ...dayErrors])
+          }
+          if (dayJson.daily && dayErrors.length === 0) {
             writeDailyCache(cacheScope, date, dayJson.daily)
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
-          }
-          if (dayJson.rateLimitErrors?.length) {
-            setRateLimitErrors((current) => [...current, ...dayJson.rateLimitErrors])
           }
           if (index < dates.length - 1) await sleep(21000)
         }
