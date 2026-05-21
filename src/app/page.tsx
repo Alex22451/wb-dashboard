@@ -159,6 +159,52 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function dailyCacheKey(selection: string, date: string) {
+  return `wb-daily-cache-v1:${selection}:${date}`
+}
+
+function endOfMonthIso(date: string) {
+  const [year, month] = date.split('-').map(Number)
+  if (!year || !month) return null
+  return new Date(Date.UTC(year, month, 1)).toISOString()
+}
+
+function readDailyCache(selection: string, date: string): DailyOrdersData | null {
+  try {
+    const raw = window.localStorage.getItem(dailyCacheKey(selection, date))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed.expiresAt && Date.now() > new Date(parsed.expiresAt).getTime()) {
+      window.localStorage.removeItem(dailyCacheKey(selection, date))
+      return null
+    }
+    return parsed.data || null
+  } catch {
+    return null
+  }
+}
+
+function writeDailyCache(selection: string, date: string, data: DailyOrdersData) {
+  try {
+    const expiresAt = endOfMonthIso(date)
+    window.localStorage.setItem(dailyCacheKey(selection, date), JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      expiresAt,
+      data,
+    }))
+  } catch {
+    // Browser storage can be full or disabled; live loading still works.
+  }
+}
+
+function sumDailyTotal(data: DailyOrdersData | null): number {
+  return data?.dateTotals?.reduce((sum, value) => sum + Number(value || 0), 0) || 0
+}
+
+function cloneDashboard(data: DashboardData): DashboardData {
+  return JSON.parse(JSON.stringify(data))
+}
+
 const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'compare'] as const
 type OptionalTabId = typeof OPTIONAL_TAB_IDS[number]
 
@@ -1504,11 +1550,19 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
       const dates = dateMode === 'range' ? getClientDateRange(df, dt) : [df]
       const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
+      const selection = selectionToParam(selectedEnt)
 
       for (let i = 0; i < dates.length; i++) {
         const date = dates[i]
+        const cached = readDailyCache(selection, date)
+        if (cached) {
+          loadedDays.push(cached)
+          setFetchedData(mergeDailyResponses(loadedDays, dates))
+          continue
+        }
+
         const params = new URLSearchParams()
-        params.set('entrepreneurId', selectionToParam(selectedEnt))
+        params.set('entrepreneurId', selection)
         params.set('section', 'daily')
         params.set('dateFrom', date)
         params.set('dateTo', date)
@@ -1517,6 +1571,7 @@ function DailyOrdersTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }
         const json = await res.json()
         if (json.daily) {
           loadedDays.push(json.daily)
+          writeDailyCache(selection, date, json.daily)
           setFetchedData(mergeDailyResponses(loadedDays, dates))
         }
         if (json.rateLimitErrors) errors.push(...json.rateLimitErrors)
@@ -4039,6 +4094,117 @@ export default function Home() {
         setDataSource('wbapi')
       }
       if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+
+      if (json.dashboard) {
+        const baseDashboard = json.dashboard as DashboardData
+        const selection = selectionToParam(selectedDashEnt)
+        const dailyByDate = new Map<string, DailyOrdersData>()
+        const periodKeys: Array<keyof DashboardData['periodStats']> = ['yesterday', 'week', 'twoWeeks', 'month']
+        const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
+          period?.dateFrom && period?.dateTo ? getClientDateRange(period.dateFrom, period.dateTo) : []
+        )
+        const allNeededDates = [
+          ...collectPeriodDates(baseDashboard.periodStats.yesterday),
+          ...collectPeriodDates(baseDashboard.periodStats.week),
+          ...collectPeriodDates(baseDashboard.prevPeriodStats.week),
+          ...collectPeriodDates(baseDashboard.periodStats.twoWeeks),
+          ...collectPeriodDates(baseDashboard.periodStats.month),
+          ...collectPeriodDates(baseDashboard.prevPeriodStats.month),
+        ].filter(Boolean)
+        const dates = [...new Set(allNeededDates)]
+
+        const applyExactDashboard = () => {
+          const next = cloneDashboard(baseDashboard)
+          const chartDates = [...new Set([...next.chartDates, ...dates.filter((date) => dailyByDate.has(date))])].sort()
+          next.chartDates = chartDates
+
+          for (const date of chartDates) {
+            const exactTotal = dailyByDate.has(date) ? sumDailyTotal(dailyByDate.get(date) || null) : null
+            if (exactTotal === null) continue
+            const oldFbo = Math.min(next.chartFbo[date] || 0, exactTotal)
+            next.chartFbo[date] = oldFbo
+            next.chartFbs[date] = Math.max(exactTotal - oldFbo, 0)
+          }
+
+          const patchPeriod = (period: keyof DashboardData['periodStats'], source: 'periodStats' | 'prevPeriodStats') => {
+            const stats = next[source][period]
+            const periodDates = collectPeriodDates(stats)
+            if (periodDates.length === 0 || !periodDates.every((date) => dailyByDate.has(date))) return
+            const total = periodDates.reduce((sum, date) => sum + sumDailyTotal(dailyByDate.get(date) || null), 0)
+            const fbo = Math.min(stats.fbo, total)
+            next[source][period] = {
+              ...stats,
+              total,
+              fbo,
+              fbs: Math.max(total - fbo, 0),
+            }
+          }
+
+          for (const period of periodKeys) {
+            patchPeriod(period, 'periodStats')
+            patchPeriod(period, 'prevPeriodStats')
+          }
+
+          if (baseDashboard.periodStats.yesterday.dateTo) {
+            const yesterdayTotal = sumDailyTotal(dailyByDate.get(baseDashboard.periodStats.yesterday.dateTo) || null)
+            if (dailyByDate.has(baseDashboard.periodStats.yesterday.dateTo)) next.yesterdayOrders = yesterdayTotal
+          }
+          if (baseDashboard.prevPeriodStats.yesterday.dateTo) {
+            const previousTotal = sumDailyTotal(dailyByDate.get(baseDashboard.prevPeriodStats.yesterday.dateTo) || null)
+            if (dailyByDate.has(baseDashboard.prevPeriodStats.yesterday.dateTo)) next.dayBeforeYesterdayOrders = previousTotal
+          }
+
+          next.weekTotalOrders = next.periodStats.week.total
+          next.weekDateFrom = next.periodStats.week.dateFrom
+          next.weekDateTo = next.periodStats.week.dateTo
+          next.weekEntrepreneurStats = baseDashboard.weekEntrepreneurStats.map((row) => ({ ...row, totalOrders: 0 }))
+          const weekDates = collectPeriodDates(next.periodStats.week)
+          if (weekDates.every((date) => dailyByDate.has(date))) {
+            const byEnt = new Map<number, { id: number; name: string; totalOrders: number }>()
+            for (const row of baseDashboard.weekEntrepreneurStats) byEnt.set(row.id, { ...row, totalOrders: 0 })
+            for (const date of weekDates) {
+              const day = dailyByDate.get(date)
+              for (const [entIdRaw, value] of Object.entries(day?.entrepreneurDailyData?.[date] || {})) {
+                const entId = Number(entIdRaw)
+                const existing = byEnt.get(entId) || { id: entId, name: entrepreneurs.find((ent) => ent.id === entId)?.name || String(entId), totalOrders: 0 }
+                existing.totalOrders += Number(value || 0)
+                byEnt.set(entId, existing)
+              }
+            }
+            next.weekEntrepreneurStats = [...byEnt.values()]
+          }
+
+          setDashboard(next)
+        }
+
+        for (const date of dates) {
+          const cached = readDailyCache(selection, date)
+          if (cached) dailyByDate.set(date, cached)
+        }
+        if (dailyByDate.size > 0) applyExactDashboard()
+        setDashboardLoading(false)
+
+        for (let index = 0; index < dates.length; index++) {
+          const date = dates[index]
+          if (dailyByDate.has(date)) continue
+          const dayParams = new URLSearchParams()
+          dayParams.set('entrepreneurId', selection)
+          dayParams.set('section', 'daily')
+          dayParams.set('dateFrom', date)
+          dayParams.set('dateTo', date)
+          const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
+          const dayJson = await dayRes.json()
+          if (dayJson.daily) {
+            writeDailyCache(selection, date, dayJson.daily)
+            dailyByDate.set(date, dayJson.daily)
+            applyExactDashboard()
+          }
+          if (dayJson.rateLimitErrors?.length) {
+            setRateLimitErrors((current) => [...current, ...dayJson.rateLimitErrors])
+          }
+          if (index < dates.length - 1) await sleep(21000)
+        }
+      }
     } catch (e) {
       console.error(e)
     } finally {
