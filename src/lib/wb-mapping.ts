@@ -153,24 +153,15 @@ export function extractWbSize(article: string, subject?: string): string {
   const isDorozhki = subjectLower.includes('дорожки') || subjectLower.includes('дорожк')
   const isSalfetki = subjectLower.includes('салфетк')
 
-  // ─── Category-specific: "набор" detection for дорожки and салфетки ───
+  // ─── Category-specific комплект rules for дорожки and салфетки ───
   if (isDorozhki || isSalfetki) {
-    // Check for "набор" in article — these get size label "набор"
-    if (articleNorm.includes('набор')) {
-      // Special case: салфетки 40х40 with 6шт/4шт → "набор 6 шт" / "набор 4 шт"
-      if (isSalfetki) {
-        const has40x40 = /40\s*[хx*]\s*40/.test(articleNorm)
-        if (has40x40) {
-          const match6 = articleNorm.match(/6\s*шт/i)
-          if (match6) return 'набор 6 шт'
-          const match4 = articleNorm.match(/4\s*шт/i)
-          if (match4) return 'набор 4 шт'
-        }
-      }
-      // Дорожки наборы: "набор220см+6шт" → "набор 4шт" (4 изделия в заказе)
-      return 'набор 4шт'
-    }
-    // Special case: салфетки 40х40 with 6шт/4шт but NO "набор" word — still a набора
+    const cmSet = articleNorm.match(/(150|220)см\+?6шт/)
+    if (cmSet) return `${cmSet[1]} см + 6 шт`
+
+    // Салфетки 2шт: один заказ, но две физические салфетки в производстве.
+    if (isSalfetki && /2шт/.test(articleNorm)) return '2 шт'
+
+    // Салфетки 40х40 with 6шт/4шт → "набор 6 шт" / "набор 4 шт"
     if (isSalfetki) {
       const has40x40 = /40\s*[хx*]\s*40/.test(articleNorm)
       if (has40x40) {
@@ -180,12 +171,15 @@ export function extractWbSize(article: string, subject?: string): string {
         if (match4) return 'набор 4 шт'
       }
     }
+
     // Дорожки: extract size from patterns like "_150_дорожка" or "_220_дорожка"
     if (isDorozhki) {
       const dorozhkaMatch = article.match(/_(\d{2,3})_дорожк/i)
       if (dorozhkaMatch) {
         return dorozhkaMatch[1] + ' см'
       }
+      const cmMatch = articleNorm.match(/(150|220)см/)
+      if (cmMatch) return `${cmMatch[1]} см`
     }
   }
 
@@ -241,10 +235,11 @@ export function extractPackQty(name: string): string {
 // ─── Extract items multiplier for production load ───────────────────
 // Determines how many physical items one order contains.
 // "салфетки набор 6 шт" → 6 items per order
-// "дорожки набор 4шт" → 4 items per order
+// "дорожки 220 см + 6 шт" → 7 items per order
 // "подушка декоративная 45х45" → 1 item per order
 export function extractItemsMultiplier(productName: string): number {
   const lower = productName.toLowerCase()
+  if (/(150|220)\s*см\s*\+\s*6\s*шт/i.test(lower)) return 7
   // Match patterns like "6 шт", "4шт", "2 шт" in product name
   const match = lower.match(/(\d+)\s*шт/i)
   if (match) {

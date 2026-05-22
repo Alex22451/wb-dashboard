@@ -29,7 +29,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v11:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v12:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -79,7 +79,7 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 }
 
 function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v4:${apiKeyFingerprint(apiKey)}:${date}`
+  return `wb:daily:v5:${apiKeyFingerprint(apiKey)}:${date}`
 }
 
 function redisDailyTtlSeconds(date: string) {
