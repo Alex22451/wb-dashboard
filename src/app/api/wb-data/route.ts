@@ -86,6 +86,7 @@ const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
 const FUNNEL_REQUEST_INTERVAL_MS = 21000
+const FUNNEL_PRODUCTS_PAGE_LIMIT = 1000
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -227,11 +228,11 @@ function saleReturnToOrder(record: any): any {
 }
 
 async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
-  const cacheKey = `funnel-products-positive-v1:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+  const cacheKey = `funnel-products-positive-v2:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
     const allProducts: any[] = []
     let offset = 0
-    const limit = 100
+    const limit = FUNNEL_PRODUCTS_PAGE_LIMIT
 
     while (offset < 250000) {
       const response = await fetch(FUNNEL_PRODUCTS_URL, {
@@ -471,7 +472,7 @@ export async function GET(request: NextRequest) {
     const useExactSingleDayStats = requestedDateFrom === requestedDateTo
     let dateFrom = requestedDateFrom
     const dateTo = requestedDateTo
-    if (section === 'daily' || section === 'production') {
+    if (section === 'production') {
       const fromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
       const toMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
       if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
@@ -561,8 +562,8 @@ export async function GET(request: NextRequest) {
       needDaily || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
 
-    // Fetch orders for each entrepreneur SEQUENTIALLY with delays
-    // Use cache to avoid repeated API calls
+    // Fetch each entrepreneur independently. WB limits are per seller cabinet, so
+    // parallelizing different API keys avoids the admin "all IP" waterfall.
     const results: Array<{
       entrepreneurId: number
       entrepreneurName: string
@@ -570,18 +571,10 @@ export async function GET(request: NextRequest) {
       returns: any[]
       error?: string
       returnError?: string
-    }> = []
-
-    for (let i = 0; i < targets.length; i++) {
-      const ent = targets[i]
+    }> = await Promise.all(targets.map(async (ent) => {
       const cacheKey = getCacheKey(ent.id, ent.wbApiKey, apiDateFrom, dateTo)
 
-      // Delay between entrepreneurs (1s) to respect rate limits
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
-
-      const result = await cachedRequest(cacheKey, cacheTtl, async () => {
+      return cachedRequest(cacheKey, cacheTtl, async () => {
         const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
         let orders: any[] = []
         let returns: any[] = []
@@ -673,9 +666,7 @@ export async function GET(request: NextRequest) {
           returnError,
         }
       }, true)
-
-      results.push(result)
-    }
+    }))
 
     // Collect all successful results with mapped types
     // warehouseType: "Склад продавца" = FBS, "Склад WB" = FBO
