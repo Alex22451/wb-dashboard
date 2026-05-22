@@ -73,6 +73,20 @@ async function pruneOldDailyRedisKeys() {
   return { totalDeleted, deletedByPattern }
 }
 
+async function probeRedis() {
+  const key = `wb:probe:${Date.now()}`
+  const value = 'ok'
+  const setResult = await redisCommand<string>(['SET', key, value, 'EX', 60])
+  const getResult = await redisCommand<string>(['GET', key])
+  await redisCommand<number>(['DEL', key])
+  return {
+    configured: !!getRedisConfig(),
+    setResult,
+    getResult,
+    ok: setResult === 'OK' && getResult === value,
+  }
+}
+
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
@@ -91,6 +105,7 @@ export async function GET(request: NextRequest) {
 
   const { from, to } = getMoscowWeekRange()
   const redisPrune = await pruneOldDailyRedisKeys()
+  const redisProbe = await probeRedis()
   const url = new URL('/api/wb-data', baseUrl)
   url.searchParams.set('entrepreneurId', 'all')
   url.searchParams.set('section', 'daily')
@@ -123,5 +138,6 @@ export async function GET(request: NextRequest) {
     entrepreneurs: dailyByEntrepreneur,
     rateLimitErrors: json?.rateLimitErrors || [],
     redisPrune,
+    redisProbe,
   })
 }
