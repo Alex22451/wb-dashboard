@@ -568,6 +568,7 @@ export async function GET(request: NextRequest) {
       entrepreneurId: number
       entrepreneurName: string
       orders: any[]
+      fulfillmentOrders?: any[]
       returns: any[]
       error?: string
       returnError?: string
@@ -577,6 +578,7 @@ export async function GET(request: NextRequest) {
       return cachedRequest(cacheKey, cacheTtl, async () => {
         const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
         let orders: any[] = []
+        let fulfillmentOrders: any[] = []
         let returns: any[] = []
         let error: string | undefined
         let returnError: string | undefined
@@ -585,13 +587,34 @@ export async function GET(request: NextRequest) {
           const funnel = needDaily
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
+
+          if (needDaily) {
+            try {
+              const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${requestedDateFrom}&flag=1`
+              const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+              if (response.status === 429 || response.status === 461) {
+                returnError = 'WB API ограничил загрузку FBO/FBS. Подождите минуту и повторите.'
+              } else if (response.status === 401) {
+                returnError = 'Неверный API ключ для загрузки FBO/FBS (401)'
+              } else if (response.ok) {
+                const allOrders = await response.json()
+                if (Array.isArray(allOrders)) fulfillmentOrders = filterToDateRange(allOrders, requestedDateFrom, requestedDateTo)
+              } else {
+                returnError = `Ошибка API FBO/FBS (${response.status})`
+              }
+            } catch (_e) {
+              returnError = 'Ошибка сети при загрузке FBO/FBS'
+            }
+          }
+
           return {
             entrepreneurId: ent.id,
             entrepreneurName: ent.name,
             orders: funnel.orders,
+            fulfillmentOrders,
             returns: [],
             error: funnel.error,
-            returnError: undefined,
+            returnError,
           }
         }
 
@@ -661,11 +684,12 @@ export async function GET(request: NextRequest) {
           entrepreneurId: ent.id,
           entrepreneurName: ent.name,
           orders: [...orders, ...returns],
+          fulfillmentOrders: orders,
           returns,
           error,
           returnError,
         }
-      }, true)
+      }, !shouldUseFunnelOrders)
     }))
 
     // Collect all successful results with mapped types
@@ -679,13 +703,15 @@ export async function GET(request: NextRequest) {
       monthStr: string
       isFbs: boolean
     }> = []
+    const allFulfillmentMappedOrders: typeof allMappedOrders = []
 
     for (const result of results) {
-      const { entrepreneurId, entrepreneurName, orders } = result
+      const { entrepreneurId, entrepreneurName, orders, fulfillmentOrders = [] } = result
       const target = targets.find((ent) => ent.id === entrepreneurId)
       const useExcelMapping = target ? shouldUseExcelMapping(target.wbApiKey) : false
 
-      for (const order of orders) {
+      const mapOrders = (sourceOrders: any[], targetRows: typeof allMappedOrders) => {
+      for (const order of sourceOrders) {
         let mappedType: string
         if (useExcelMapping) {
           const subject = order.subject || ''
@@ -720,7 +746,7 @@ export async function GET(request: NextRequest) {
         const monthStr = dateStr.substring(0, 7)
         const isFbs = (order.warehouseType || '').includes('продавца') // "Склад продавца" = FBS
 
-        allMappedOrders.push({
+        targetRows.push({
           entrepreneurId,
           entrepreneurName,
           order,
@@ -730,6 +756,10 @@ export async function GET(request: NextRequest) {
           isFbs,
         })
       }
+      }
+
+      mapOrders(orders, allMappedOrders)
+      mapOrders(fulfillmentOrders, allFulfillmentMappedOrders)
     }
 
     // Collect rate limit errors for UI display
@@ -1056,17 +1086,32 @@ export async function GET(request: NextRequest) {
         dailyProductTotals[productId] = (dailyProductTotals[productId] || 0) + 1
         entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
 
-        // FBS or FBO
-        if (o.isFbs) {
+      }
+
+      for (const o of allFulfillmentMappedOrders) {
+        if (o.isFbs) continue
+        const productId = dailyProductMap.get(o.mappedType)
+        if (productId === undefined) continue
+        const dateIdx = visibleDateIndex.get(o.dateStr)
+        if (dateIdx === undefined) continue
+
+        if (!fboPivot[productId]) fboPivot[productId] = {}
+        fboPivot[productId][dateIdx] = (fboPivot[productId][dateIdx] || 0) + 1
+        fboDateTotals[dateIdx]++
+        fboProductTotals[productId] = (fboProductTotals[productId] || 0) + 1
+      }
+
+      for (const [productIdRaw, row] of Object.entries(dailyPivot)) {
+        const productId = Number(productIdRaw)
+        for (const [dateIdxRaw, totalValue] of Object.entries(row)) {
+          const dateIdx = Number(dateIdxRaw)
+          const fboValue = fboPivot[productId]?.[dateIdx] || 0
+          const fbsValue = Math.max((Number(totalValue) || 0) - fboValue, 0)
+          if (!fbsValue) continue
           if (!fbsPivot[productId]) fbsPivot[productId] = {}
-          fbsPivot[productId][dateIdx] = (fbsPivot[productId][dateIdx] || 0) + 1
-          fbsDateTotals[dateIdx]++
-          fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + 1
-        } else {
-          if (!fboPivot[productId]) fboPivot[productId] = {}
-          fboPivot[productId][dateIdx] = (fboPivot[productId][dateIdx] || 0) + 1
-          fboDateTotals[dateIdx]++
-          fboProductTotals[productId] = (fboProductTotals[productId] || 0) + 1
+          fbsPivot[productId][dateIdx] = fbsValue
+          fbsDateTotals[dateIdx] += fbsValue
+          fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
         }
       }
 

@@ -161,6 +161,7 @@ function sleep(ms: number) {
 
 const DAILY_REQUEST_BATCH_SIZE = 3
 const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
+const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
 
 function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
@@ -179,7 +180,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v5:${scope}:${date}`
+  return `wb-daily-cache-v6:${scope}:${date}`
 }
 
 function endOfMonthIso(date: string) {
@@ -213,6 +214,14 @@ function writeDailyCache(scope: string, date: string, data: DailyOrdersData) {
     }))
   } catch {
     // Browser storage can be full or disabled; live loading still works.
+  }
+}
+
+function removeDailyCache(scope: string, date: string) {
+  try {
+    window.localStorage.removeItem(dailyCacheKey(scope, date))
+  } catch {
+    // Browser storage can be disabled; live loading still works.
   }
 }
 
@@ -1563,6 +1572,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
   const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
     setLoading(true)
     setRateLimitErrors([])
+    setFetchedData(null)
     try {
       const df = overrideFrom ?? (dateMode === 'single' ? singleDate : dateFrom)
       const dt = overrideTo ?? (dateMode === 'single' ? singleDate : dateTo)
@@ -1571,41 +1581,64 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
       const cacheScope = getDailyCacheScope(selection, entrepreneurs, user)
+      const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
+      const requestDay = async (date: string) => {
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selection)
+        params.set('section', 'daily')
+        params.set('dateFrom', date)
+        params.set('dateTo', date)
+
+        const res = await fetch(`/api/wb-data?${params.toString()}`)
+        return { date, json: await res.json() }
+      }
 
       const uncachedDates: string[] = []
       for (const date of dates) {
         const cached = readDailyCache(cacheScope, date)
         if (cached) {
           loadedDays.push(cached)
-          setFetchedData(mergeDailyResponses(loadedDays, dates))
+          setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           continue
         }
         uncachedDates.push(date)
       }
 
+      const failedDates: string[] = []
       for (let offset = 0; offset < uncachedDates.length; offset += DAILY_REQUEST_BATCH_SIZE) {
         const batch = uncachedDates.slice(offset, offset + DAILY_REQUEST_BATCH_SIZE)
-        const batchResults = await Promise.all(batch.map(async (date) => {
-          const params = new URLSearchParams()
-          params.set('entrepreneurId', selection)
-          params.set('section', 'daily')
-          params.set('dateFrom', date)
-          params.set('dateTo', date)
-
-          const res = await fetch(`/api/wb-data?${params.toString()}`)
-          return { date, json: await res.json() }
-        }))
+        const batchResults = await Promise.all(batch.map(requestDay))
 
         for (const { date, json } of batchResults) {
           const dayErrors = json.rateLimitErrors || []
-          if (dayErrors.length) errors.push(...dayErrors)
+          if (dayErrors.length) {
+            errors.push(...dayErrors)
+            removeDailyCache(cacheScope, date)
+            failedDates.push(date)
+          }
           if (json.daily && dayErrors.length === 0) {
             loadedDays.push(json.daily)
             writeDailyCache(cacheScope, date, json.daily)
-            setFetchedData(mergeDailyResponses(loadedDays, dates))
+            setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
         if (offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
+      }
+
+      for (const date of failedDates) {
+        await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
+        const { json } = await requestDay(date)
+        const dayErrors = json.rateLimitErrors || []
+        if (dayErrors.length) {
+          errors.push(...dayErrors)
+          removeDailyCache(cacheScope, date)
+          continue
+        }
+        if (json.daily) {
+          loadedDays.push(json.daily)
+          writeDailyCache(cacheScope, date, json.daily)
+          setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
+        }
       }
 
       setRateLimitErrors(errors)
@@ -4130,6 +4163,7 @@ export default function Home() {
         const selection = selectionToParam(selectedDashEnt)
         const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser)
         const dailyByDate = new Map<string, DailyOrdersData>()
+        const failedDates = new Set<string>()
         const periodKeys: Array<keyof DashboardData['periodStats']> = ['yesterday', 'week', 'twoWeeks', 'month']
         const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
           period?.dateFrom && period?.dateTo ? getClientDateRange(period.dateFrom, period.dateTo) : []
@@ -4209,23 +4243,27 @@ export default function Home() {
         }
         if (dailyByDate.size > 0) applyExactDashboard()
 
+        const requestDay = async (date: string) => {
+          const dayParams = new URLSearchParams()
+          dayParams.set('entrepreneurId', selection)
+          dayParams.set('section', 'daily')
+          dayParams.set('dateFrom', date)
+          dayParams.set('dateTo', date)
+          const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
+          return { date, json: await dayRes.json() }
+        }
+
         const uncachedDates = dates.filter((date) => !dailyByDate.has(date))
         for (let offset = 0; offset < uncachedDates.length; offset += DAILY_REQUEST_BATCH_SIZE) {
           const batch = uncachedDates.slice(offset, offset + DAILY_REQUEST_BATCH_SIZE)
-          const batchResults = await Promise.all(batch.map(async (date) => {
-            const dayParams = new URLSearchParams()
-            dayParams.set('entrepreneurId', selection)
-            dayParams.set('section', 'daily')
-            dayParams.set('dateFrom', date)
-            dayParams.set('dateTo', date)
-            const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
-            return { date, json: await dayRes.json() }
-          }))
+          const batchResults = await Promise.all(batch.map(requestDay))
 
           for (const { date, json: dayJson } of batchResults) {
             const dayErrors = dayJson.rateLimitErrors || []
             if (dayErrors.length) {
               setRateLimitErrors((current) => [...current, ...dayErrors])
+              removeDailyCache(cacheScope, date)
+              failedDates.add(date)
             }
             if (dayJson.daily && dayErrors.length === 0) {
               writeDailyCache(cacheScope, date, dayJson.daily)
@@ -4234,6 +4272,23 @@ export default function Home() {
             }
           }
           if (offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
+        }
+
+        for (const date of failedDates) {
+          if (dailyByDate.has(date)) continue
+          await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
+          const { json: dayJson } = await requestDay(date)
+          const dayErrors = dayJson.rateLimitErrors || []
+          if (dayErrors.length) {
+            setRateLimitErrors((current) => [...current, ...dayErrors])
+            removeDailyCache(cacheScope, date)
+            continue
+          }
+          if (dayJson.daily) {
+            writeDailyCache(cacheScope, date, dayJson.daily)
+            dailyByDate.set(date, dayJson.daily)
+            applyExactDashboard()
+          }
         }
       }
     } catch (e) {
