@@ -108,7 +108,7 @@ async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> 
 }
 
 function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v2:${apiKeyFingerprint(apiKey)}:${date}`
+  return `wb:daily:v3:${apiKeyFingerprint(apiKey)}:${date}`
 }
 
 function redisDailyTtlSeconds(date: string) {
@@ -171,12 +171,15 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
   const fbsPivot: Record<number, Record<number, number>> = {}
   const fboPivot: Record<number, Record<number, number>> = {}
   const dateTotals = new Array(dates.length).fill(0)
+  const revenueDateTotals = new Array(dates.length).fill(0)
   const fbsDateTotals = new Array(dates.length).fill(0)
   const fboDateTotals = new Array(dates.length).fill(0)
   const productTotals: Record<number, number> = {}
+  const productRevenue: Record<number, number> = {}
   const fbsProductTotals: Record<number, number> = {}
   const fboProductTotals: Record<number, number> = {}
   const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+  const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
 
   const addPivot = (
     targetPivot: Record<number, Record<number, number>>,
@@ -200,9 +203,17 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
         entrepreneurDailyData[date][Number(entId)] = (entrepreneurDailyData[date][Number(entId)] || 0) + Number(value || 0)
       }
     }
+    for (const [date, entRows] of Object.entries(day.entrepreneurDailyRevenue || {})) {
+      entrepreneurDailyRevenue[date] = entrepreneurDailyRevenue[date] || {}
+      for (const [entId, value] of Object.entries(entRows as Record<string, number>)) {
+        entrepreneurDailyRevenue[date][Number(entId)] = (entrepreneurDailyRevenue[date][Number(entId)] || 0) + Number(value || 0)
+      }
+    }
 
     for (const product of day.products || []) {
       const nextProductId = ensureProduct(product.name)
+      const sourceRevenue = day.productRevenue?.[product.id] || 0
+      if (sourceRevenue) productRevenue[nextProductId] = (productRevenue[nextProductId] || 0) + Number(sourceRevenue || 0)
       const groups = [
         { source: day.pivot, sourceDates: day.dates, totals: dateTotals, productTotals, target: pivot },
         { source: day.fbsPivot, sourceDates: day.dates, totals: fbsDateTotals, productTotals: fbsProductTotals, target: fbsPivot },
@@ -218,6 +229,13 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
         }
       }
     }
+
+    for (const [sourceIdxRaw, value] of Object.entries(day.revenueDateTotals || {})) {
+      const sourceDate = day.dates?.[Number(sourceIdxRaw)]
+      const targetDateIdx = dateIndex.get(sourceDate)
+      if (targetDateIdx === undefined) continue
+      revenueDateTotals[targetDateIdx] += Number(value || 0)
+    }
   }
 
   return {
@@ -230,9 +248,12 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
     previousFbsPivot: {},
     previousFboPivot: {},
     dateTotals,
+    revenueDateTotals,
     previousDateTotals: new Array(dates.length).fill(0),
     productTotals,
+    productRevenue,
     entrepreneurDailyData,
+    entrepreneurDailyRevenue,
     fbsPivot,
     fbsDateTotals,
     fbsProductTotals,
@@ -450,6 +471,9 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
 function addFunnelProductOrders(orders: any[], product: any, count: number, date: string) {
   if (count <= 0) return
   const item = product.product || {}
+  const selected = product?.statistic?.selected || {}
+  const orderSum = Number(selected.orderSum) || 0
+  const orderRevenue = count > 0 ? orderSum / count : 0
   for (let i = 0; i < count; i++) {
     orders.push({
       date: `${date}T12:00:00`,
@@ -460,10 +484,10 @@ function addFunnelProductOrders(orders: any[], product: any, count: number, date
       brand: item.brandName || '',
       techSize: '',
       warehouseType: '',
-      finishedPrice: 0,
-      priceWithDisc: 0,
-      totalPrice: 0,
-      forPay: 0,
+      finishedPrice: orderRevenue,
+      priceWithDisc: orderRevenue,
+      totalPrice: orderRevenue,
+      forPay: orderRevenue,
       odid: `funnel:${item.nmId || item.vendorCode || 'unknown'}:${date}:${i}`,
       isFunnelOrder: true,
     })
@@ -1214,10 +1238,17 @@ export async function GET(request: NextRequest) {
         const dailyPivot: Record<number, Record<number, number>> = {}
         const dailyDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
         const dailyProductTotals: Record<number, number> = {}
+        const dailyRevenueDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+        const dailyProductRevenue: Record<number, number> = {}
+        const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
         const entrepreneurDailyData: Record<string, Record<number, number>> = {}
         for (const date of visibleDailyDates) {
           entrepreneurDailyData[date] = {}
-          for (const ent of dailyEntrepreneurs) entrepreneurDailyData[date][ent.id] = 0
+          entrepreneurDailyRevenue[date] = {}
+          for (const ent of dailyEntrepreneurs) {
+            entrepreneurDailyData[date][ent.id] = 0
+            entrepreneurDailyRevenue[date][ent.id] = 0
+          }
         }
 
         const fbsPivot: Record<number, Record<number, number>> = {}
@@ -1265,7 +1296,11 @@ export async function GET(request: NextRequest) {
           dailyPivot[productId][dateIdx] = (dailyPivot[productId][dateIdx] || 0) + 1
           dailyDateTotals[dateIdx]++
           dailyProductTotals[productId] = (dailyProductTotals[productId] || 0) + 1
+          const revenue = getOrderRevenue(o.order)
+          dailyRevenueDateTotals[dateIdx] += revenue
+          dailyProductRevenue[productId] = (dailyProductRevenue[productId] || 0) + revenue
           entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
+          entrepreneurDailyRevenue[o.dateStr][o.entrepreneurId] = (entrepreneurDailyRevenue[o.dateStr][o.entrepreneurId] || 0) + revenue
         }
 
         for (const o of fulfillmentRows) {
@@ -1305,9 +1340,12 @@ export async function GET(request: NextRequest) {
           previousFbsPivot,
           previousFboPivot,
           dateTotals: dailyDateTotals,
+          revenueDateTotals: dailyRevenueDateTotals,
           previousDateTotals,
           productTotals: dailyProductTotals,
+          productRevenue: dailyProductRevenue,
           entrepreneurDailyData,
+          entrepreneurDailyRevenue,
           fbsPivot,
           fbsDateTotals,
           fbsProductTotals,

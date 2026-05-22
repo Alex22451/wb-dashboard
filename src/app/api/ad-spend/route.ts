@@ -88,20 +88,56 @@ function getVercelEntrepreneurs(): EntrepreneurWithPromotionKey[] {
   }))
 }
 
+function filterEntrepreneurs(rows: EntrepreneurWithPromotionKey[], entrepreneurId: string | null): EntrepreneurWithPromotionKey[] {
+  if (!entrepreneurId || entrepreneurId === 'all') return rows
+  const ids = new Set(entrepreneurId.split(',').map((id) => Number(id.trim())).filter(Number.isFinite))
+  return rows.filter((row) => ids.has(row.id))
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return unauthorized()
 
-    const year = Number(request.nextUrl.searchParams.get('year')) || 2026
+    const entrepreneurId = request.nextUrl.searchParams.get('entrepreneurId')
+    const from = request.nextUrl.searchParams.get('from')
+    const to = request.nextUrl.searchParams.get('to')
     const isVercel = !!process.env.VERCEL
     const entrepreneurs = isVercel
-      ? (await getVercelWbTargets(user, 'all')).map((e) => ({
+      ? (await getVercelWbTargets(user, entrepreneurId || 'all')).map((e) => ({
           id: e.id,
           name: e.name,
           promotionApiKey: e.wbPromotionApiKey || e.wbApiKey,
         }))
-      : await getLocalEntrepreneurs(user.role === 'admin' ? undefined : user.id)
+      : filterEntrepreneurs(await getLocalEntrepreneurs(user.role === 'admin' ? undefined : user.id), entrepreneurId)
+
+    if (from && to) {
+      const errors: Array<{ id: number; name: string; error: string }> = []
+      const rows = await Promise.all(entrepreneurs.map(async (ent) => {
+        if (!ent.promotionApiKey || ent.promotionApiKey.trim() === '') {
+          errors.push({ id: ent.id, name: ent.name, error: 'Нет WB токена категории Продвижение' })
+          return { id: ent.id, name: ent.name, spend: 0 }
+        }
+        try {
+          const costs = await fetchWbAdCosts(ent.promotionApiKey, from, to)
+          const spend = costs.reduce((sum, row) => sum + (Number(row.updSum) || 0), 0)
+          return { id: ent.id, name: ent.name, spend: Math.round(spend) }
+        } catch (error: any) {
+          errors.push({ id: ent.id, name: ent.name, error: error.message || 'Ошибка WB Promotion API' })
+          return { id: ent.id, name: ent.name, spend: 0 }
+        }
+      }))
+
+      return NextResponse.json({
+        period: { from, to },
+        entrepreneurs: rows,
+        totalSpend: rows.reduce((sum, row) => sum + row.spend, 0),
+        source: 'wb-promotion-api',
+        errors,
+      })
+    }
+
+    const year = Number(request.nextUrl.searchParams.get('year')) || 2026
     const months = getAvailableMonths(year)
 
     const grouped: Record<number, {

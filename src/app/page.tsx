@@ -116,9 +116,12 @@ interface DailyOrdersData {
   previousFbsPivot?: Record<number, Record<number, number>>
   previousFboPivot?: Record<number, Record<number, number>>
   dateTotals: number[]
+  revenueDateTotals?: number[]
   previousDateTotals?: number[]
   productTotals: Record<number, number>
+  productRevenue?: Record<number, number>
   entrepreneurDailyData: Record<string, Record<number, number>>
+  entrepreneurDailyRevenue?: Record<string, Record<number, number>>
   fbsPivot: Record<number, Record<number, number>>
   fbsDateTotals: number[]
   fbsProductTotals: Record<number, number>
@@ -132,6 +135,8 @@ type DailyResponse = {
   dailyByEntrepreneur?: Record<string, DailyOrdersData>
   rateLimitErrors?: RateLimitError[]
 }
+
+type DashboardPeriod = 'yesterday' | 'week' | 'twoWeeks' | 'month'
 
 interface EntrepreneurInfo {
   id: number
@@ -186,7 +191,11 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v7:${scope}:${date}`
+  return `wb-daily-cache-v8:${scope}:${date}`
+}
+
+function adPeriodCacheKey(scope: string, from: string, to: string) {
+  return `wb-ad-period-cache-v1:${scope}:${from}:${to}`
 }
 
 function endOfMonthIso(date: string) {
@@ -231,6 +240,34 @@ function removeDailyCache(scope: string, date: string) {
   }
 }
 
+function readAdPeriodCache(scope: string, from: string, to: string): Record<number, number> | null {
+  try {
+    const raw = window.localStorage.getItem(adPeriodCacheKey(scope, from, to))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed.expiresAt && Date.now() > new Date(parsed.expiresAt).getTime()) {
+      window.localStorage.removeItem(adPeriodCacheKey(scope, from, to))
+      return null
+    }
+    return parsed.spendByEntrepreneur || null
+  } catch {
+    return null
+  }
+}
+
+function writeAdPeriodCache(scope: string, from: string, to: string, spendByEntrepreneur: Record<number, number>) {
+  try {
+    const expiresAt = endOfMonthIso(to)
+    window.localStorage.setItem(adPeriodCacheKey(scope, from, to), JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      expiresAt,
+      spendByEntrepreneur,
+    }))
+  } catch {
+    // Browser storage can be full or disabled; live loading still works.
+  }
+}
+
 function writeDailyResponseCache(
   cacheScope: string,
   selection: string,
@@ -270,6 +307,10 @@ function sumDailyFbs(data: DailyOrdersData | null): number {
 
 function sumDailyFbo(data: DailyOrdersData | null): number {
   return data?.fboDateTotals?.reduce((sum, value) => sum + Number(value || 0), 0) || 0
+}
+
+function sumDailyRevenue(data: DailyOrdersData | null): number {
+  return data?.revenueDateTotals?.reduce((sum, value) => sum + Number(value || 0), 0) || 0
 }
 
 function cloneDashboard(data: DashboardData): DashboardData {
@@ -782,22 +823,23 @@ function MultiEntrepreneurSelect({
 }
 
 // --- Dashboard Tab ---
-function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dataSource, onLoad, loading, rateLimitErrors }: {
+function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboardPeriod, onDashboardPeriodChange, dataSource, onLoad, loading, rateLimitErrors }: {
   data: DashboardData | null
   entrepreneurs: EntrepreneurInfo[]
   selectedEnt: string[]
   onSelectEnt: (ids: string[]) => void
+  dashboardPeriod: DashboardPeriod
+  onDashboardPeriodChange: (period: DashboardPeriod) => void
   dataSource?: 'excel' | 'wbapi'
   onLoad: () => void
   loading: boolean
   rateLimitErrors: RateLimitError[]
 }) {
-  const [dashboardPeriod, setDashboardPeriod] = useState<'yesterday' | 'week' | 'twoWeeks' | 'month'>('yesterday')
   const [showChart, setShowChart] = useState(false)
 
   // Period change is purely client-side — periodStats for all periods are already in data
   const handlePeriodChange = (v: string) => {
-    if (v) setDashboardPeriod(v as 'yesterday' | 'week' | 'twoWeeks' | 'month')
+    if (v) onDashboardPeriodChange(v as DashboardPeriod)
   }
 
   // Current period stats
@@ -1618,12 +1660,15 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
     const fbsPivot = emptyPivot()
     const fboPivot = emptyPivot()
     const dateTotals = new Array(dates.length).fill(0)
+    const revenueDateTotals = new Array(dates.length).fill(0)
     const fbsDateTotals = new Array(dates.length).fill(0)
     const fboDateTotals = new Array(dates.length).fill(0)
     const productTotals: Record<number, number> = {}
+    const productRevenue: Record<number, number> = {}
     const fbsProductTotals: Record<number, number> = {}
     const fboProductTotals: Record<number, number> = {}
     const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+    const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
 
     const addPivot = (
       targetPivot: Record<number, Record<number, number>>,
@@ -1647,9 +1692,17 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
           entrepreneurDailyData[date][Number(entId)] = (entrepreneurDailyData[date][Number(entId)] || 0) + value
         }
       }
+      for (const [date, entRows] of Object.entries(day.entrepreneurDailyRevenue || {})) {
+        entrepreneurDailyRevenue[date] = entrepreneurDailyRevenue[date] || {}
+        for (const [entId, value] of Object.entries(entRows)) {
+          entrepreneurDailyRevenue[date][Number(entId)] = (entrepreneurDailyRevenue[date][Number(entId)] || 0) + Number(value || 0)
+        }
+      }
 
       for (const product of day.products || []) {
         const nextProductId = ensureProduct(product.name)
+        const sourceRevenue = day.productRevenue?.[product.id] || 0
+        if (sourceRevenue) productRevenue[nextProductId] = (productRevenue[nextProductId] || 0) + Number(sourceRevenue || 0)
         const sourceDateTotals = [
           { source: day.pivot, dates: day.dates, totals: dateTotals, productTotals, target: pivot },
           { source: day.fbsPivot, dates: day.dates, totals: fbsDateTotals, productTotals: fbsProductTotals, target: fbsPivot },
@@ -1666,6 +1719,12 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
           }
         }
       }
+      for (const [sourceIdxRaw, value] of Object.entries(day.revenueDateTotals || {})) {
+        const sourceDate = day.dates[Number(sourceIdxRaw)]
+        const targetDateIdx = dateIndex.get(sourceDate)
+        if (targetDateIdx === undefined) continue
+        revenueDateTotals[targetDateIdx] += Number(value || 0)
+      }
     }
 
     return {
@@ -1678,9 +1737,12 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
       previousFbsPivot: {},
       previousFboPivot: {},
       dateTotals,
+      revenueDateTotals,
       previousDateTotals: new Array(dates.length).fill(0),
       productTotals,
+      productRevenue,
       entrepreneurDailyData,
+      entrepreneurDailyRevenue,
       fbsPivot,
       fbsDateTotals,
       fbsProductTotals,
@@ -4160,6 +4222,7 @@ export default function Home() {
   const [entrepreneurs, setEntrepreneurs] = useState<EntrepreneurInfo[]>([])
   const [activeTab, setActiveTab] = useState('dashboard')
   const [selectedDashEnt, setSelectedDashEnt] = useState<string[]>([]) // Empty = no auto-fetch
+  const [dashboardPeriod, setDashboardPeriod] = useState<DashboardPeriod>('yesterday')
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
@@ -4272,18 +4335,30 @@ export default function Home() {
       const selection = selectionToParam(selectedDashEnt)
       const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser)
       const dailyByDate = new Map<string, DailyOrdersData>()
+      const adSpendByPeriod = new Map<DashboardPeriod, Record<number, number>>()
       const failedDates = new Set<string>()
       const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
         period?.dateFrom && period?.dateTo ? getClientDateRange(period.dateFrom, period.dateTo) : []
       )
-      const dates = collectPeriodDates(baseDashboard.periodStats.week)
+      const uniqueDates = (items: string[]) => [...new Set(items)].sort()
+      const allDashboardDates = uniqueDates(
+        (Object.keys(baseDashboard.periodStats) as DashboardPeriod[]).flatMap((period) => [
+          ...collectPeriodDates(baseDashboard.periodStats[period]),
+          ...collectPeriodDates(baseDashboard.prevPeriodStats[period]),
+        ])
+      )
+      const requiredDates = uniqueDates([
+        ...collectPeriodDates(baseDashboard.periodStats[dashboardPeriod]),
+        ...collectPeriodDates(baseDashboard.prevPeriodStats[dashboardPeriod]),
+        ...collectPeriodDates(baseDashboard.periodStats.week),
+      ])
 
       setDashboard(baseDashboard)
       setDataSource('wbapi')
 
       const applyExactDashboard = () => {
         const next = cloneDashboard(baseDashboard)
-        const chartDates = dates.filter((date) => dailyByDate.has(date))
+        const chartDates = allDashboardDates.filter((date) => dailyByDate.has(date))
         next.chartDates = chartDates
 
         for (const date of chartDates) {
@@ -4292,18 +4367,30 @@ export default function Home() {
           next.chartFbo[date] = sumDailyFbo(day)
         }
 
-        const patchPeriod = (period: keyof DashboardData['periodStats'], source: 'periodStats' | 'prevPeriodStats') => {
-          const stats = next[source][period]
+        const getPeriodTotals = (stats: { dateFrom: string; dateTo: string }) => {
           const periodDates = collectPeriodDates(stats)
-          if (periodDates.length === 0 || !periodDates.every((date) => dailyByDate.has(date))) return
-          const total = periodDates.reduce((sum, date) => sum + sumDailyTotal(dailyByDate.get(date) || null), 0)
-          const fbs = periodDates.reduce((sum, date) => sum + sumDailyFbs(dailyByDate.get(date) || null), 0)
-          const fbo = periodDates.reduce((sum, date) => sum + sumDailyFbo(dailyByDate.get(date) || null), 0)
-          next[source][period] = { ...stats, total, fbs, fbo }
+          if (periodDates.length === 0 || !periodDates.every((date) => dailyByDate.has(date))) return null
+          return periodDates.reduce((acc, date) => {
+            const day = dailyByDate.get(date) || null
+            acc.total += sumDailyTotal(day)
+            acc.fbs += sumDailyFbs(day)
+            acc.fbo += sumDailyFbo(day)
+            acc.revenue += sumDailyRevenue(day)
+            return acc
+          }, { total: 0, fbs: 0, fbo: 0, revenue: 0 })
         }
 
-        patchPeriod('week', 'periodStats')
-        patchPeriod('yesterday', 'periodStats')
+        const patchPeriod = (period: keyof DashboardData['periodStats'], source: 'periodStats' | 'prevPeriodStats') => {
+          const stats = next[source][period]
+          const totals = getPeriodTotals(stats)
+          if (!totals) return
+          next[source][period] = { ...stats, ...totals, revenue: Math.round(totals.revenue) }
+        }
+
+        ;(Object.keys(next.periodStats) as DashboardPeriod[]).forEach((period) => {
+          patchPeriod(period, 'periodStats')
+          patchPeriod(period, 'prevPeriodStats')
+        })
 
         const yesterdayDate = next.periodStats.yesterday.dateTo
         if (dailyByDate.has(yesterdayDate)) {
@@ -4312,12 +4399,20 @@ export default function Home() {
           next.yesterdayFbsOrders = sumDailyFbs(day)
           next.yesterdayFboOrders = sumDailyFbo(day)
         }
+        const dayBeforeDate = next.prevPeriodStats.yesterday.dateTo
+        if (dailyByDate.has(dayBeforeDate)) {
+          const day = dailyByDate.get(dayBeforeDate) || null
+          next.dayBeforeYesterdayOrders = sumDailyTotal(day)
+          next.dayBeforeYesterdayFbsOrders = sumDailyFbs(day)
+          next.dayBeforeYesterdayFboOrders = sumDailyFbo(day)
+        }
 
         next.weekTotalOrders = next.periodStats.week.total
         const byEnt = new Map<number, { id: number; name: string; totalOrders: number }>()
         for (const row of baseDashboard.weekEntrepreneurStats) byEnt.set(row.id, { ...row, totalOrders: 0 })
-        if (dates.every((date) => dailyByDate.has(date))) {
-          for (const date of dates) {
+        const weekDates = collectPeriodDates(next.periodStats.week)
+        if (weekDates.every((date) => dailyByDate.has(date))) {
+          for (const date of weekDates) {
             const day = dailyByDate.get(date)
             for (const [entIdRaw, value] of Object.entries(day?.entrepreneurDailyData?.[date] || {})) {
               const entId = Number(entIdRaw)
@@ -4329,15 +4424,106 @@ export default function Home() {
           next.weekEntrepreneurStats = [...byEnt.values()]
         }
 
+        const selectedRows = baseDashboard.weekEntrepreneurStats.map((row) => ({ id: row.id, name: row.name }))
+        for (const period of Object.keys(next.adSpendByPeriod) as DashboardPeriod[]) {
+          const spendByEnt = adSpendByPeriod.get(period)
+          if (!spendByEnt) continue
+          const stats = next.periodStats[period]
+          const entRows = selectedRows.map((ent) => {
+            const revenue = collectPeriodDates(stats).reduce((sum, date) => (
+              sum + Number(dailyByDate.get(date)?.entrepreneurDailyRevenue?.[date]?.[ent.id] || 0)
+            ), 0)
+            const spend = Math.round(Number(spendByEnt[ent.id] || 0))
+            return {
+              id: ent.id,
+              name: ent.name,
+              spend,
+              revenue: Math.round(revenue),
+              drr: revenue > 0 ? Math.round((spend / revenue) * 1000) / 10 : null,
+            }
+          })
+          const totalSpend = entRows.reduce((sum, row) => sum + row.spend, 0)
+          next.adSpendByPeriod[period] = {
+            totalSpend,
+            drr: stats.revenue > 0 ? Math.round((totalSpend / stats.revenue) * 1000) / 10 : null,
+            entrepreneurs: entRows,
+          }
+        }
+
+        const productTotalsForDates = (periodDates: string[]) => {
+          const totals = new Map<string, { name: string; currentOrders: number }>()
+          for (const date of periodDates) {
+            const day = dailyByDate.get(date)
+            if (!day) continue
+            for (const product of day.products || []) {
+              const orders = Number(day.productTotals?.[product.id] || 0)
+              if (!orders) continue
+              const existing = totals.get(product.name) || { name: product.name, currentOrders: 0 }
+              existing.currentOrders += orders
+              totals.set(product.name, existing)
+            }
+          }
+          return totals
+        }
+
+        for (const period of Object.keys(next.productDynamics) as DashboardPeriod[]) {
+          const currentDates = collectPeriodDates(next.periodStats[period])
+          const previousDates = collectPeriodDates(next.prevPeriodStats[period])
+          if (!currentDates.every((date) => dailyByDate.has(date)) || !previousDates.every((date) => dailyByDate.has(date))) continue
+          const current = productTotalsForDates(currentDates)
+          const previous = productTotalsForDates(previousDates)
+          const productNames = new Set([...current.keys(), ...previous.keys()])
+          const rows = [...productNames].map((name) => {
+            const currentOrders = current.get(name)?.currentOrders || 0
+            const previousOrders = previous.get(name)?.currentOrders || 0
+            const diff = currentOrders - previousOrders
+            return {
+              name,
+              article: '',
+              currentOrders,
+              previousOrders,
+              diff,
+              diffPercent: previousOrders > 0 ? Math.round((diff / previousOrders) * 1000) / 10 : null,
+            }
+          }).filter((row) => row.currentOrders > 0 || row.previousOrders > 0)
+          next.productDynamics[period] = {
+            growth: rows.filter((row) => row.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 10),
+            decline: rows.filter((row) => row.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 10),
+          }
+        }
+
         setDashboard(next)
       }
 
-      for (const date of dates) {
+      for (const date of allDashboardDates) {
         const cached = readDailyCache(cacheScope, date)
         if (cached) dailyByDate.set(date, cached)
       }
       if (dailyByDate.size > 0) applyExactDashboard()
-      if (dates.every((date) => dailyByDate.has(date))) return
+      const loadAdSpend = async (period: DashboardPeriod) => {
+        const stats = baseDashboard.periodStats[period]
+        const cached = readAdPeriodCache(cacheScope, stats.dateFrom, stats.dateTo)
+        if (cached) {
+          adSpendByPeriod.set(period, cached)
+          applyExactDashboard()
+          return
+        }
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selection)
+        params.set('from', stats.dateFrom)
+        params.set('to', stats.dateTo)
+        const res = await fetch(`/api/ad-spend?${params.toString()}`)
+        const json = await res.json()
+        if (json.errors?.length) setRateLimitErrors((current) => [...current, ...json.errors])
+        if (Array.isArray(json.entrepreneurs)) {
+          const spendByEnt = Object.fromEntries(json.entrepreneurs.map((row: { id: number; spend: number }) => [row.id, Number(row.spend || 0)]))
+          adSpendByPeriod.set(period, spendByEnt)
+          writeAdPeriodCache(cacheScope, stats.dateFrom, stats.dateTo, spendByEnt)
+          applyExactDashboard()
+        }
+      }
+      await loadAdSpend(dashboardPeriod)
+      if (requiredDates.every((date) => dailyByDate.has(date))) return
 
       const requestDay = async (date: string) => {
         const dayParams = new URLSearchParams()
@@ -4349,7 +4535,7 @@ export default function Home() {
         return { date, json: await dayRes.json() }
       }
 
-      const uncachedDates = dates.filter((date) => !dailyByDate.has(date))
+      const uncachedDates = requiredDates.filter((date) => !dailyByDate.has(date))
       for (let offset = 0; offset < uncachedDates.length; offset += DAILY_REQUEST_BATCH_SIZE) {
         const batch = uncachedDates.slice(offset, offset + DAILY_REQUEST_BATCH_SIZE)
         const batchResults = await Promise.all(batch.map(requestDay))
@@ -4391,7 +4577,7 @@ export default function Home() {
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt, entrepreneurs, authUser])
+  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod])
 
   if (!authChecked) {
     return (
@@ -4524,6 +4710,8 @@ export default function Home() {
               entrepreneurs={entrepreneurs}
               selectedEnt={selectedDashEnt}
               onSelectEnt={setSelectedDashEnt}
+              dashboardPeriod={dashboardPeriod}
+              onDashboardPeriodChange={setDashboardPeriod}
               dataSource={dataSource}
               onLoad={loadDashboardData}
               loading={dashboardLoading}
