@@ -79,7 +79,7 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 }
 
 function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v3:${apiKeyFingerprint(apiKey)}:${date}`
+  return `wb:daily:v4:${apiKeyFingerprint(apiKey)}:${date}`
 }
 
 function redisDailyTtlSeconds(date: string) {
@@ -662,8 +662,9 @@ async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<n
 
 export async function GET(request: NextRequest) {
   try {
+    const internalWarmRequest = !!(process.env.WB_VERCEL_API_TOKEN && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN)
     const user = await getCurrentUser()
-      || ((process.env.WB_VERCEL_API_TOKEN && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN)
+      || (internalWarmRequest
         ? { id: 0, username: 'cron', role: 'admin' as const }
         : null)
     if (!user) return unauthorized()
@@ -725,8 +726,17 @@ export async function GET(request: NextRequest) {
     })()
 
     let targets: Array<{ id: number; name: string; wbApiKey: string }>
+    const warmApiKey = internalWarmRequest ? searchParams.get('warmApiKey')?.trim() : null
+    const warmName = internalWarmRequest ? searchParams.get('warmName')?.trim() : null
+    const warmId = internalWarmRequest ? Number(searchParams.get('warmId') || 0) : 0
 
-    if (isVercel()) {
+    if (warmApiKey) {
+      targets = [{
+        id: Number.isFinite(warmId) && warmId > 0 ? warmId : 900000,
+        name: warmName || 'Warm API key',
+        wbApiKey: warmApiKey,
+      }]
+    } else if (isVercel()) {
       targets = await getVercelWbTargets(user, entrepreneurId)
     } else {
       // Get entrepreneurs with API keys
@@ -1298,6 +1308,7 @@ export async function GET(request: NextRequest) {
         const fbsPivot: Record<number, Record<number, number>> = {}
         const fbsDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
         const fbsProductTotals: Record<number, number> = {}
+        const rawFboPivot: Record<number, Record<number, number>> = {}
         const fboPivot: Record<number, Record<number, number>> = {}
         const fboDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
         const fboProductTotals: Record<number, number> = {}
@@ -1354,23 +1365,29 @@ export async function GET(request: NextRequest) {
           const dateIdx = visibleDateIndex.get(o.dateStr)
           if (dateIdx === undefined) continue
 
-          if (!fboPivot[productId]) fboPivot[productId] = {}
-          fboPivot[productId][dateIdx] = (fboPivot[productId][dateIdx] || 0) + 1
-          fboDateTotals[dateIdx]++
-          fboProductTotals[productId] = (fboProductTotals[productId] || 0) + 1
+          if (!rawFboPivot[productId]) rawFboPivot[productId] = {}
+          rawFboPivot[productId][dateIdx] = (rawFboPivot[productId][dateIdx] || 0) + 1
         }
 
         for (const [productIdRaw, row] of Object.entries(dailyPivot)) {
           const productId = Number(productIdRaw)
           for (const [dateIdxRaw, totalValue] of Object.entries(row)) {
             const dateIdx = Number(dateIdxRaw)
-            const fboValue = fboPivot[productId]?.[dateIdx] || 0
+            const total = Number(totalValue) || 0
+            const fboValue = Math.min(rawFboPivot[productId]?.[dateIdx] || 0, total)
             const fbsValue = Math.max((Number(totalValue) || 0) - fboValue, 0)
-            if (!fbsValue) continue
-            if (!fbsPivot[productId]) fbsPivot[productId] = {}
-            fbsPivot[productId][dateIdx] = fbsValue
-            fbsDateTotals[dateIdx] += fbsValue
-            fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
+            if (fboValue) {
+              if (!fboPivot[productId]) fboPivot[productId] = {}
+              fboPivot[productId][dateIdx] = fboValue
+              fboDateTotals[dateIdx] += fboValue
+              fboProductTotals[productId] = (fboProductTotals[productId] || 0) + fboValue
+            }
+            if (fbsValue) {
+              if (!fbsPivot[productId]) fbsPivot[productId] = {}
+              fbsPivot[productId][dateIdx] = fbsValue
+              fbsDateTotals[dateIdx] += fbsValue
+              fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
+            }
           }
         }
 

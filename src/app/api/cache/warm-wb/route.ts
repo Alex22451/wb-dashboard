@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { hasRedisConfig, redisCommand } from '@/lib/redis-cache'
+import { getAllVercelWbTargets, type WbTarget } from '@/lib/user-store'
 
 function getBaseUrl(request: NextRequest): string {
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
@@ -14,10 +15,10 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function getMoscowDashboardWarmRange() {
+function getMoscowDashboardWarmRange(days: number) {
   const mskNow = new Date(Date.now() + 3 * 3600000)
   const yesterday = new Date(mskNow.getTime() - 86400000)
-  const warmStart = new Date(mskNow.getTime() - 14 * 86400000)
+  const warmStart = new Date(mskNow.getTime() - days * 86400000)
   return {
     from: warmStart.toISOString().split('T')[0],
     to: yesterday.toISOString().split('T')[0],
@@ -36,7 +37,7 @@ function getDateRange(from: string, to: string) {
 }
 
 async function pruneOldDailyRedisKeys() {
-  const patterns = ['wb:daily:v1:*', 'wb:daily:v2:*']
+  const patterns = ['wb:daily:v1:*', 'wb:daily:v2:*', 'wb:daily:v3:*']
   const deletedByPattern: Record<string, number> = {}
   let totalDeleted = 0
 
@@ -93,8 +94,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'WB_VERCEL_API_TOKEN is required for cache warmup' }, { status: 500 })
   }
 
-  const { from, to } = getMoscowDashboardWarmRange()
-  const warmDates = getDateRange(from, to)
+  const scope = request.nextUrl.searchParams.get('scope') === 'all' ? 'all' : 'admin'
+  const explicitDate = request.nextUrl.searchParams.get('date') || ''
+  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || (scope === 'all' ? 30 : 14))
+  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), 30) : (scope === 'all' ? 30 : 14)
+  const { from, to } = getMoscowDashboardWarmRange(periodDays)
+  const warmDates = explicitDate ? [explicitDate] : getDateRange(from, to)
+  const allTargets = scope === 'all' ? await getAllVercelWbTargets() : []
   const redisPrune = await pruneOldDailyRedisKeys()
   const redisProbe = await probeRedis()
 
@@ -106,12 +112,17 @@ export async function GET(request: NextRequest) {
   let ok = true
   let status = 200
 
-  const requestDate = async (date: string) => {
+  const requestDate = async (date: string, target?: WbTarget) => {
     const url = new URL('/api/wb-data', baseUrl)
-    url.searchParams.set('entrepreneurId', 'all')
+    url.searchParams.set('entrepreneurId', target ? String(target.id) : 'all')
     url.searchParams.set('section', 'daily')
     url.searchParams.set('dateFrom', date)
     url.searchParams.set('dateTo', date)
+    if (target) {
+      url.searchParams.set('warmId', String(target.id))
+      url.searchParams.set('warmName', target.name)
+      url.searchParams.set('warmApiKey', target.wbApiKey)
+    }
 
     const response = await fetch(url, {
       cache: 'no-store',
@@ -139,16 +150,25 @@ export async function GET(request: NextRequest) {
       ? Object.keys(json.dailyByEntrepreneur).length
       : 0
     entrepreneurs = Math.max(entrepreneurs, dailyByEntrepreneur)
-    return { date, ok: response.ok, status: response.status, cacheSource: json?.cacheSource || null }
+    return {
+      date,
+      target: target ? { id: target.id, name: target.name } : { id: 0, name: 'admin' },
+      ok: response.ok,
+      status: response.status,
+      cacheSource: json?.cacheSource || null,
+    }
   }
 
-  const batches: Array<Array<{ date: string; ok: boolean; status: number; cacheSource: string | null }>> = []
-  for (let offset = 0; offset < warmDates.length; offset += WARM_BATCH_SIZE) {
-    const batchDates = warmDates.slice(offset, offset + WARM_BATCH_SIZE)
-    const batch = await Promise.all(batchDates.map(requestDate))
+  const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null }>> = []
+  const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
+  for (let offset = 0; offset < warmDates.length; offset += batchSize) {
+    const batchDates = warmDates.slice(offset, offset + batchSize)
+    const batch = scope === 'all'
+      ? (await Promise.all(batchDates.flatMap((date) => allTargets.map((target) => requestDate(date, target)))))
+      : await Promise.all(batchDates.map((date) => requestDate(date)))
     batches.push(batch)
     const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
-    if (!batchFromRedis && offset + WARM_BATCH_SIZE < warmDates.length) {
+    if (!batchFromRedis && offset + batchSize < warmDates.length) {
       await sleep(WARM_BATCH_PAUSE_MS)
     }
   }
@@ -156,6 +176,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     warmedAt: new Date().toISOString(),
     moscowSchedule: '08:30',
+    scope,
     period: { from, to },
     section: 'daily',
     ok,
@@ -164,6 +185,7 @@ export async function GET(request: NextRequest) {
     dates: warmedDates,
     cacheHitDates,
     entrepreneurs,
+    targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
     rateLimitErrors,
     batches,
     redisPrune,

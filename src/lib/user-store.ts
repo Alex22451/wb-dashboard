@@ -238,6 +238,41 @@ export async function getVercelEntrepreneursForUser(user: CurrentUser) {
   }]
 }
 
+function normalizeApiKey(apiKey: string) {
+  return apiKey.trim().replace(/^bearer\s+/i, '').trim()
+}
+
+export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
+  const targets: WbTarget[] = getEntrepreneurs()
+    .filter((e) => e.apiKey && e.apiKey.trim() !== '')
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      wbApiKey: e.apiKey,
+      wbPromotionApiKey: e.promotionApiKey || e.apiKey,
+    }))
+
+  const seen = new Set(targets.map((target) => normalizeApiKey(target.wbApiKey)))
+  const maxUserId = Number(await kvGet<string | number>('wb_user_id')) || 0
+  for (let id = 1; id <= maxUserId; id += 1) {
+    const user = await getStoredUserById(id)
+    if (!user) continue
+    const keys = await getUserApiKeys(id)
+    if (!keys.apiKey) continue
+    const normalized = normalizeApiKey(keys.apiKey)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    targets.push({
+      id: 100000 + user.id,
+      name: keys.sellerName || user.username,
+      wbApiKey: keys.apiKey,
+      wbPromotionApiKey: keys.promotionApiKey || keys.apiKey,
+    })
+  }
+
+  return targets
+}
+
 export async function getVercelWbTargets(user: CurrentUser, entrepreneurId: string | null | undefined): Promise<WbTarget[]> {
   if (user.role === 'admin') {
     const rows = getEntrepreneurs()
