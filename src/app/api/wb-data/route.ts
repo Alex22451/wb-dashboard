@@ -303,6 +303,198 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
   }
 }
 
+async function readMergedRedisDailyPayload(
+  targets: Array<{ wbApiKey: string }>,
+  dates: string[]
+): Promise<any | null> {
+  if (dates.length === 0 || targets.length === 0) return null
+
+  const rows = await Promise.all(targets.flatMap((target) =>
+    dates.map((date) => readRedisDailyPayload(target.wbApiKey, date))
+  ))
+  if (rows.some((row) => !row)) return null
+  return mergeDailyPayloads(rows, dates)
+}
+
+function buildProductionLoadPayload(daily: any, capacity: number, requestedDateFrom: string, requestedDateTo: string) {
+  const DAILY_CAPACITY = capacity
+  const visibleProdDates: string[] = Array.isArray(daily?.dates) ? daily.dates : []
+  const visibleDateIndex = new Map(visibleProdDates.map((date, index) => [date, index]))
+  const dailyProducts: Array<{ id: number; name: string }> = Array.isArray(daily?.products) ? daily.products : []
+  const sourceFbsPivot = daily?.fbsPivot || {}
+  const sourcePreviousFbsPivot = daily?.previousFbsPivot || {}
+
+  const productIdsWithLoad = new Set<number>()
+  const addLoadedProducts = (pivot: Record<string, Record<string, number>>) => {
+    for (const [productIdRaw, row] of Object.entries(pivot || {})) {
+      const hasOrders = Object.values(row || {}).some((value) => Number(value) > 0)
+      if (hasOrders) productIdsWithLoad.add(Number(productIdRaw))
+    }
+  }
+  addLoadedProducts(sourceFbsPivot)
+  addLoadedProducts(sourcePreviousFbsPivot)
+
+  const sourceToProdId = new Map<number, number>()
+  const prodProducts = dailyProducts
+    .filter((product) => productIdsWithLoad.has(Number(product.id)))
+    .map((product, index) => {
+      sourceToProdId.set(Number(product.id), index)
+      return {
+        id: index,
+        name: product.name,
+        multiplier: extractItemsMultiplier(product.name),
+      }
+    })
+
+  const prodPivot: Record<number, Record<number, number>> = {}
+  const prodOrdersPivot: Record<number, Record<number, number>> = {}
+  const prodDateItems: number[] = new Array(visibleProdDates.length).fill(0)
+  const prodDateOrders: number[] = new Array(visibleProdDates.length).fill(0)
+  const previousDateItems: number[] = new Array(visibleProdDates.length).fill(0)
+  const previousDateOrders: number[] = new Array(visibleProdDates.length).fill(0)
+  const prodProductItems: Record<number, number> = {}
+  const prodProductOrders: Record<number, number> = {}
+
+  const applyPivot = (pivot: Record<string, Record<string, number>>, targetItems: number[], targetOrders: number[], writeProductTotals: boolean) => {
+    for (const [sourceProductIdRaw, row] of Object.entries(pivot || {})) {
+      const sourceProductId = Number(sourceProductIdRaw)
+      const productId = sourceToProdId.get(sourceProductId)
+      if (productId === undefined) continue
+      const multiplier = prodProducts[productId]?.multiplier || 1
+      for (const [dateIdxRaw, countRaw] of Object.entries(row || {})) {
+        const dateIdx = Number(dateIdxRaw)
+        if (!Number.isInteger(dateIdx) || dateIdx < 0 || dateIdx >= visibleProdDates.length) continue
+        const orders = Number(countRaw) || 0
+        if (orders <= 0) continue
+        const items = orders * multiplier
+        targetItems[dateIdx] += items
+        targetOrders[dateIdx] += orders
+        if (writeProductTotals) {
+          if (!prodPivot[productId]) prodPivot[productId] = {}
+          prodPivot[productId][dateIdx] = (prodPivot[productId][dateIdx] || 0) + items
+          if (!prodOrdersPivot[productId]) prodOrdersPivot[productId] = {}
+          prodOrdersPivot[productId][dateIdx] = (prodOrdersPivot[productId][dateIdx] || 0) + orders
+          prodProductItems[productId] = (prodProductItems[productId] || 0) + items
+          prodProductOrders[productId] = (prodProductOrders[productId] || 0) + orders
+        }
+      }
+    }
+  }
+
+  applyPivot(sourceFbsPivot, prodDateItems, prodDateOrders, true)
+  applyPivot(sourcePreviousFbsPivot, previousDateItems, previousDateOrders, false)
+
+  const prodDateLoadPct: number[] = prodDateItems.map(items =>
+    Math.round((items / DAILY_CAPACITY) * 1000) / 10
+  )
+  const previousDateLoadPct: number[] = previousDateItems.map(items =>
+    Math.round((items / DAILY_CAPACITY) * 1000) / 10
+  )
+
+  const mskOffset2 = 3 * 3600000
+  const mskNow2 = new Date(Date.now() + mskOffset2)
+  const todayMskStr = new Date(mskNow2).toISOString().split('T')[0]
+  const periodEnd = requestedDateTo
+
+  const weekEndDate = new Date(`${periodEnd}T00:00:00`)
+  const weekStartDate = new Date(weekEndDate)
+  weekStartDate.setDate(weekStartDate.getDate() - 6)
+  const weekFromDate = weekStartDate.toISOString().split('T')[0]
+  const weekDates = visibleProdDates.filter(d => d >= weekFromDate && d <= periodEnd)
+  const weekTotalItems = weekDates.reduce((sum, d) => {
+    const idx = visibleDateIndex.get(d) ?? -1
+    return sum + (idx >= 0 ? prodDateItems[idx] || 0 : 0)
+  }, 0)
+  const weekDays = weekDates.length || 1
+  const weekAvgLoadPct = Math.round((weekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
+  const previousWeekTotalItems = weekDates.reduce((sum, d) => {
+    const idx = visibleDateIndex.get(d) ?? -1
+    return sum + (idx >= 0 ? previousDateItems[idx] || 0 : 0)
+  }, 0)
+  const previousWeekAvgLoadPct = Math.round((previousWeekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
+
+  const monthStartDate = new Date(weekEndDate)
+  monthStartDate.setDate(monthStartDate.getDate() - 29)
+  const monthFromDate = monthStartDate.toISOString().split('T')[0]
+  const monthDates = visibleProdDates.filter(d => d >= monthFromDate && d <= periodEnd)
+  const monthTotalItems = monthDates.reduce((sum, d) => {
+    const idx = visibleDateIndex.get(d) ?? -1
+    return sum + (idx >= 0 ? prodDateItems[idx] || 0 : 0)
+  }, 0)
+  const monthDays = monthDates.length || 1
+  const monthAvgLoadPct = Math.round((monthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
+  const previousMonthTotalItems = monthDates.reduce((sum, d) => {
+    const idx = visibleDateIndex.get(d) ?? -1
+    return sum + (idx >= 0 ? previousDateItems[idx] || 0 : 0)
+  }, 0)
+  const previousMonthAvgLoadPct = Math.round((previousMonthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
+
+  const periodEndIdx = visibleDateIndex.get(periodEnd) ?? -1
+  const periodEndItems = periodEndIdx >= 0 ? prodDateItems[periodEndIdx] : 0
+  const periodEndLoadPct = periodEndIdx >= 0 ? prodDateLoadPct[periodEndIdx] : 0
+  const recentItems = prodDateItems.slice(-14).filter(items => items > 0)
+  const avgRecentItems = recentItems.length ? recentItems.reduce((sum, v) => sum + v, 0) / recentItems.length : 0
+  const sameWeekdayAvg = (targetDate: Date) => {
+    const weekday = targetDate.getUTCDay()
+    const values = visibleProdDates
+      .map((date, index) => ({ date, items: prodDateItems[index] || 0 }))
+      .filter(row => row.items > 0 && new Date(`${row.date}T00:00:00`).getUTCDay() === weekday)
+      .slice(-4)
+      .map(row => row.items)
+    if (!values.length) return avgRecentItems
+    return values.reduce((sum, value) => sum + value, 0) / values.length
+  }
+  const forecast = Array.from({ length: 7 }, (_, index) => {
+    const forecastDate = new Date(`${periodEnd}T00:00:00`)
+    forecastDate.setDate(forecastDate.getDate() + index + 1)
+    const predictedItems = Math.round(((avgRecentItems || 0) * 0.55) + (sameWeekdayAvg(forecastDate) * 0.45))
+    return {
+      date: forecastDate.toISOString().split('T')[0],
+      predictedItems,
+      loadPct: Math.round((predictedItems / DAILY_CAPACITY) * 1000) / 10,
+    }
+  })
+  const todayMsk = new Date(`${todayMskStr}T00:00:00Z`)
+  const seasonalityAlerts = PRODUCTION_SEASONAL_PEAKS
+    .map((peak) => {
+      const [month, day] = peak.peakMonthDay.split('-').map(Number)
+      let peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear(), month - 1, day))
+      if (dateDiffDays(todayMsk, peakDate) < 0) {
+        peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear() + 1, month - 1, day))
+      }
+      return {
+        ...peak,
+        peakDate: peakDate.toISOString().split('T')[0],
+        daysToPeak: dateDiffDays(todayMsk, peakDate),
+      }
+    })
+    .filter(alert => alert.daysToPeak >= 0 && alert.daysToPeak <= 14)
+    .sort((a, b) => a.daysToPeak - b.daysToPeak || b.uplift - a.uplift)
+
+  return {
+    capacity: DAILY_CAPACITY,
+    dates: visibleProdDates,
+    products: prodProducts,
+    pivot: prodPivot,
+    ordersPivot: prodOrdersPivot,
+    dateItems: prodDateItems,
+    dateOrders: prodDateOrders,
+    dateLoadPct: prodDateLoadPct,
+    previousDateItems,
+    previousDateOrders,
+    previousDateLoadPct,
+    productItems: prodProductItems,
+    productOrders: prodProductOrders,
+    forecast,
+    seasonalityAlerts,
+    summary: {
+      yesterday: { date: periodEnd, items: periodEndItems, loadPct: periodEndLoadPct, orders: periodEndIdx >= 0 ? prodDateOrders[periodEndIdx] : 0 },
+      week: { dateFrom: weekFromDate, dateTo: periodEnd, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, previousTotalItems: previousWeekTotalItems, previousAvgLoadPct: previousWeekAvgLoadPct, days: weekDays },
+      month: { dateFrom: monthFromDate, dateTo: periodEnd, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, previousTotalItems: previousMonthTotalItems, previousAvgLoadPct: previousMonthAvgLoadPct, days: monthDays },
+    },
+  }
+}
+
 const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
 const CACHE_TTL_DAILY = 2 * 60 * 1000       // 2 min
 const CACHE_TTL_MONTHLY = 10 * 60 * 1000    // 10 min
@@ -800,9 +992,23 @@ export async function GET(request: NextRequest) {
     const needMonthly = !section || section === 'monthly'
     const needProduction = !section || section === 'production'
     const needSupply = !section || section === 'supply'
-    const shouldUseFunnelOrders = !needProduction && !needSupply && (
-      needDaily || (useExactSingleDayStats && (needDashboard || needMonthly))
+    const shouldUseFunnelOrders = !needSupply && (
+      needDaily || needProduction || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
+
+    if (section === 'production') {
+      const capacityParam = Number(searchParams.get('capacity'))
+      const dailyCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
+      const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
+      const cachedDaily = await readMergedRedisDailyPayload(targets, currentDates)
+      if (cachedDaily) {
+        return NextResponse.json({
+          rateLimitErrors: [],
+          cacheSource: 'redis',
+          production: buildProductionLoadPayload(cachedDaily, dailyCapacity, requestedDateFrom, requestedDateTo),
+        })
+      }
+    }
 
     if (section === 'daily' && useExactSingleDayStats) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
@@ -842,13 +1048,13 @@ export async function GET(request: NextRequest) {
         let returnError: string | undefined
 
         if (shouldUseFunnelOrders) {
-          const funnel = needDaily
+          const funnel = needDaily || needProduction
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
 
-          if (needDaily) {
+          if (needDaily || needProduction) {
             try {
-              const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${requestedDateFrom}&flag=1`
+              const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=1`
               const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
               if (response.status === 429 || response.status === 461) {
                 returnError = 'WB API ограничил загрузку FBO/FBS. Подождите минуту и повторите.'
@@ -856,7 +1062,7 @@ export async function GET(request: NextRequest) {
                 returnError = 'Неверный API ключ для загрузки FBO/FBS (401)'
               } else if (response.ok) {
                 const allOrders = await response.json()
-                if (Array.isArray(allOrders)) fulfillmentOrders = filterToDateRange(allOrders, requestedDateFrom, requestedDateTo)
+                if (Array.isArray(allOrders)) fulfillmentOrders = filterToDateRange(allOrders, dateFrom, dateTo)
               } else {
                 returnError = `Ошибка API FBO/FBS (${response.status})`
               }
@@ -1034,6 +1240,8 @@ export async function GET(request: NextRequest) {
     const productTypes = [...new Set(allMappedOrders.map(o => o.mappedType))]
 
     const response: Record<string, any> = { rateLimitErrors }
+    let dailyPayload: any = null
+    let dailyByEntrepreneurPayload: Record<string, any> = {}
 
     // ─── Build Dashboard ───
     if (needDashboard) {
@@ -1276,7 +1484,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── Build Daily ───
-    if (needDaily) {
+    if (needDaily || needProduction) {
       const buildDailyPayload = (
         mappedRows: typeof allMappedOrders,
         fulfillmentRows: typeof allFulfillmentMappedOrders,
@@ -1315,6 +1523,7 @@ export async function GET(request: NextRequest) {
         const previousPivot: Record<number, Record<number, number>> = {}
         const previousFbsPivot: Record<number, Record<number, number>> = {}
         const previousFboPivot: Record<number, Record<number, number>> = {}
+        const rawPreviousFboPivot: Record<number, Record<number, number>> = {}
         const previousDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
         const visibleDateIndex = new Map(visibleDailyDates.map((date, index) => [date, index]))
         const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
@@ -1339,9 +1548,6 @@ export async function GET(request: NextRequest) {
                 if (!previousPivot[productId]) previousPivot[productId] = {}
                 previousPivot[productId][shiftedIdx] = (previousPivot[productId][shiftedIdx] || 0) + 1
                 previousDateTotals[shiftedIdx]++
-                const fulfillmentPivot = o.isFbs ? previousFbsPivot : previousFboPivot
-                if (!fulfillmentPivot[productId]) fulfillmentPivot[productId] = {}
-                fulfillmentPivot[productId][shiftedIdx] = (fulfillmentPivot[productId][shiftedIdx] || 0) + 1
               }
             }
             continue
@@ -1363,7 +1569,20 @@ export async function GET(request: NextRequest) {
           const productId = dailyProductMap.get(o.mappedType)
           if (productId === undefined) continue
           const dateIdx = visibleDateIndex.get(o.dateStr)
-          if (dateIdx === undefined) continue
+          if (dateIdx === undefined) {
+            const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
+            if (!Number.isNaN(orderMs) && !Number.isNaN(requestedFromMs)) {
+              const shifted = new Date(orderMs)
+              shifted.setDate(shifted.getDate() + visiblePeriodDays)
+              const shiftedDate = shifted.toISOString().split('T')[0]
+              const shiftedIdx = visibleDateIndex.get(shiftedDate)
+              if (shiftedIdx !== undefined) {
+                if (!rawPreviousFboPivot[productId]) rawPreviousFboPivot[productId] = {}
+                rawPreviousFboPivot[productId][shiftedIdx] = (rawPreviousFboPivot[productId][shiftedIdx] || 0) + 1
+              }
+            }
+            continue
+          }
 
           if (!rawFboPivot[productId]) rawFboPivot[productId] = {}
           rawFboPivot[productId][dateIdx] = (rawFboPivot[productId][dateIdx] || 0) + 1
@@ -1387,6 +1606,24 @@ export async function GET(request: NextRequest) {
               fbsPivot[productId][dateIdx] = fbsValue
               fbsDateTotals[dateIdx] += fbsValue
               fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
+            }
+          }
+        }
+
+        for (const [productIdRaw, row] of Object.entries(previousPivot)) {
+          const productId = Number(productIdRaw)
+          for (const [dateIdxRaw, totalValue] of Object.entries(row)) {
+            const dateIdx = Number(dateIdxRaw)
+            const total = Number(totalValue) || 0
+            const fboValue = Math.min(rawPreviousFboPivot[productId]?.[dateIdx] || 0, total)
+            const fbsValue = Math.max(total - fboValue, 0)
+            if (fboValue) {
+              if (!previousFboPivot[productId]) previousFboPivot[productId] = {}
+              previousFboPivot[productId][dateIdx] = fboValue
+            }
+            if (fbsValue) {
+              if (!previousFbsPivot[productId]) previousFbsPivot[productId] = {}
+              previousFbsPivot[productId][dateIdx] = fbsValue
             }
           }
         }
@@ -1416,8 +1653,8 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      response.daily = buildDailyPayload(allMappedOrders, allFulfillmentMappedOrders, targets)
-      response.dailyByEntrepreneur = Object.fromEntries(targets.map((ent) => [
+      dailyPayload = buildDailyPayload(allMappedOrders, allFulfillmentMappedOrders, targets)
+      dailyByEntrepreneurPayload = Object.fromEntries(targets.map((ent) => [
         ent.id,
         buildDailyPayload(
           allMappedOrders.filter((row) => row.entrepreneurId === ent.id),
@@ -1425,10 +1662,14 @@ export async function GET(request: NextRequest) {
           [ent]
         ),
       ]))
+      if (needDaily) {
+        response.daily = dailyPayload
+        response.dailyByEntrepreneur = dailyByEntrepreneurPayload
+      }
       if (section === 'daily' && shouldUseFunnelOrders && rateLimitErrors.length === 0) {
-        const datesToCache = response.daily?.dates || []
+        const datesToCache = dailyPayload?.dates || []
         await Promise.all(targets.flatMap((ent) => datesToCache.map((date: string) => {
-          const dayPayload = sliceDailyPayloadByDate(response.dailyByEntrepreneur[ent.id], date)
+          const dayPayload = sliceDailyPayloadByDate(dailyByEntrepreneurPayload[ent.id], date)
           return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload) : Promise.resolve()
         })))
       }
@@ -1590,189 +1831,9 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Production Load ───
     if (needProduction) {
-      // Maximum FBS production capacity per day
       const capacityParam = Number(searchParams.get('capacity'))
-      const DAILY_CAPACITY = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
-
-      // Only FBS orders matter for production load
-      const fbsOrders = allMappedOrders.filter(o => o.isFbs)
-
-      const visibleProdDates = [...new Set(fbsOrders.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
-      const visibleDateIndex = new Map(visibleProdDates.map((date, index) => [date, index]))
-      const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
-      const requestedToMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
-      const visiblePeriodDays = !Number.isNaN(requestedFromMs) && !Number.isNaN(requestedToMs)
-        ? Math.ceil((requestedToMs - requestedFromMs) / 86400000) + 1
-        : visibleProdDates.length
-
-      // Product types with items multiplier
-      const fbsProductTypes = [...new Set(fbsOrders.map(o => o.mappedType))]
-      const prodProducts = fbsProductTypes.map((name, i) => ({
-        id: i,
-        name,
-        multiplier: extractItemsMultiplier(name),
-      }))
-      const prodProductMap = new Map(fbsProductTypes.map((name, i) => [name, i]))
-
-      // Build production pivot: productId → dateIdx → items count (orders × multiplier)
-      const prodPivot: Record<number, Record<number, number>> = {}   // items
-      const prodOrdersPivot: Record<number, Record<number, number>> = {} // raw orders
-      const prodDateItems: number[] = new Array(visibleProdDates.length).fill(0)   // total items per date
-      const prodDateOrders: number[] = new Array(visibleProdDates.length).fill(0)  // total orders per date
-      const previousDateItems: number[] = new Array(visibleProdDates.length).fill(0)
-      const previousDateOrders: number[] = new Array(visibleProdDates.length).fill(0)
-      const prodProductItems: Record<number, number> = {}   // total items per product
-      const prodProductOrders: Record<number, number> = {}  // total orders per product
-
-      for (const o of fbsOrders) {
-        const productId = prodProductMap.get(o.mappedType)
-        if (productId === undefined) continue
-
-        const multiplier = prodProducts[productId].multiplier
-        const items = multiplier // 1 order × multiplier = multiplier items
-        const dateIdx = visibleDateIndex.get(o.dateStr)
-        if (dateIdx === undefined) {
-          const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
-          if (!Number.isNaN(orderMs)) {
-            const shifted = new Date(orderMs)
-            shifted.setDate(shifted.getDate() + visiblePeriodDays)
-            const shiftedIdx = visibleDateIndex.get(shifted.toISOString().split('T')[0])
-            if (shiftedIdx !== undefined) {
-              previousDateItems[shiftedIdx] += items
-              previousDateOrders[shiftedIdx]++
-            }
-          }
-          continue
-        }
-
-        // Items pivot
-        if (!prodPivot[productId]) prodPivot[productId] = {}
-        prodPivot[productId][dateIdx] = (prodPivot[productId][dateIdx] || 0) + items
-        prodDateItems[dateIdx] += items
-        prodProductItems[productId] = (prodProductItems[productId] || 0) + items
-
-        // Orders pivot
-        if (!prodOrdersPivot[productId]) prodOrdersPivot[productId] = {}
-        prodOrdersPivot[productId][dateIdx] = (prodOrdersPivot[productId][dateIdx] || 0) + 1
-        prodDateOrders[dateIdx]++
-        prodProductOrders[productId] = (prodProductOrders[productId] || 0) + 1
-      }
-
-      // Calculate load percentages per date
-      const prodDateLoadPct: number[] = prodDateItems.map(items =>
-        Math.round((items / DAILY_CAPACITY) * 1000) / 10 // round to 1 decimal
-      )
-      const previousDateLoadPct: number[] = previousDateItems.map(items =>
-        Math.round((items / DAILY_CAPACITY) * 1000) / 10
-      )
-
-      // Week/Month aggregates end at the selected period end, so historical ranges
-      // remain internally consistent.
-      const mskOffset2 = 3 * 3600000
-      const mskNow2 = new Date(Date.now() + mskOffset2)
-      const todayMskStr = new Date(mskNow2).toISOString().split('T')[0]
-      const periodEnd = requestedDateTo
-
-      // Rolling 7 days ending at selected period end (not calendar week)
-      const weekEndDate = new Date(`${periodEnd}T00:00:00`)
-      const weekStartDate = new Date(weekEndDate)
-      weekStartDate.setDate(weekStartDate.getDate() - 6)
-      const weekFromDate = weekStartDate.toISOString().split('T')[0]
-      const weekDates = visibleProdDates.filter(d => d >= weekFromDate && d <= periodEnd)
-      const weekTotalItems = weekDates.reduce((sum, d) => {
-        const idx = visibleProdDates.indexOf(d)
-        return sum + (prodDateItems[idx] || 0)
-      }, 0)
-      const weekDays = weekDates.length || 1
-      const weekAvgLoadPct = Math.round((weekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
-      const previousWeekTotalItems = weekDates.reduce((sum, d) => {
-        const idx = visibleProdDates.indexOf(d)
-        return sum + (previousDateItems[idx] || 0)
-      }, 0)
-      const previousWeekAvgLoadPct = Math.round((previousWeekTotalItems / (DAILY_CAPACITY * weekDays)) * 1000) / 10
-
-      // Rolling 30 days ending at selected period end (not calendar month)
-      const monthStartDate = new Date(weekEndDate)
-      monthStartDate.setDate(monthStartDate.getDate() - 29)
-      const monthFromDate = monthStartDate.toISOString().split('T')[0]
-      const monthDates = visibleProdDates.filter(d => d >= monthFromDate && d <= periodEnd)
-      const monthTotalItems = monthDates.reduce((sum, d) => {
-        const idx = visibleProdDates.indexOf(d)
-        return sum + (prodDateItems[idx] || 0)
-      }, 0)
-      const monthDays = monthDates.length || 1
-      const monthAvgLoadPct = Math.round((monthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
-      const previousMonthTotalItems = monthDates.reduce((sum, d) => {
-        const idx = visibleProdDates.indexOf(d)
-        return sum + (previousDateItems[idx] || 0)
-      }, 0)
-      const previousMonthAvgLoadPct = Math.round((previousMonthTotalItems / (DAILY_CAPACITY * monthDays)) * 1000) / 10
-
-      // Selected period end load
-      const periodEndIdx = visibleProdDates.indexOf(periodEnd)
-      const periodEndItems = periodEndIdx >= 0 ? prodDateItems[periodEndIdx] : 0
-      const periodEndLoadPct = periodEndIdx >= 0 ? prodDateLoadPct[periodEndIdx] : 0
-      const recentItems = prodDateItems.slice(-14).filter(items => items > 0)
-      const avgRecentItems = recentItems.length ? recentItems.reduce((sum, v) => sum + v, 0) / recentItems.length : 0
-      const sameWeekdayAvg = (targetDate: Date) => {
-        const weekday = targetDate.getUTCDay()
-        const values = visibleProdDates
-          .map((date, index) => ({ date, items: prodDateItems[index] || 0 }))
-          .filter(row => row.items > 0 && new Date(`${row.date}T00:00:00`).getUTCDay() === weekday)
-          .slice(-4)
-          .map(row => row.items)
-        if (!values.length) return avgRecentItems
-        return values.reduce((sum, value) => sum + value, 0) / values.length
-      }
-      const forecast = Array.from({ length: 7 }, (_, index) => {
-        const forecastDate = new Date(`${periodEnd}T00:00:00`)
-        forecastDate.setDate(forecastDate.getDate() + index + 1)
-        const predictedItems = Math.round(((avgRecentItems || 0) * 0.55) + (sameWeekdayAvg(forecastDate) * 0.45))
-        return {
-          date: forecastDate.toISOString().split('T')[0],
-          predictedItems,
-          loadPct: Math.round((predictedItems / DAILY_CAPACITY) * 1000) / 10,
-        }
-      })
-      const todayMsk = new Date(`${todayMskStr}T00:00:00Z`)
-      const seasonalityAlerts = PRODUCTION_SEASONAL_PEAKS
-        .map((peak) => {
-          const [month, day] = peak.peakMonthDay.split('-').map(Number)
-          let peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear(), month - 1, day))
-          if (dateDiffDays(todayMsk, peakDate) < 0) {
-            peakDate = new Date(Date.UTC(todayMsk.getUTCFullYear() + 1, month - 1, day))
-          }
-          return {
-            ...peak,
-            peakDate: peakDate.toISOString().split('T')[0],
-            daysToPeak: dateDiffDays(todayMsk, peakDate),
-          }
-        })
-        .filter(alert => alert.daysToPeak >= 0 && alert.daysToPeak <= 14)
-        .sort((a, b) => a.daysToPeak - b.daysToPeak || b.uplift - a.uplift)
-
-      response.production = {
-        capacity: DAILY_CAPACITY,
-        dates: visibleProdDates,
-        products: prodProducts,
-        pivot: prodPivot,
-        ordersPivot: prodOrdersPivot,
-        dateItems: prodDateItems,
-        dateOrders: prodDateOrders,
-        dateLoadPct: prodDateLoadPct,
-        previousDateItems,
-        previousDateOrders,
-        previousDateLoadPct,
-        productItems: prodProductItems,
-        productOrders: prodProductOrders,
-        forecast,
-        seasonalityAlerts,
-        summary: {
-          yesterday: { date: periodEnd, items: periodEndItems, loadPct: periodEndLoadPct, orders: periodEndIdx >= 0 ? prodDateOrders[periodEndIdx] : 0 },
-          week: { dateFrom: weekFromDate, dateTo: periodEnd, totalItems: weekTotalItems, avgLoadPct: weekAvgLoadPct, previousTotalItems: previousWeekTotalItems, previousAvgLoadPct: previousWeekAvgLoadPct, days: weekDays },
-          month: { dateFrom: monthFromDate, dateTo: periodEnd, totalItems: monthTotalItems, avgLoadPct: monthAvgLoadPct, previousTotalItems: previousMonthTotalItems, previousAvgLoadPct: previousMonthAvgLoadPct, days: monthDays },
-        },
-      }
+      const dailyCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
+      response.production = buildProductionLoadPayload(dailyPayload, dailyCapacity, requestedDateFrom, requestedDateTo)
     }
 
     // ─── Build Supply Calculation ───
