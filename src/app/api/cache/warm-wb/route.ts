@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const WARM_SECTIONS = ['dashboard', 'supply']
-
 function getBaseUrl(request: NextRequest): string {
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
   const proto = request.headers.get('x-forwarded-proto') || 'https'
   return `${proto}://${host}`
+}
+
+function getMoscowWeekRange() {
+  const mskNow = new Date(Date.now() + 3 * 3600000)
+  const yesterday = new Date(mskNow.getTime() - 86400000)
+  const weekStart = new Date(mskNow.getTime() - 7 * 86400000)
+  return {
+    from: weekStart.toISOString().split('T')[0],
+    to: yesterday.toISOString().split('T')[0],
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -19,27 +27,42 @@ export async function GET(request: NextRequest) {
   }
 
   const baseUrl = getBaseUrl(request)
-  const results = await Promise.allSettled(
-    WARM_SECTIONS.map(async (section) => {
-      const url = new URL('/api/wb-data', baseUrl)
-      url.searchParams.set('entrepreneurId', 'all')
-      url.searchParams.set('section', section)
-      if (section === 'supply') {
-        url.searchParams.set('supplyDays', '14')
-        url.searchParams.set('coefficient', '1')
-      }
+  const internalToken = process.env.WB_VERCEL_API_TOKEN
+  if (!internalToken) {
+    return NextResponse.json({ error: 'WB_VERCEL_API_TOKEN is required for cache warmup' }, { status: 500 })
+  }
 
-      const response = await fetch(url, { cache: 'no-store' })
-      return { section, ok: response.ok, status: response.status }
-    })
-  )
+  const { from, to } = getMoscowWeekRange()
+  const url = new URL('/api/wb-data', baseUrl)
+  url.searchParams.set('entrepreneurId', 'all')
+  url.searchParams.set('section', 'daily')
+  url.searchParams.set('dateFrom', from)
+  url.searchParams.set('dateTo', to)
+
+  const startedAt = Date.now()
+  const response = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      'x-wb-internal-warm': internalToken,
+    },
+    signal: AbortSignal.timeout(290000),
+  })
+  const json = await response.json().catch(() => ({}))
+  const dates = Array.isArray(json?.daily?.dates) ? json.daily.dates : []
+  const dailyByEntrepreneur = json?.dailyByEntrepreneur && typeof json.dailyByEntrepreneur === 'object'
+    ? Object.keys(json.dailyByEntrepreneur).length
+    : 0
 
   return NextResponse.json({
     warmedAt: new Date().toISOString(),
-    results: results.map((result, index) => (
-      result.status === 'fulfilled'
-        ? result.value
-        : { section: WARM_SECTIONS[index], ok: false, error: result.reason?.message || 'Warmup failed' }
-    )),
+    moscowSchedule: '08:30',
+    period: { from, to },
+    section: 'daily',
+    ok: response.ok,
+    status: response.status,
+    durationMs: Date.now() - startedAt,
+    dates,
+    entrepreneurs: dailyByEntrepreneur,
+    rateLimitErrors: json?.rateLimitErrors || [],
   })
 }

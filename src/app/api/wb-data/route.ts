@@ -148,6 +148,75 @@ async function writeRedisDailyPayload(apiKey: string, date: string, daily: any) 
   ])
 }
 
+function sliceDailyPayloadByDate(daily: any, date: string) {
+  const sourceDateIdx = daily?.dates?.indexOf(date)
+  if (sourceDateIdx === undefined || sourceDateIdx < 0) return null
+
+  const products: Array<{ id: number; name: string }> = []
+  const productMap = new Map<number, number>()
+  const remapProduct = (sourceProductId: number) => {
+    const existing = productMap.get(sourceProductId)
+    if (existing !== undefined) return existing
+    const sourceProduct = daily.products?.find((product: any) => Number(product.id) === sourceProductId)
+    if (!sourceProduct) return null
+    const nextId = products.length
+    productMap.set(sourceProductId, nextId)
+    products.push({ id: nextId, name: sourceProduct.name })
+    return nextId
+  }
+
+  const slicePivot = (source: Record<number, Record<number, number>> | undefined) => {
+    const target: Record<number, Record<number, number>> = {}
+    for (const [sourceProductIdRaw, row] of Object.entries(source || {})) {
+      const value = Number((row as Record<number, number>)[sourceDateIdx] || 0)
+      if (!value) continue
+      const targetProductId = remapProduct(Number(sourceProductIdRaw))
+      if (targetProductId === null) continue
+      target[targetProductId] = { 0: value }
+    }
+    return target
+  }
+
+  const pivot = slicePivot(daily.pivot)
+  const fbsPivot = slicePivot(daily.fbsPivot)
+  const fboPivot = slicePivot(daily.fboPivot)
+  const productTotals: Record<number, number> = {}
+  const fbsProductTotals: Record<number, number> = {}
+  const fboProductTotals: Record<number, number> = {}
+  const fillProductTotals = (source: Record<number, Record<number, number>>, target: Record<number, number>) => {
+    for (const [productIdRaw, row] of Object.entries(source)) {
+      target[Number(productIdRaw)] = Number(row[0] || 0)
+    }
+  }
+  fillProductTotals(pivot, productTotals)
+  fillProductTotals(fbsPivot, fbsProductTotals)
+  fillProductTotals(fboPivot, fboProductTotals)
+
+  return {
+    dates: [date],
+    allDates: [date],
+    products,
+    entrepreneurs: daily.entrepreneurs || [],
+    pivot,
+    previousPivot: {},
+    previousFbsPivot: {},
+    previousFboPivot: {},
+    dateTotals: [Number(daily.dateTotals?.[sourceDateIdx] || 0)],
+    revenueDateTotals: [Number(daily.revenueDateTotals?.[sourceDateIdx] || 0)],
+    previousDateTotals: [0],
+    productTotals,
+    productRevenue: {},
+    entrepreneurDailyData: { [date]: daily.entrepreneurDailyData?.[date] || {} },
+    entrepreneurDailyRevenue: { [date]: daily.entrepreneurDailyRevenue?.[date] || {} },
+    fbsPivot,
+    fbsDateTotals: [Number(daily.fbsDateTotals?.[sourceDateIdx] || 0)],
+    fbsProductTotals,
+    fboPivot,
+    fboDateTotals: [Number(daily.fboDateTotals?.[sourceDateIdx] || 0)],
+    fboProductTotals,
+  }
+}
+
 function mergeDailyPayloads(days: any[], dates: string[]) {
   const products: Array<{ id: number; name: string }> = []
   const productIdByName = new Map<string, number>()
@@ -623,6 +692,9 @@ async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<n
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
+      || ((process.env.WB_VERCEL_API_TOKEN && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN)
+        ? { id: 0, username: 'cron', role: 'admin' as const }
+        : null)
     if (!user) return unauthorized()
 
     const { searchParams } = request.nextUrl
@@ -1364,10 +1436,12 @@ export async function GET(request: NextRequest) {
           [ent]
         ),
       ]))
-      if (section === 'daily' && useExactSingleDayStats && rateLimitErrors.length === 0) {
-        await Promise.all(targets.map((ent) => (
-          writeRedisDailyPayload(ent.wbApiKey, requestedDateFrom, response.dailyByEntrepreneur[ent.id])
-        )))
+      if (section === 'daily' && shouldUseFunnelOrders && rateLimitErrors.length === 0) {
+        const datesToCache = response.daily?.dates || []
+        await Promise.all(targets.flatMap((ent) => datesToCache.map((date: string) => {
+          const dayPayload = sliceDailyPayloadByDate(response.dailyByEntrepreneur[ent.id], date)
+          return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload) : Promise.resolve()
+        })))
       }
     }
 

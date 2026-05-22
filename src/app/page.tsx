@@ -4522,7 +4522,9 @@ export default function Home() {
           applyExactDashboard()
         }
       }
-      await loadAdSpend(dashboardPeriod)
+      const adSpendPromise = loadAdSpend(dashboardPeriod).catch((error) => {
+        console.error('Failed to load dashboard ad spend:', error)
+      })
       if (requiredDates.every((date) => dailyByDate.has(date))) return
 
       const requestDay = async (date: string) => {
@@ -4572,6 +4574,7 @@ export default function Home() {
           applyExactDashboard()
         }
       }
+      void adSpendPromise
     } catch (e) {
       console.error(e)
     } finally {
