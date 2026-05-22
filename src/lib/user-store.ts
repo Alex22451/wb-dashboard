@@ -93,6 +93,13 @@ async function edgeRequest<T = unknown>(path: string, init?: RequestInit): Promi
   return body ? JSON.parse(body) : null
 }
 
+async function edgeGet<T = unknown>(key: string): Promise<T | null> {
+  const config = getEdgeConfig()
+  if (!config) return null
+  const item = await edgeRequest<{ value: T }>(`/v1/edge-config/${config.edgeConfigId}/item/${encodeURIComponent(key)}`)
+  return item ? item.value : null
+}
+
 async function kvGet<T = string>(key: string): Promise<T | null> {
   if (getRedisConfig()) return redisCommand<T | null>(['GET', key])
 
@@ -253,12 +260,26 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
     }))
 
   const seen = new Set(targets.map((target) => normalizeApiKey(target.wbApiKey)))
-  const maxUserId = Number(await kvGet<string | number>('wb_user_id')) || 0
+  let maxUserId = 0
+  try {
+    maxUserId = Number(await kvGet<string | number>('wb_user_id')) || 0
+  } catch {
+    maxUserId = Number(await edgeGet<string | number>('wb_user_id')) || 0
+  }
   for (let id = 1; id <= maxUserId; id += 1) {
-    const user = await getStoredUserById(id)
+    let user: StoredUser | null = null
+    let keys: UserApiKeys | null = null
+    try {
+      user = await getStoredUserById(id)
+      keys = await getUserApiKeys(id)
+    } catch {
+      const edgeUser = await edgeGet<string | StoredUser>(userKey(id))
+      const edgeKeys = await edgeGet<string | UserApiKeys>(apiKeysKey(id))
+      user = typeof edgeUser === 'string' ? JSON.parse(edgeUser) : edgeUser
+      keys = typeof edgeKeys === 'string' ? JSON.parse(edgeKeys) : edgeKeys
+    }
     if (!user) continue
-    const keys = await getUserApiKeys(id)
-    if (!keys.apiKey) continue
+    if (!keys?.apiKey) continue
     const normalized = normalizeApiKey(keys.apiKey)
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
