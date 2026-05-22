@@ -174,6 +174,7 @@ function sleep(ms: number) {
 const DAILY_REQUEST_BATCH_SIZE = 3
 const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
 const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
+const DAILY_BROWSER_CACHE_VERSION = 'v9'
 
 function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
@@ -192,7 +193,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v8:${scope}:${date}`
+  return `wb-daily-cache-${DAILY_BROWSER_CACHE_VERSION}:${scope}:${date}`
 }
 
 function adPeriodCacheKey(scope: string, from: string, to: string) {
