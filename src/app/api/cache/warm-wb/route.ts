@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { hasRedisConfig, redisCommand } from '@/lib/redis-cache'
 
 function getBaseUrl(request: NextRequest): string {
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
@@ -13,35 +14,6 @@ function getMoscowWeekRange() {
   return {
     from: weekStart.toISOString().split('T')[0],
     to: yesterday.toISOString().split('T')[0],
-  }
-}
-
-function getRedisConfig() {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-  if (!url || !token) return null
-  return { url: url.replace(/\/$/, ''), token }
-}
-
-async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> {
-  const config = getRedisConfig()
-  if (!config) return null
-  try {
-    const response = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(command),
-      cache: 'no-store',
-    })
-    if (!response.ok) return null
-    const json = await response.json()
-    if (json.error) return null
-    return json.result as T
-  } catch {
-    return null
   }
 }
 
@@ -80,7 +52,7 @@ async function probeRedis() {
   const getResult = await redisCommand<string>(['GET', key])
   await redisCommand<number>(['DEL', key])
   return {
-    configured: !!getRedisConfig(),
+    configured: hasRedisConfig(),
     setResult,
     getResult,
     ok: setResult === 'OK' && getResult === value,

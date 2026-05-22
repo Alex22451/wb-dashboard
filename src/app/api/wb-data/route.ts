@@ -4,6 +4,7 @@ import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
 import { getVercelWbTargets } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
+import { redisCommand } from '@/lib/redis-cache'
 import {
   mapWbOrderToProductKey,
   filterToDateRange,
@@ -75,36 +76,6 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
   inFlightRequests.set(key, promise)
   return promise
-}
-
-function getRedisConfig() {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-  if (!url || !token) return null
-  return { url: url.replace(/\/$/, ''), token }
-}
-
-async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> {
-  const config = getRedisConfig()
-  if (!config) return null
-
-  try {
-    const response = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(command),
-      cache: 'no-store',
-    })
-    if (!response.ok) return null
-    const json = await response.json()
-    if (json.error) return null
-    return json.result as T
-  } catch {
-    return null
-  }
 }
 
 function redisDailyKey(apiKey: string, date: string) {
