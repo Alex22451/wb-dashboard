@@ -127,6 +127,12 @@ interface DailyOrdersData {
   fboProductTotals: Record<number, number>
 }
 
+type DailyResponse = {
+  daily?: DailyOrdersData
+  dailyByEntrepreneur?: Record<string, DailyOrdersData>
+  rateLimitErrors?: RateLimitError[]
+}
+
 interface EntrepreneurInfo {
   id: number
   name: string
@@ -180,7 +186,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
 }
 
 function dailyCacheKey(scope: string, date: string) {
-  return `wb-daily-cache-v6:${scope}:${date}`
+  return `wb-daily-cache-v7:${scope}:${date}`
 }
 
 function endOfMonthIso(date: string) {
@@ -222,6 +228,35 @@ function removeDailyCache(scope: string, date: string) {
     window.localStorage.removeItem(dailyCacheKey(scope, date))
   } catch {
     // Browser storage can be disabled; live loading still works.
+  }
+}
+
+function writeDailyResponseCache(
+  cacheScope: string,
+  selection: string,
+  entrepreneurs: EntrepreneurInfo[],
+  user: AuthUser | null,
+  date: string,
+  response: DailyResponse,
+) {
+  if (response.daily) writeDailyCache(cacheScope, date, response.daily)
+  if (!response.dailyByEntrepreneur) return
+
+  for (const [entId, daily] of Object.entries(response.dailyByEntrepreneur)) {
+    const ent = entrepreneurs.find((item) => String(item.id) === String(entId))
+    if (!ent) continue
+    const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user)
+    writeDailyCache(singleScope, date, daily)
+  }
+
+  if (selection !== ALL_ENTREPRENEURS && selection.includes(',')) {
+    const selectedIds = selection.split(',').map((id) => id.trim()).filter(Boolean)
+    for (const entId of selectedIds) {
+      const daily = response.dailyByEntrepreneur[String(entId)]
+      if (!daily) continue
+      const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user)
+      writeDailyCache(singleScope, date, daily)
+    }
   }
 }
 
@@ -1704,7 +1739,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
           }
           if (json.daily && dayErrors.length === 0) {
             loadedDays.push(json.daily)
-            writeDailyCache(cacheScope, date, json.daily)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json)
             setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
@@ -1722,7 +1757,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
         }
         if (json.daily) {
           loadedDays.push(json.daily)
-          writeDailyCache(cacheScope, date, json.daily)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json)
           setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
         }
       }
@@ -4327,7 +4362,7 @@ export default function Home() {
             failedDates.add(date)
           }
           if (dayJson.daily && dayErrors.length === 0) {
-            writeDailyCache(cacheScope, date, dayJson.daily)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson)
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
@@ -4346,7 +4381,7 @@ export default function Home() {
           continue
         }
         if (dayJson.daily) {
-          writeDailyCache(cacheScope, date, dayJson.daily)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson)
           dailyByDate.set(date, dayJson.daily)
           applyExactDashboard()
         }

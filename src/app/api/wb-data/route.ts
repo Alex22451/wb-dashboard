@@ -1019,122 +1019,133 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Daily ───
     if (needDaily) {
-      const visibleDailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
-      const allDailyDates = [...new Set(allMappedOrders.map(o => o.dateStr).filter(Boolean))].sort()
-      const dailyProducts = productTypes.map((name, i) => ({ id: i, name }))
-      const dailyProductMap = new Map(productTypes.map((name, i) => [name, i]))
-      const dailyEntrepreneurs = targets.map(e => ({ id: e.id, name: e.name }))
+      const buildDailyPayload = (
+        mappedRows: typeof allMappedOrders,
+        fulfillmentRows: typeof allFulfillmentMappedOrders,
+        dailyTargets: Array<{ id: number; name: string; wbApiKey: string }>
+      ) => {
+        const visibleDailyDates = [...new Set(mappedRows.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
+        const allDailyDates = [...new Set(mappedRows.map(o => o.dateStr).filter(Boolean))].sort()
+        const localProductTypes = [...new Set(mappedRows.map(o => o.mappedType))]
+        const dailyProducts = localProductTypes.map((name, i) => ({ id: i, name }))
+        const dailyProductMap = new Map(localProductTypes.map((name, i) => [name, i]))
+        const dailyEntrepreneurs = dailyTargets.map(e => ({ id: e.id, name: e.name }))
 
-      const dailyPivot: Record<number, Record<number, number>> = {}
-      const dailyDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
-      const dailyProductTotals: Record<number, number> = {}
-      const entrepreneurDailyData: Record<string, Record<number, number>> = {}
-      for (const date of visibleDailyDates) {
-        entrepreneurDailyData[date] = {}
-        for (const ent of dailyEntrepreneurs) {
-          entrepreneurDailyData[date][ent.id] = 0
+        const dailyPivot: Record<number, Record<number, number>> = {}
+        const dailyDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+        const dailyProductTotals: Record<number, number> = {}
+        const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+        for (const date of visibleDailyDates) {
+          entrepreneurDailyData[date] = {}
+          for (const ent of dailyEntrepreneurs) entrepreneurDailyData[date][ent.id] = 0
         }
-      }
 
-      // FBS/FBO separate pivots
-      const fbsPivot: Record<number, Record<number, number>> = {}
-      const fbsDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
-      const fbsProductTotals: Record<number, number> = {}
+        const fbsPivot: Record<number, Record<number, number>> = {}
+        const fbsDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+        const fbsProductTotals: Record<number, number> = {}
+        const fboPivot: Record<number, Record<number, number>> = {}
+        const fboDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+        const fboProductTotals: Record<number, number> = {}
+        const previousPivot: Record<number, Record<number, number>> = {}
+        const previousFbsPivot: Record<number, Record<number, number>> = {}
+        const previousFboPivot: Record<number, Record<number, number>> = {}
+        const previousDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
+        const visibleDateIndex = new Map(visibleDailyDates.map((date, index) => [date, index]))
+        const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
+        const requestedToMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
+        const visiblePeriodDays = !Number.isNaN(requestedFromMs) && !Number.isNaN(requestedToMs)
+          ? Math.ceil((requestedToMs - requestedFromMs) / 86400000) + 1
+          : visibleDailyDates.length
 
-      const fboPivot: Record<number, Record<number, number>> = {}
-      const fboDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
-      const fboProductTotals: Record<number, number> = {}
-      const previousPivot: Record<number, Record<number, number>> = {}
-      const previousFbsPivot: Record<number, Record<number, number>> = {}
-      const previousFboPivot: Record<number, Record<number, number>> = {}
-      const previousDateTotals: number[] = new Array(visibleDailyDates.length).fill(0)
-      const visibleDateIndex = new Map(visibleDailyDates.map((date, index) => [date, index]))
-      const requestedFromMs = new Date(`${requestedDateFrom}T00:00:00`).getTime()
-      const requestedToMs = new Date(`${requestedDateTo}T00:00:00`).getTime()
-      const visiblePeriodDays = !Number.isNaN(requestedFromMs) && !Number.isNaN(requestedToMs)
-        ? Math.ceil((requestedToMs - requestedFromMs) / 86400000) + 1
-        : visibleDailyDates.length
+        for (const o of mappedRows) {
+          const productId = dailyProductMap.get(o.mappedType)
+          if (productId === undefined) continue
+          const dateIdx = visibleDateIndex.get(o.dateStr)
 
-      for (const o of allMappedOrders) {
-        const productId = dailyProductMap.get(o.mappedType)
-        if (productId === undefined) continue
-        const dateIdx = visibleDateIndex.get(o.dateStr)
-
-        if (dateIdx === undefined) {
-          const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
-          if (!Number.isNaN(orderMs) && !Number.isNaN(requestedFromMs)) {
-            const shifted = new Date(orderMs)
-            shifted.setDate(shifted.getDate() + visiblePeriodDays)
-            const shiftedDate = shifted.toISOString().split('T')[0]
-            const shiftedIdx = visibleDateIndex.get(shiftedDate)
-            if (shiftedIdx !== undefined) {
-              if (!previousPivot[productId]) previousPivot[productId] = {}
-              previousPivot[productId][shiftedIdx] = (previousPivot[productId][shiftedIdx] || 0) + 1
-              previousDateTotals[shiftedIdx]++
-              const fulfillmentPivot = o.isFbs ? previousFbsPivot : previousFboPivot
-              if (!fulfillmentPivot[productId]) fulfillmentPivot[productId] = {}
-              fulfillmentPivot[productId][shiftedIdx] = (fulfillmentPivot[productId][shiftedIdx] || 0) + 1
+          if (dateIdx === undefined) {
+            const orderMs = new Date(`${o.dateStr}T00:00:00`).getTime()
+            if (!Number.isNaN(orderMs) && !Number.isNaN(requestedFromMs)) {
+              const shifted = new Date(orderMs)
+              shifted.setDate(shifted.getDate() + visiblePeriodDays)
+              const shiftedDate = shifted.toISOString().split('T')[0]
+              const shiftedIdx = visibleDateIndex.get(shiftedDate)
+              if (shiftedIdx !== undefined) {
+                if (!previousPivot[productId]) previousPivot[productId] = {}
+                previousPivot[productId][shiftedIdx] = (previousPivot[productId][shiftedIdx] || 0) + 1
+                previousDateTotals[shiftedIdx]++
+                const fulfillmentPivot = o.isFbs ? previousFbsPivot : previousFboPivot
+                if (!fulfillmentPivot[productId]) fulfillmentPivot[productId] = {}
+                fulfillmentPivot[productId][shiftedIdx] = (fulfillmentPivot[productId][shiftedIdx] || 0) + 1
+              }
             }
+            continue
           }
-          continue
+
+          if (!dailyPivot[productId]) dailyPivot[productId] = {}
+          dailyPivot[productId][dateIdx] = (dailyPivot[productId][dateIdx] || 0) + 1
+          dailyDateTotals[dateIdx]++
+          dailyProductTotals[productId] = (dailyProductTotals[productId] || 0) + 1
+          entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
         }
 
-        // All orders
-        if (!dailyPivot[productId]) dailyPivot[productId] = {}
-        dailyPivot[productId][dateIdx] = (dailyPivot[productId][dateIdx] || 0) + 1
-        dailyDateTotals[dateIdx]++
-        dailyProductTotals[productId] = (dailyProductTotals[productId] || 0) + 1
-        entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
+        for (const o of fulfillmentRows) {
+          if (o.isFbs) continue
+          const productId = dailyProductMap.get(o.mappedType)
+          if (productId === undefined) continue
+          const dateIdx = visibleDateIndex.get(o.dateStr)
+          if (dateIdx === undefined) continue
 
-      }
+          if (!fboPivot[productId]) fboPivot[productId] = {}
+          fboPivot[productId][dateIdx] = (fboPivot[productId][dateIdx] || 0) + 1
+          fboDateTotals[dateIdx]++
+          fboProductTotals[productId] = (fboProductTotals[productId] || 0) + 1
+        }
 
-      for (const o of allFulfillmentMappedOrders) {
-        if (o.isFbs) continue
-        const productId = dailyProductMap.get(o.mappedType)
-        if (productId === undefined) continue
-        const dateIdx = visibleDateIndex.get(o.dateStr)
-        if (dateIdx === undefined) continue
+        for (const [productIdRaw, row] of Object.entries(dailyPivot)) {
+          const productId = Number(productIdRaw)
+          for (const [dateIdxRaw, totalValue] of Object.entries(row)) {
+            const dateIdx = Number(dateIdxRaw)
+            const fboValue = fboPivot[productId]?.[dateIdx] || 0
+            const fbsValue = Math.max((Number(totalValue) || 0) - fboValue, 0)
+            if (!fbsValue) continue
+            if (!fbsPivot[productId]) fbsPivot[productId] = {}
+            fbsPivot[productId][dateIdx] = fbsValue
+            fbsDateTotals[dateIdx] += fbsValue
+            fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
+          }
+        }
 
-        if (!fboPivot[productId]) fboPivot[productId] = {}
-        fboPivot[productId][dateIdx] = (fboPivot[productId][dateIdx] || 0) + 1
-        fboDateTotals[dateIdx]++
-        fboProductTotals[productId] = (fboProductTotals[productId] || 0) + 1
-      }
-
-      for (const [productIdRaw, row] of Object.entries(dailyPivot)) {
-        const productId = Number(productIdRaw)
-        for (const [dateIdxRaw, totalValue] of Object.entries(row)) {
-          const dateIdx = Number(dateIdxRaw)
-          const fboValue = fboPivot[productId]?.[dateIdx] || 0
-          const fbsValue = Math.max((Number(totalValue) || 0) - fboValue, 0)
-          if (!fbsValue) continue
-          if (!fbsPivot[productId]) fbsPivot[productId] = {}
-          fbsPivot[productId][dateIdx] = fbsValue
-          fbsDateTotals[dateIdx] += fbsValue
-          fbsProductTotals[productId] = (fbsProductTotals[productId] || 0) + fbsValue
+        return {
+          dates: visibleDailyDates,
+          allDates: allDailyDates,
+          products: dailyProducts,
+          entrepreneurs: dailyEntrepreneurs,
+          pivot: dailyPivot,
+          previousPivot,
+          previousFbsPivot,
+          previousFboPivot,
+          dateTotals: dailyDateTotals,
+          previousDateTotals,
+          productTotals: dailyProductTotals,
+          entrepreneurDailyData,
+          fbsPivot,
+          fbsDateTotals,
+          fbsProductTotals,
+          fboPivot,
+          fboDateTotals,
+          fboProductTotals,
         }
       }
 
-      response.daily = {
-        dates: visibleDailyDates,
-        allDates: allDailyDates,
-        products: dailyProducts,
-        entrepreneurs: dailyEntrepreneurs,
-        pivot: dailyPivot,
-        previousPivot,
-        previousFbsPivot,
-        previousFboPivot,
-        dateTotals: dailyDateTotals,
-        previousDateTotals,
-        productTotals: dailyProductTotals,
-        entrepreneurDailyData,
-        fbsPivot,
-        fbsDateTotals,
-        fbsProductTotals,
-        fboPivot,
-        fboDateTotals,
-        fboProductTotals,
-      }
+      response.daily = buildDailyPayload(allMappedOrders, allFulfillmentMappedOrders, targets)
+      response.dailyByEntrepreneur = Object.fromEntries(targets.map((ent) => [
+        ent.id,
+        buildDailyPayload(
+          allMappedOrders.filter((row) => row.entrepreneurId === ent.id),
+          allFulfillmentMappedOrders.filter((row) => row.entrepreneurId === ent.id),
+          [ent]
+        ),
+      ]))
     }
 
     // ─── Build Monthly ───
