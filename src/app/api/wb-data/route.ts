@@ -108,7 +108,7 @@ async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> 
 }
 
 function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v1:${apiKeyFingerprint(apiKey)}:${date}`
+  return `wb:daily:v2:${apiKeyFingerprint(apiKey)}:${date}`
 }
 
 function redisDailyTtlSeconds(date: string) {
@@ -120,36 +120,126 @@ function redisDailyTtlSeconds(date: string) {
   return 180 * 24 * 60 * 60
 }
 
-async function readRedisDailyResult(apiKey: string, date: string): Promise<{ orders: any[]; fulfillmentOrders: any[] } | null> {
+async function readRedisDailyPayload(apiKey: string, date: string): Promise<any | null> {
   const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date)])
   if (!raw || typeof raw !== 'string') return null
   try {
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed.orders) || !Array.isArray(parsed.fulfillmentOrders)) return null
-    return {
-      orders: parsed.orders,
-      fulfillmentOrders: parsed.fulfillmentOrders,
-    }
+    if (!parsed?.daily?.dates || !Array.isArray(parsed.daily.dates)) return null
+    return parsed.daily
   } catch {
     return null
   }
 }
 
-async function writeRedisDailyResult(apiKey: string, date: string, data: { orders: any[]; fulfillmentOrders: any[] }) {
+async function writeRedisDailyPayload(apiKey: string, date: string, daily: any) {
   await redisCommand([
     'SET',
     redisDailyKey(apiKey, date),
     JSON.stringify({
       date,
       fetchedAt: new Date().toISOString(),
-      source: 'wb-daily-funnel-v1',
+      source: 'wb-daily-payload-v2',
       complete: true,
-      orders: data.orders,
-      fulfillmentOrders: data.fulfillmentOrders,
+      daily,
     }),
     'EX',
     redisDailyTtlSeconds(date),
   ])
+}
+
+function mergeDailyPayloads(days: any[], dates: string[]) {
+  const products: Array<{ id: number; name: string }> = []
+  const productIdByName = new Map<string, number>()
+  const entrepreneursById = new Map<number, { id: number; name: string }>()
+  const dateIndex = new Map(dates.map((date, index) => [date, index]))
+
+  const ensureProduct = (name: string) => {
+    const existing = productIdByName.get(name)
+    if (existing !== undefined) return existing
+    const id = products.length
+    productIdByName.set(name, id)
+    products.push({ id, name })
+    return id
+  }
+
+  for (const day of days) {
+    for (const ent of day.entrepreneurs || []) entrepreneursById.set(ent.id, ent)
+  }
+
+  const pivot: Record<number, Record<number, number>> = {}
+  const fbsPivot: Record<number, Record<number, number>> = {}
+  const fboPivot: Record<number, Record<number, number>> = {}
+  const dateTotals = new Array(dates.length).fill(0)
+  const fbsDateTotals = new Array(dates.length).fill(0)
+  const fboDateTotals = new Array(dates.length).fill(0)
+  const productTotals: Record<number, number> = {}
+  const fbsProductTotals: Record<number, number> = {}
+  const fboProductTotals: Record<number, number> = {}
+  const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+
+  const addPivot = (
+    targetPivot: Record<number, Record<number, number>>,
+    targetDateTotals: number[],
+    targetProductTotals: Record<number, number>,
+    productId: number,
+    targetDateIdx: number,
+    value: number,
+  ) => {
+    if (!value) return
+    if (!targetPivot[productId]) targetPivot[productId] = {}
+    targetPivot[productId][targetDateIdx] = (targetPivot[productId][targetDateIdx] || 0) + value
+    targetDateTotals[targetDateIdx] += value
+    targetProductTotals[productId] = (targetProductTotals[productId] || 0) + value
+  }
+
+  for (const day of days) {
+    for (const [date, entRows] of Object.entries(day.entrepreneurDailyData || {})) {
+      entrepreneurDailyData[date] = entrepreneurDailyData[date] || {}
+      for (const [entId, value] of Object.entries(entRows as Record<string, number>)) {
+        entrepreneurDailyData[date][Number(entId)] = (entrepreneurDailyData[date][Number(entId)] || 0) + Number(value || 0)
+      }
+    }
+
+    for (const product of day.products || []) {
+      const nextProductId = ensureProduct(product.name)
+      const groups = [
+        { source: day.pivot, sourceDates: day.dates, totals: dateTotals, productTotals, target: pivot },
+        { source: day.fbsPivot, sourceDates: day.dates, totals: fbsDateTotals, productTotals: fbsProductTotals, target: fbsPivot },
+        { source: day.fboPivot, sourceDates: day.dates, totals: fboDateTotals, productTotals: fboProductTotals, target: fboPivot },
+      ]
+      for (const group of groups) {
+        const row = group.source?.[product.id] || {}
+        for (const [sourceIdxRaw, value] of Object.entries(row)) {
+          const sourceDate = group.sourceDates[Number(sourceIdxRaw)]
+          const targetDateIdx = dateIndex.get(sourceDate)
+          if (targetDateIdx === undefined) continue
+          addPivot(group.target, group.totals, group.productTotals, nextProductId, targetDateIdx, Number(value) || 0)
+        }
+      }
+    }
+  }
+
+  return {
+    dates,
+    allDates: dates,
+    products,
+    entrepreneurs: [...entrepreneursById.values()],
+    pivot,
+    previousPivot: {},
+    previousFbsPivot: {},
+    previousFboPivot: {},
+    dateTotals,
+    previousDateTotals: new Array(dates.length).fill(0),
+    productTotals,
+    entrepreneurDailyData,
+    fbsPivot,
+    fbsDateTotals,
+    fbsProductTotals,
+    fboPivot,
+    fboDateTotals,
+    fboProductTotals,
+  }
 }
 
 const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
@@ -637,6 +727,21 @@ export async function GET(request: NextRequest) {
       needDaily || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
 
+    if (section === 'daily' && useExactSingleDayStats) {
+      const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
+        ent,
+        daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom),
+      })))
+      if (cachedDailyRows.every((row) => row.daily)) {
+        const dailyByEntrepreneur = Object.fromEntries(cachedDailyRows.map((row) => [row.ent.id, row.daily]))
+        return NextResponse.json({
+          rateLimitErrors: [],
+          daily: mergeDailyPayloads(cachedDailyRows.map((row) => row.daily), [requestedDateFrom]),
+          dailyByEntrepreneur,
+        })
+      }
+    }
+
     // Fetch each entrepreneur independently. WB limits are per seller cabinet, so
     // parallelizing different API keys avoids the admin "all IP" waterfall.
     const results: Array<{
@@ -659,21 +764,6 @@ export async function GET(request: NextRequest) {
         let returnError: string | undefined
 
         if (shouldUseFunnelOrders) {
-          if (needDaily && useExactSingleDayStats) {
-            const redisDaily = await readRedisDailyResult(ent.wbApiKey, requestedDateFrom)
-            if (redisDaily) {
-              return {
-                entrepreneurId: ent.id,
-                entrepreneurName: ent.name,
-                orders: redisDaily.orders,
-                fulfillmentOrders: redisDaily.fulfillmentOrders,
-                returns: [],
-                error: undefined,
-                returnError: undefined,
-              }
-            }
-          }
-
           const funnel = needDaily
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
@@ -695,13 +785,6 @@ export async function GET(request: NextRequest) {
             } catch (_e) {
               returnError = 'Ошибка сети при загрузке FBO/FBS'
             }
-          }
-
-          if (needDaily && useExactSingleDayStats && !funnel.error && !returnError) {
-            await writeRedisDailyResult(ent.wbApiKey, requestedDateFrom, {
-              orders: funnel.orders,
-              fulfillmentOrders,
-            })
           }
 
           return {
@@ -1243,6 +1326,11 @@ export async function GET(request: NextRequest) {
           [ent]
         ),
       ]))
+      if (section === 'daily' && useExactSingleDayStats && rateLimitErrors.length === 0) {
+        await Promise.all(targets.map((ent) => (
+          writeRedisDailyPayload(ent.wbApiKey, requestedDateFrom, response.dailyByEntrepreneur[ent.id])
+        )))
+      }
     }
 
     // ─── Build Monthly ───
