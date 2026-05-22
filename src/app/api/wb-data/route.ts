@@ -28,7 +28,7 @@ function apiKeyFingerprint(apiKey: string): string {
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v10:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v11:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -75,6 +75,81 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
   inFlightRequests.set(key, promise)
   return promise
+}
+
+function getRedisConfig() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) return null
+  return { url: url.replace(/\/$/, ''), token }
+}
+
+async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> {
+  const config = getRedisConfig()
+  if (!config) return null
+
+  try {
+    const response = await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(command),
+      cache: 'no-store',
+    })
+    if (!response.ok) return null
+    const json = await response.json()
+    if (json.error) return null
+    return json.result as T
+  } catch {
+    return null
+  }
+}
+
+function redisDailyKey(apiKey: string, date: string) {
+  return `wb:daily:v1:${apiKeyFingerprint(apiKey)}:${date}`
+}
+
+function redisDailyTtlSeconds(date: string) {
+  const mskNow = new Date(Date.now() + 3 * 3600000)
+  const today = mskNow.toISOString().split('T')[0]
+  const yesterday = new Date(mskNow.getTime() - 86400000).toISOString().split('T')[0]
+  if (date >= today) return 15 * 60
+  if (date === yesterday) return 24 * 60 * 60
+  return 180 * 24 * 60 * 60
+}
+
+async function readRedisDailyResult(apiKey: string, date: string): Promise<{ orders: any[]; fulfillmentOrders: any[] } | null> {
+  const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date)])
+  if (!raw || typeof raw !== 'string') return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed.orders) || !Array.isArray(parsed.fulfillmentOrders)) return null
+    return {
+      orders: parsed.orders,
+      fulfillmentOrders: parsed.fulfillmentOrders,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function writeRedisDailyResult(apiKey: string, date: string, data: { orders: any[]; fulfillmentOrders: any[] }) {
+  await redisCommand([
+    'SET',
+    redisDailyKey(apiKey, date),
+    JSON.stringify({
+      date,
+      fetchedAt: new Date().toISOString(),
+      source: 'wb-daily-funnel-v1',
+      complete: true,
+      orders: data.orders,
+      fulfillmentOrders: data.fulfillmentOrders,
+    }),
+    'EX',
+    redisDailyTtlSeconds(date),
+  ])
 }
 
 const CACHE_TTL_DASHBOARD = 5 * 60 * 1000   // 5 min
@@ -584,6 +659,21 @@ export async function GET(request: NextRequest) {
         let returnError: string | undefined
 
         if (shouldUseFunnelOrders) {
+          if (needDaily && useExactSingleDayStats) {
+            const redisDaily = await readRedisDailyResult(ent.wbApiKey, requestedDateFrom)
+            if (redisDaily) {
+              return {
+                entrepreneurId: ent.id,
+                entrepreneurName: ent.name,
+                orders: redisDaily.orders,
+                fulfillmentOrders: redisDaily.fulfillmentOrders,
+                returns: [],
+                error: undefined,
+                returnError: undefined,
+              }
+            }
+          }
+
           const funnel = needDaily
             ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
             : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
@@ -605,6 +695,13 @@ export async function GET(request: NextRequest) {
             } catch (_e) {
               returnError = 'Ошибка сети при загрузке FBO/FBS'
             }
+          }
+
+          if (needDaily && useExactSingleDayStats && !funnel.error && !returnError) {
+            await writeRedisDailyResult(ent.wbApiKey, requestedDateFrom, {
+              orders: funnel.orders,
+              fulfillmentOrders,
+            })
           }
 
           return {
