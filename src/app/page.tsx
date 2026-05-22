@@ -159,6 +159,10 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function hasUncachedRemainingDay(scope: string, dates: string[], currentIndex: number) {
+  return dates.slice(currentIndex + 1).some((date) => !readDailyCache(scope, date))
+}
+
 function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
     ? entrepreneurs.filter((ent) => ent.hasApiKey).map((ent) => String(ent.id))
@@ -1593,7 +1597,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
           writeDailyCache(cacheScope, date, json.daily)
           setFetchedData(mergeDailyResponses(loadedDays, dates))
         }
-        if (dateMode === 'range' && i < dates.length - 1) await sleep(21000)
+        if (dateMode === 'range' && hasUncachedRemainingDay(cacheScope, dates, i)) await sleep(21000)
       }
 
       setRateLimitErrors(errors)
@@ -4222,7 +4226,7 @@ export default function Home() {
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
-          if (index < dates.length - 1) await sleep(21000)
+          if (dates.slice(index + 1).some((nextDate) => !dailyByDate.has(nextDate))) await sleep(21000)
         }
       }
     } catch (e) {
