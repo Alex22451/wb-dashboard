@@ -9,6 +9,7 @@ interface EntrepreneurRow {
   id: number
   name: string
   wbApiKey: string
+  wbPromotionApiKey?: string | null
 }
 
 interface GrowthItem {
@@ -73,7 +74,11 @@ function setCached(key: string, data: unknown) {
 }
 
 function apiKeyFingerprint(apiKey: string): string {
-  return createHash('sha256').update(apiKey.trim().replace(/^bearer\s+/i, '')).digest('hex').slice(0, 16)
+  return createHash('sha256').update(normalizeApiKey(apiKey)).digest('hex').slice(0, 16)
+}
+
+function normalizeApiKey(apiKey: string): string {
+  return apiKey.trim().replace(/^bearer\s+/i, '').trim()
 }
 
 function parseEntrepreneurIds(value: string | null, rows: EntrepreneurRow[]): EntrepreneurRow[] {
@@ -105,7 +110,7 @@ function collectAdvertIds(node: unknown, ids: Set<number>, parentStatus?: number
 
 async function fetchPromotionCampaignIds(apiKey: string): Promise<number[]> {
   const response = await fetchWbApi(`${AD_API_BASE}/adv/v1/promotion/count`, {
-    headers: { Authorization: apiKey },
+    headers: { Authorization: normalizeApiKey(apiKey) },
   })
 
   if (!response.ok) {
@@ -151,7 +156,7 @@ async function fetchPromotionStats(apiKey: string, dateFrom: string, dateTo: str
 
   const response = await fetchWbApi(
     `${AD_API_BASE}/adv/v3/fullstats?ids=${campaignIds.join(',')}&beginDate=${dateFrom}&endDate=${dateTo}`,
-    { headers: { Authorization: apiKey } }
+    { headers: { Authorization: normalizeApiKey(apiKey) } }
   )
 
   if (!response.ok) {
@@ -169,7 +174,7 @@ async function fetchFboStocks(apiKey: string, dateTo: string): Promise<Map<numbe
   const stocks = new Map<number, number>()
   const response = await fetchWbApi(`${STATS_BASE}?dateFrom=${dateTo}`, {
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: normalizeApiKey(apiKey),
       'Content-Type': 'application/json',
     },
   })
@@ -225,7 +230,8 @@ export async function GET(request: NextRequest) {
 
     for (const ent of targets) {
       try {
-        const promotionRows = await fetchPromotionStats(ent.wbApiKey, dateFrom, dateTo)
+        const promotionApiKey = ent.wbPromotionApiKey || ent.wbApiKey
+        const promotionRows = await fetchPromotionStats(promotionApiKey, dateFrom, dateTo)
         const fboStocks = await fetchFboStocks(ent.wbApiKey, dateTo)
 
         if (promotionRows.length === 0) {
