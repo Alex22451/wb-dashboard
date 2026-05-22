@@ -134,6 +134,7 @@ type DailyResponse = {
   daily?: DailyOrdersData
   dailyByEntrepreneur?: Record<string, DailyOrdersData>
   rateLimitErrors?: RateLimitError[]
+  cacheSource?: 'redis'
 }
 
 type DashboardPeriod = 'yesterday' | 'week' | 'twoWeeks' | 'month'
@@ -1805,7 +1806,8 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
             setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
-        if (offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
+        const batchFromRedis = batchResults.every(({ json }) => json.cacheSource === 'redis')
+        if (!batchFromRedis && offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
       }
 
       for (const date of failedDates) {
@@ -4555,7 +4557,8 @@ export default function Home() {
             applyExactDashboard()
           }
         }
-        if (offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
+        const batchFromRedis = batchResults.every(({ json: dayJson }) => dayJson.cacheSource === 'redis')
+        if (!batchFromRedis && offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
       }
 
       for (const date of failedDates) {

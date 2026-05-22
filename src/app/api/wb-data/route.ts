@@ -832,6 +832,7 @@ export async function GET(request: NextRequest) {
         const dailyByEntrepreneur = Object.fromEntries(cachedDailyRows.map((row) => [row.ent.id, row.daily]))
         return NextResponse.json({
           rateLimitErrors: [],
+          cacheSource: 'redis',
           daily: mergeDailyPayloads(cachedDailyRows.map((row) => row.daily), [requestedDateFrom]),
           dailyByEntrepreneur,
         })
