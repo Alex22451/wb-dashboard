@@ -122,6 +122,8 @@ interface DailyOrdersData {
   productRevenue?: Record<number, number>
   entrepreneurDailyData: Record<string, Record<number, number>>
   entrepreneurDailyRevenue?: Record<string, Record<number, number>>
+  entrepreneurDailyFbs?: Record<string, Record<number, number>>
+  entrepreneurDailyFbo?: Record<string, Record<number, number>>
   fbsPivot: Record<number, Record<number, number>>
   fbsDateTotals: number[]
   fbsProductTotals: Record<number, number>
@@ -174,7 +176,7 @@ function sleep(ms: number) {
 const DAILY_REQUEST_BATCH_SIZE = 3
 const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
 const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
-const DAILY_BROWSER_CACHE_VERSION = 'v9'
+const DAILY_BROWSER_CACHE_VERSION = 'v10'
 
 function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
@@ -1671,6 +1673,8 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
     const fboProductTotals: Record<number, number> = {}
     const entrepreneurDailyData: Record<string, Record<number, number>> = {}
     const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
+    const entrepreneurDailyFbs: Record<string, Record<number, number>> = {}
+    const entrepreneurDailyFbo: Record<string, Record<number, number>> = {}
 
     const addPivot = (
       targetPivot: Record<number, Record<number, number>>,
@@ -1698,6 +1702,18 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
         entrepreneurDailyRevenue[date] = entrepreneurDailyRevenue[date] || {}
         for (const [entId, value] of Object.entries(entRows)) {
           entrepreneurDailyRevenue[date][Number(entId)] = (entrepreneurDailyRevenue[date][Number(entId)] || 0) + Number(value || 0)
+        }
+      }
+      for (const [date, entRows] of Object.entries(day.entrepreneurDailyFbs || {})) {
+        entrepreneurDailyFbs[date] = entrepreneurDailyFbs[date] || {}
+        for (const [entId, value] of Object.entries(entRows)) {
+          entrepreneurDailyFbs[date][Number(entId)] = (entrepreneurDailyFbs[date][Number(entId)] || 0) + Number(value || 0)
+        }
+      }
+      for (const [date, entRows] of Object.entries(day.entrepreneurDailyFbo || {})) {
+        entrepreneurDailyFbo[date] = entrepreneurDailyFbo[date] || {}
+        for (const [entId, value] of Object.entries(entRows)) {
+          entrepreneurDailyFbo[date][Number(entId)] = (entrepreneurDailyFbo[date][Number(entId)] || 0) + Number(value || 0)
         }
       }
 
@@ -1745,6 +1761,8 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
       productRevenue,
       entrepreneurDailyData,
       entrepreneurDailyRevenue,
+      entrepreneurDailyFbs,
+      entrepreneurDailyFbo,
       fbsPivot,
       fbsDateTotals,
       fbsProductTotals,
@@ -1940,14 +1958,40 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
                 <div className="space-y-2 p-3 sm:hidden">
                   {fetchedData.dates.map((date) => (
                     <div key={date} className="rounded-md border p-3">
-                      <div className="mb-2 text-sm font-medium">{formatDateFull(date)}</div>
+                      <div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium">
+                        <span>{formatDateFull(date)}</span>
+                        <span>{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                      </div>
                       <div className="space-y-1">
-                        {fetchedData.entrepreneurs.map((ent) => (
-                          <div key={ent.id} className="flex items-center justify-between gap-3 text-sm">
-                            <span className="truncate text-muted-foreground">{ent.name}</span>
-                            <span className="font-semibold">{formatNumber(fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0)}</span>
-                          </div>
-                        ))}
+                        {fetchedData.entrepreneurs.map((ent) => {
+                          const total = fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0
+                          const fbs = fetchedData.entrepreneurDailyFbs?.[date]?.[ent.id] || 0
+                          const fbo = fetchedData.entrepreneurDailyFbo?.[date]?.[ent.id] || 0
+                          return (
+                            <div key={ent.id} className="flex items-start justify-between gap-3 text-sm">
+                              <span className="truncate text-muted-foreground">{ent.name}</span>
+                              <span className="text-right">
+                                <span className="block font-semibold">{formatNumber(total)}</span>
+                                <span className="block text-[11px] text-muted-foreground">
+                                  <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
+                                  <span className="mx-1">/</span>
+                                  <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fbo)}</span>
+                                </span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                        <div className="flex items-start justify-between gap-3 border-t pt-2 text-sm">
+                          <span className="font-medium">Итого</span>
+                          <span className="text-right">
+                            <span className="block font-semibold">{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                            <span className="block text-[11px] text-muted-foreground">
+                              <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                              <span className="mx-1">/</span>
+                              <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fetchedData.fboDateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                            </span>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1960,15 +2004,36 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
                         {fetchedData.entrepreneurs.map((ent) => (
                           <th key={ent.id} className="min-w-[140px] px-3 py-2 text-right font-medium">{ent.name}</th>
                         ))}
+                        <th className="min-w-[130px] px-3 py-2 text-right font-medium">Итого</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedData.dates.map((date) => (
+                      {fetchedData.dates.map((date, dateIdx) => (
                         <tr key={date} className="border-b last:border-b-0">
                           <td className="px-3 py-2 font-medium">{formatDateShort(date)}</td>
-                          {fetchedData.entrepreneurs.map((ent) => (
-                            <td key={ent.id} className="px-3 py-2 text-right">{formatNumber(fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0)}</td>
-                          ))}
+                          {fetchedData.entrepreneurs.map((ent) => {
+                            const total = fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0
+                            const fbs = fetchedData.entrepreneurDailyFbs?.[date]?.[ent.id] || 0
+                            const fbo = fetchedData.entrepreneurDailyFbo?.[date]?.[ent.id] || 0
+                            return (
+                              <td key={ent.id} className="px-3 py-2 text-right">
+                                <div className="font-medium">{formatNumber(total)}</div>
+                                <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                                  <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
+                                  <span className="mx-1">/</span>
+                                  <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fbo)}</span>
+                                </div>
+                              </td>
+                            )
+                          })}
+                          <td className="px-3 py-2 text-right">
+                            <div className="font-semibold">{formatNumber(fetchedData.dateTotals[dateIdx] || 0)}</div>
+                            <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                              <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[dateIdx] || 0)}</span>
+                              <span className="mx-1">/</span>
+                              <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fetchedData.fboDateTotals[dateIdx] || 0)}</span>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

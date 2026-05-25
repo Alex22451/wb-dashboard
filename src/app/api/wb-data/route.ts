@@ -79,7 +79,7 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 }
 
 function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v5:${apiKeyFingerprint(apiKey)}:${date}`
+  return `wb:daily:v6:${apiKeyFingerprint(apiKey)}:${date}`
 }
 
 function redisDailyTtlSeconds(date: string) {
@@ -110,7 +110,7 @@ async function writeRedisDailyPayload(apiKey: string, date: string, daily: any) 
     JSON.stringify({
       date,
       fetchedAt: new Date().toISOString(),
-      source: 'wb-daily-payload-v2',
+      source: 'wb-daily-payload-v3',
       complete: true,
       daily,
     }),
@@ -179,6 +179,8 @@ function sliceDailyPayloadByDate(daily: any, date: string) {
     productRevenue: {},
     entrepreneurDailyData: { [date]: daily.entrepreneurDailyData?.[date] || {} },
     entrepreneurDailyRevenue: { [date]: daily.entrepreneurDailyRevenue?.[date] || {} },
+    entrepreneurDailyFbs: { [date]: daily.entrepreneurDailyFbs?.[date] || {} },
+    entrepreneurDailyFbo: { [date]: daily.entrepreneurDailyFbo?.[date] || {} },
     fbsPivot,
     fbsDateTotals: [Number(daily.fbsDateTotals?.[sourceDateIdx] || 0)],
     fbsProductTotals,
@@ -220,6 +222,8 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
   const fboProductTotals: Record<number, number> = {}
   const entrepreneurDailyData: Record<string, Record<number, number>> = {}
   const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
+  const entrepreneurDailyFbs: Record<string, Record<number, number>> = {}
+  const entrepreneurDailyFbo: Record<string, Record<number, number>> = {}
 
   const addPivot = (
     targetPivot: Record<number, Record<number, number>>,
@@ -247,6 +251,18 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
       entrepreneurDailyRevenue[date] = entrepreneurDailyRevenue[date] || {}
       for (const [entId, value] of Object.entries(entRows as Record<string, number>)) {
         entrepreneurDailyRevenue[date][Number(entId)] = (entrepreneurDailyRevenue[date][Number(entId)] || 0) + Number(value || 0)
+      }
+    }
+    for (const [date, entRows] of Object.entries(day.entrepreneurDailyFbs || {})) {
+      entrepreneurDailyFbs[date] = entrepreneurDailyFbs[date] || {}
+      for (const [entId, value] of Object.entries(entRows as Record<string, number>)) {
+        entrepreneurDailyFbs[date][Number(entId)] = (entrepreneurDailyFbs[date][Number(entId)] || 0) + Number(value || 0)
+      }
+    }
+    for (const [date, entRows] of Object.entries(day.entrepreneurDailyFbo || {})) {
+      entrepreneurDailyFbo[date] = entrepreneurDailyFbo[date] || {}
+      for (const [entId, value] of Object.entries(entRows as Record<string, number>)) {
+        entrepreneurDailyFbo[date][Number(entId)] = (entrepreneurDailyFbo[date][Number(entId)] || 0) + Number(value || 0)
       }
     }
 
@@ -294,6 +310,8 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
     productRevenue,
     entrepreneurDailyData,
     entrepreneurDailyRevenue,
+    entrepreneurDailyFbs,
+    entrepreneurDailyFbo,
     fbsPivot,
     fbsDateTotals,
     fbsProductTotals,
@@ -1504,12 +1522,20 @@ export async function GET(request: NextRequest) {
         const dailyProductRevenue: Record<number, number> = {}
         const entrepreneurDailyRevenue: Record<string, Record<number, number>> = {}
         const entrepreneurDailyData: Record<string, Record<number, number>> = {}
+        const entrepreneurDailyFbs: Record<string, Record<number, number>> = {}
+        const entrepreneurDailyFbo: Record<string, Record<number, number>> = {}
+        const entrepreneurProductDateTotals: Record<number, Record<number, Record<number, number>>> = {}
+        const entrepreneurProductDateFboRaw: Record<number, Record<number, Record<number, number>>> = {}
         for (const date of visibleDailyDates) {
           entrepreneurDailyData[date] = {}
           entrepreneurDailyRevenue[date] = {}
+          entrepreneurDailyFbs[date] = {}
+          entrepreneurDailyFbo[date] = {}
           for (const ent of dailyEntrepreneurs) {
             entrepreneurDailyData[date][ent.id] = 0
             entrepreneurDailyRevenue[date][ent.id] = 0
+            entrepreneurDailyFbs[date][ent.id] = 0
+            entrepreneurDailyFbo[date][ent.id] = 0
           }
         }
 
@@ -1562,6 +1588,9 @@ export async function GET(request: NextRequest) {
           dailyProductRevenue[productId] = (dailyProductRevenue[productId] || 0) + revenue
           entrepreneurDailyData[o.dateStr][o.entrepreneurId] = (entrepreneurDailyData[o.dateStr][o.entrepreneurId] || 0) + 1
           entrepreneurDailyRevenue[o.dateStr][o.entrepreneurId] = (entrepreneurDailyRevenue[o.dateStr][o.entrepreneurId] || 0) + revenue
+          entrepreneurProductDateTotals[o.entrepreneurId] = entrepreneurProductDateTotals[o.entrepreneurId] || {}
+          entrepreneurProductDateTotals[o.entrepreneurId][productId] = entrepreneurProductDateTotals[o.entrepreneurId][productId] || {}
+          entrepreneurProductDateTotals[o.entrepreneurId][productId][dateIdx] = (entrepreneurProductDateTotals[o.entrepreneurId][productId][dateIdx] || 0) + 1
         }
 
         for (const o of fulfillmentRows) {
@@ -1586,6 +1615,26 @@ export async function GET(request: NextRequest) {
 
           if (!rawFboPivot[productId]) rawFboPivot[productId] = {}
           rawFboPivot[productId][dateIdx] = (rawFboPivot[productId][dateIdx] || 0) + 1
+          entrepreneurProductDateFboRaw[o.entrepreneurId] = entrepreneurProductDateFboRaw[o.entrepreneurId] || {}
+          entrepreneurProductDateFboRaw[o.entrepreneurId][productId] = entrepreneurProductDateFboRaw[o.entrepreneurId][productId] || {}
+          entrepreneurProductDateFboRaw[o.entrepreneurId][productId][dateIdx] = (entrepreneurProductDateFboRaw[o.entrepreneurId][productId][dateIdx] || 0) + 1
+        }
+
+        for (const [entIdRaw, productRows] of Object.entries(entrepreneurProductDateTotals)) {
+          const entId = Number(entIdRaw)
+          for (const [productIdRaw, dateRows] of Object.entries(productRows)) {
+            const productId = Number(productIdRaw)
+            for (const [dateIdxRaw, totalRaw] of Object.entries(dateRows)) {
+              const dateIdx = Number(dateIdxRaw)
+              const date = visibleDailyDates[dateIdx]
+              if (!date) continue
+              const total = Number(totalRaw) || 0
+              const fboValue = Math.min(entrepreneurProductDateFboRaw[entId]?.[productId]?.[dateIdx] || 0, total)
+              const fbsValue = Math.max(total - fboValue, 0)
+              entrepreneurDailyFbo[date][entId] = (entrepreneurDailyFbo[date][entId] || 0) + fboValue
+              entrepreneurDailyFbs[date][entId] = (entrepreneurDailyFbs[date][entId] || 0) + fbsValue
+            }
+          }
         }
 
         for (const [productIdRaw, row] of Object.entries(dailyPivot)) {
@@ -1644,6 +1693,8 @@ export async function GET(request: NextRequest) {
           productRevenue: dailyProductRevenue,
           entrepreneurDailyData,
           entrepreneurDailyRevenue,
+          entrepreneurDailyFbs,
+          entrepreneurDailyFbo,
           fbsPivot,
           fbsDateTotals,
           fbsProductTotals,
