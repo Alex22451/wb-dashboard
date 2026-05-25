@@ -1,7 +1,9 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs } from '@/lib/entrepreneurs-config'
+import { redisCommand } from '@/lib/redis-cache'
 import { getVercelWbTargets } from '@/lib/user-store'
+import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface EntrepreneurWithPromotionKey {
@@ -27,7 +29,61 @@ interface CampaignSpend {
   drr?: number | null
 }
 
+interface AdPeriodEntrepreneurPayload {
+  id: number
+  name: string
+  spend: number
+  campaigns: CampaignSpend[]
+  cacheSource?: 'redis'
+}
+
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
+
+function apiKeyFingerprint(apiKey: string) {
+  return createHash('sha256').update(apiKey.trim()).digest('hex').slice(0, 16)
+}
+
+function redisAdPeriodKey(apiKey: string, from: string, to: string) {
+  return `wb:ad-period:v1:${apiKeyFingerprint(apiKey)}:${from}:${to}`
+}
+
+function redisAdPeriodTtlSeconds(to: string) {
+  const mskNow = new Date(Date.now() + 3 * 3600000)
+  const today = mskNow.toISOString().split('T')[0]
+  const yesterday = new Date(mskNow.getTime() - 86400000).toISOString().split('T')[0]
+  if (to >= today) return 15 * 60
+  if (to === yesterday) return 24 * 60 * 60
+  return 180 * 24 * 60 * 60
+}
+
+async function readRedisAdPeriodPayload(apiKey: string, from: string, to: string): Promise<AdPeriodEntrepreneurPayload | null> {
+  const raw = await redisCommand<string>(['GET', redisAdPeriodKey(apiKey, from, to)])
+  if (!raw || typeof raw !== 'string') return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed?.payload || typeof parsed.payload !== 'object') return null
+    return { ...parsed.payload, cacheSource: 'redis' }
+  } catch {
+    return null
+  }
+}
+
+async function writeRedisAdPeriodPayload(apiKey: string, from: string, to: string, payload: AdPeriodEntrepreneurPayload) {
+  await redisCommand([
+    'SET',
+    redisAdPeriodKey(apiKey, from, to),
+    JSON.stringify({
+      from,
+      to,
+      fetchedAt: new Date().toISOString(),
+      source: 'wb-ad-period-v1',
+      complete: true,
+      payload,
+    }),
+    'EX',
+    redisAdPeriodTtlSeconds(to),
+  ])
+}
 
 function getMonthEnd(year: number, month: number): string {
   return new Date(year, month, 0).toISOString().slice(0, 10)
@@ -180,6 +236,9 @@ export async function GET(request: NextRequest) {
           return { id: ent.id, name: ent.name, spend: 0, campaigns: [] as CampaignSpend[] }
         }
         try {
+          const cached = await readRedisAdPeriodPayload(ent.promotionApiKey, from, to)
+          if (cached) return cached
+
           const costs = await fetchWbAdCosts(ent.promotionApiKey, from, to)
           const campaignTotals = new Map<number, CampaignSpend>()
 
@@ -196,9 +255,11 @@ export async function GET(request: NextRequest) {
           }
 
           let stats = new Map<number, { revenue: number; orders: number }>()
+          let statsComplete = true
           try {
             stats = await fetchCampaignStats(ent.promotionApiKey, [...campaignTotals.keys()], from, to)
           } catch (error: any) {
+            statsComplete = false
             errors.push({ id: ent.id, name: ent.name, error: `Статистика кампаний: ${error.message || 'ошибка WB Promotion API'}` })
           }
 
@@ -217,7 +278,9 @@ export async function GET(request: NextRequest) {
             .sort((a, b) => b.spend - a.spend)
 
           const spend = campaigns.reduce((sum, row) => sum + row.spend, 0)
-          return { id: ent.id, name: ent.name, spend, campaigns }
+          const payload = { id: ent.id, name: ent.name, spend, campaigns }
+          if (statsComplete) await writeRedisAdPeriodPayload(ent.promotionApiKey, from, to, payload)
+          return payload
         } catch (error: any) {
           errors.push({ id: ent.id, name: ent.name, error: error.message || 'Ошибка WB Promotion API' })
           return { id: ent.id, name: ent.name, spend: 0, campaigns: [] as CampaignSpend[] }
