@@ -101,20 +101,33 @@ async function edgeGet<T = unknown>(key: string): Promise<T | null> {
 }
 
 async function kvGet<T = string>(key: string): Promise<T | null> {
-  if (getRedisConfig()) return redisCommand<T | null>(['GET', key])
+  if (getRedisConfig()) {
+    try {
+      const redisValue = await redisCommand<T | null>(['GET', key])
+      if (redisValue !== null && redisValue !== undefined) return redisValue
+    } catch {
+      // Fall back to Edge Config below.
+    }
+  }
 
   const config = getEdgeConfig()
+  if (!config) return null
   const item = await edgeRequest<{ value: T }>(`/v1/edge-config/${config!.edgeConfigId}/item/${encodeURIComponent(key)}`)
   return item ? item.value : null
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
   if (getRedisConfig()) {
-    await redisCommand(['SET', key, value])
-    return
+    try {
+      await redisCommand(['SET', key, value])
+      return
+    } catch {
+      // Fall back to Edge Config below.
+    }
   }
 
   const config = getEdgeConfig()
+  if (!config) throw new Error('KV_REST_API_URL/KV_REST_API_TOKEN или EDGE_CONFIG_ID/VERCEL_API_TOKEN/VERCEL_TEAM_ID не настроены')
   await edgeRequest(`/v1/edge-config/${config!.edgeConfigId}/items`, {
     method: 'PATCH',
     body: JSON.stringify({
@@ -124,7 +137,13 @@ async function kvSet(key: string, value: unknown): Promise<void> {
 }
 
 async function kvSetNx(key: string, value: unknown): Promise<number> {
-  if (getRedisConfig()) return redisCommand<number>(['SETNX', key, value])
+  if (getRedisConfig()) {
+    try {
+      return redisCommand<number>(['SETNX', key, value])
+    } catch {
+      // Fall back to Edge Config below.
+    }
+  }
   const existing = await kvGet(key)
   if (existing !== null) return 0
   await kvSet(key, value)
@@ -132,7 +151,13 @@ async function kvSetNx(key: string, value: unknown): Promise<number> {
 }
 
 async function kvIncr(key: string): Promise<number> {
-  if (getRedisConfig()) return redisCommand<number>(['INCR', key])
+  if (getRedisConfig()) {
+    try {
+      return redisCommand<number>(['INCR', key])
+    } catch {
+      // Fall back to Edge Config below.
+    }
+  }
   const current = Number(await kvGet<number | string>(key)) || 0
   const next = current + 1
   await kvSet(key, next)
