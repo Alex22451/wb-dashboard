@@ -434,8 +434,19 @@ interface MonthlyData {
 
 interface AdSpendData {
   year?: number
+  period?: { from: string; to: string }
+  totalSpend?: number
+  totalRevenue?: number
+  drr?: number | null
   source?: string
-  entrepreneurs: { id: number; name: string }[]
+  entrepreneurs: {
+    id: number
+    name: string
+    spend?: number
+    revenue?: number
+    drr?: number | null
+    campaigns?: { advertId: number; name: string; spend: number; revenue?: number; orders?: number; drr?: number | null }[]
+  }[]
   grouped: Record<number, { entrepreneur: string; budget: number; months: { month: number; actual: number; topCampaigns?: { advertId: number; name: string; spend: number }[] }[] }>
   errors?: RateLimitError[]
 }
@@ -3496,101 +3507,247 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
 }
 
 // --- Ad Spend Tab ---
-function AdSpendTab() {
+function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [data, setData] = useState<AdSpendData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
+  const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
 
-  useEffect(() => {
-    fetch('/api/ad-spend').then((r) => r.json()).then(setData).catch(console.error).finally(() => setLoading(false))
-  }, [])
+  const getYesterday = () => {
+    const mskOffset = 3 * 60 * 60 * 1000
+    const nowMsk = new Date(Date.now() + mskOffset)
+    nowMsk.setDate(nowMsk.getDate() - 1)
+    return nowMsk.toISOString().split('T')[0]
+  }
 
-  if (loading || !data) return <Skeleton className="h-96 w-full" />
+  const getRangeFromYesterday = (days: number) => {
+    const yesterday = getYesterday()
+    const from = new Date(`${yesterday}T00:00:00Z`)
+    from.setUTCDate(from.getUTCDate() - days + 1)
+    return { from: from.toISOString().split('T')[0], to: yesterday }
+  }
 
-  const { grouped } = data
-  const entries = Object.values(grouped)
-  const now = new Date()
-  const reportYear = data.year || 2026
-  const currentMonth = reportYear === now.getFullYear() ? now.getMonth() + 1 : 12
-  const currentMonthLabel = MONTH_SHORT[currentMonth - 1]
-  const currentMonthCampaignRows = entries.map((entry) => ({
-    entrepreneur: entry.entrepreneur,
-    campaigns: entry.months.find((month) => month.month === currentMonth)?.topCampaigns || [],
+  const defaultRange = getRangeFromYesterday(7)
+  const [dateFrom, setDateFrom] = useState(defaultRange.from)
+  const [dateTo, setDateTo] = useState(defaultRange.to)
+
+  const periodLabel = data?.period ? `${formatDateShort(data.period.from)} — ${formatDateShort(data.period.to)}` : ''
+  const entRows = data?.entrepreneurs || []
+  const campaignRows = entRows.flatMap((ent) => (ent.campaigns || []).map((campaign) => ({
+    ...campaign,
+    entrepreneur: ent.name,
+  })))
+  const chartData = entRows.map((ent) => ({
+    name: ent.name,
+    spend: Math.round(ent.spend || 0),
+    revenue: Math.round(ent.revenue || 0),
   }))
-  const chartData = Array.from({ length: 12 }, (_, i) => {
-    const entry: Record<string, any> = { month: MONTH_SHORT[i] }
-    entries.forEach((e) => { const monthData = e.months.find((m) => m.month === i + 1); entry[e.entrepreneur] = monthData?.actual || 0 })
-    return entry
-  })
-  const colors = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#64748b']
+
+  const fetchData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
+    const from = overrideFrom || dateFrom
+    const to = overrideTo || dateTo
+    setLoading(true)
+    setRateLimitErrors([])
+    setData(null)
+    try {
+      const selection = selectionToParam(selectedEnt)
+      const adParams = new URLSearchParams()
+      adParams.set('entrepreneurId', selection)
+      adParams.set('from', from)
+      adParams.set('to', to)
+
+      const dailyParams = new URLSearchParams()
+      dailyParams.set('entrepreneurId', selection)
+      dailyParams.set('section', 'daily')
+      dailyParams.set('dateFrom', from)
+      dailyParams.set('dateTo', to)
+
+      const [adRes, dailyRes] = await Promise.all([
+        fetch(`/api/ad-spend?${adParams.toString()}`),
+        fetch(`/api/wb-data?${dailyParams.toString()}`),
+      ])
+      const [adJson, dailyJson] = await Promise.all([adRes.json(), dailyRes.json()])
+      const dailyRevenueByEntrepreneur: Record<number, number> = {}
+
+      for (const [date, rows] of Object.entries(dailyJson.daily?.entrepreneurDailyRevenue || {})) {
+        if (date < from || date > to) continue
+        for (const [entId, revenue] of Object.entries(rows as Record<string, number>)) {
+          dailyRevenueByEntrepreneur[Number(entId)] = (dailyRevenueByEntrepreneur[Number(entId)] || 0) + Number(revenue || 0)
+        }
+      }
+
+      const enrichedEntrepreneurs = (adJson.entrepreneurs || []).map((ent: AdSpendData['entrepreneurs'][number]) => {
+        const revenue = dailyRevenueByEntrepreneur[ent.id] || 0
+        const spend = Number(ent.spend || 0)
+        return {
+          ...ent,
+          revenue,
+          drr: revenue > 0 ? Math.round((spend / revenue) * 1000) / 10 : null,
+        }
+      })
+      const totalSpend = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.spend || 0), 0)
+      const totalRevenue = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.revenue || 0), 0)
+
+      setData({
+        ...adJson,
+        period: { from, to },
+        entrepreneurs: enrichedEntrepreneurs,
+        grouped: adJson.grouped || {},
+        totalSpend,
+        totalRevenue,
+        drr: totalRevenue > 0 ? Math.round((totalSpend / totalRevenue) * 1000) / 10 : null,
+      })
+      setRateLimitErrors([...(adJson.errors || []), ...(dailyJson.rateLimitErrors || [])])
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [dateFrom, dateTo, selectedEnt])
+
+  const applyQuickRange = (days: number) => {
+    const range = getRangeFromYesterday(days)
+    setDateFrom(range.from)
+    setDateTo(range.to)
+    fetchData(range.from, range.to)
+  }
 
   return (
     <div className="space-y-6">
-      {data.errors && data.errors.length > 0 && (
-        <Alert variant={entries.length > 0 ? 'default' : 'destructive'}>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>WB Promotion API</AlertTitle>
-          <AlertDescription>
-            {entries.length > 0
-              ? `Часть ИП не загрузилась: ${data.errors.map(e => e.name).join(', ')}`
-              : 'Нет доступных данных рекламы. Нужны WB API токены с категорией «Продвижение».'}
-          </AlertDescription>
-        </Alert>
+      <RateLimitAlert errors={rateLimitErrors} />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <MultiEntrepreneurSelect
+          entrepreneurs={entrepreneurs}
+          selectedIds={selectedEnt}
+          onChange={setSelectedEnt}
+          className="w-full sm:w-64"
+        />
+        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
+        <span className="hidden text-sm text-muted-foreground sm:inline">—</span>
+        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
+        <ToggleGroup type="single" onValueChange={(value) => {
+          if (value === 'week') applyQuickRange(7)
+          if (value === 'twoWeeks') applyQuickRange(14)
+          if (value === 'month') applyQuickRange(30)
+        }} className="justify-start rounded-md border">
+          <ToggleGroupItem value="week" className="text-xs px-3">Неделя</ToggleGroupItem>
+          <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
+          <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
+        </ToggleGroup>
+        <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
+          {loading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Загрузка...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4" />
+              Загрузить
+            </>
+          )}
+        </Button>
+      </div>
+
+      {loading && <Skeleton className="h-96 w-full" />}
+
+      {!loading && !data && (
+        <EmptyState
+          message="Выберите ИП, период и нажмите «Загрузить»"
+          icon={<Megaphone className="h-12 w-12" />}
+        />
       )}
+
+      {!loading && data && (
+        <>
+          {rateLimitErrors.length > 0 && entRows.length === 0 && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>WB Promotion API</AlertTitle>
+              <AlertDescription>Нет доступных данных рекламы. Нужны WB API токены с категорией «Продвижение».</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">Расходы на рекламу</div>
+                <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(data.totalSpend || 0))} ₽</div>
+                <div className="mt-1 text-xs text-muted-foreground">{periodLabel}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">Выручка заказов</div>
+                <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(data.totalRevenue || 0))} ₽</div>
+                <div className="mt-1 text-xs text-muted-foreground">Тот же период</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="text-xs text-muted-foreground">ДРР</div>
+                <div className="mt-1 text-2xl font-bold">{data.drr === null || data.drr === undefined ? '—' : `${data.drr}%`}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Реклама / выручка</div>
+              </CardContent>
+            </Card>
+          </div>
 
         <Card>
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-              Расходы на рекламу по месяцам ({data.year || 2026})
+              Расходы на рекламу по кабинетам
               <Badge variant="secondary" className="text-xs">WB Promotion API</Badge>
             </CardTitle>
           </CardHeader>
         <CardContent>
-          {entries.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за {data.year || 2026} год</p>
+          {entRows.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">Нет данных о расходах на рекламу за выбранный период</p>
           ) : (
             <div className="h-[300px] sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 8, left: -8 }}>
                   <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}к`} />
                   <Tooltip formatter={(value: number) => `${formatNumber(value)} ₽`} contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  {entries.map((e, i) => (<Bar key={e.entrepreneur} dataKey={e.entrepreneur} fill={colors[i % colors.length]} radius={[2, 2, 0, 0]} />))}
+                  <Bar dataKey="spend" name="Реклама" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="revenue" name="Выручка" fill="#10b981" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
         </CardContent>
       </Card>
-      {entries.length > 0 && (
+      {entRows.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация ({data.year || 2026})</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Расходы на рекламу — детализация ({periodLabel})</CardTitle></CardHeader>
           <CardContent>
             <ScrollArea className="w-full">
               <table className="min-w-full text-xs sm:text-sm">
                 <thead>
                   <tr className="bg-muted/50 border-b">
                     <th className="text-left px-3 py-2 font-medium sticky left-0 bg-muted/50 z-10">ИП</th>
-                    {MONTH_SHORT.map((m) => (<th key={m} className="text-right px-3 py-2 font-medium min-w-[80px]">{m}</th>))}
-                    <th className="text-right px-3 py-2 font-medium min-w-[90px] bg-muted/50">Итого</th>
+                    <th className="text-right px-3 py-2 font-medium min-w-[110px]">Реклама</th>
+                    <th className="text-right px-3 py-2 font-medium min-w-[110px]">Выручка</th>
+                    <th className="text-right px-3 py-2 font-medium min-w-[80px]">ДРР</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.map((e, idx) => {
-                    const total = e.months.reduce((s, m) => s + m.actual, 0)
-                    return (
-                      <tr key={idx} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">{e.entrepreneur}</td>
-                        {Array.from({ length: 12 }, (_, i) => { const monthData = e.months.find((m) => m.month === i + 1); return (<td key={i} className={`text-right px-3 py-2 ${monthData ? '' : 'text-muted-foreground'}`}>{monthData ? formatNumber(monthData.actual) : '—'}</td>); })}
-                        <td className="text-right px-3 py-2 font-semibold bg-muted/30">{formatNumber(total)}</td>
-                      </tr>
-                    )
-                  })}
+                  {entRows.map((ent) => (
+                    <tr key={ent.id} className="border-b hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">{ent.name}</td>
+                      <td className="text-right px-3 py-2">{formatNumber(Math.round(ent.spend || 0))} ₽</td>
+                      <td className="text-right px-3 py-2">{formatNumber(Math.round(ent.revenue || 0))} ₽</td>
+                      <td className="text-right px-3 py-2 font-medium">{ent.drr === null || ent.drr === undefined ? '—' : `${ent.drr}%`}</td>
+                    </tr>
+                  ))}
                   <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
                     <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
-                    {Array.from({ length: 12 }, (_, i) => { const monthTotal = entries.reduce((s, e) => { const md = e.months.find((m) => m.month === i + 1); return s + (md?.actual || 0) }, 0); return (<td key={i} className="text-right px-3 py-2">{monthTotal ? formatNumber(monthTotal) : '—'}</td>); })}
-                    <td className="text-right px-3 py-2 font-bold bg-emerald-50 dark:bg-emerald-950/20">{formatNumber(entries.reduce((s, e) => s + e.months.reduce((ss, m) => ss + m.actual, 0), 0))}</td>
+                    <td className="text-right px-3 py-2">{formatNumber(Math.round(data.totalSpend || 0))} ₽</td>
+                    <td className="text-right px-3 py-2">{formatNumber(Math.round(data.totalRevenue || 0))} ₽</td>
+                    <td className="text-right px-3 py-2 font-bold">{data.drr === null || data.drr === undefined ? '—' : `${data.drr}%`}</td>
                   </tr>
                 </tbody>
               </table>
@@ -3600,10 +3757,10 @@ function AdSpendTab() {
         </Card>
       )}
 
-      {entries.length > 0 && (
+      {entRows.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Топ-5 кампаний по затратам за текущий месяц ({currentMonthLabel})</CardTitle>
+            <CardTitle className="text-base">Кампании по затратам ({periodLabel})</CardTitle>
           </CardHeader>
           <CardContent>
             <ScrollArea className="w-full">
@@ -3615,35 +3772,34 @@ function AdSpendTab() {
                     <th className="min-w-[260px] px-3 py-2 text-left font-medium">Кампания</th>
                     <th className="min-w-[90px] px-3 py-2 text-right font-medium">ID</th>
                     <th className="min-w-[120px] px-3 py-2 text-right font-medium">Затраты</th>
+                    <th className="min-w-[120px] px-3 py-2 text-right font-medium">Выручка</th>
+                    <th className="min-w-[80px] px-3 py-2 text-right font-medium">ДРР</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {currentMonthCampaignRows.flatMap((entry) => {
-                    if (entry.campaigns.length === 0) {
-                      return [
-                        <tr key={`${entry.entrepreneur}-empty`} className="border-b">
-                          <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{entry.entrepreneur}</td>
-                          <td colSpan={4} className="px-3 py-2 text-muted-foreground">Нет затрат за текущий месяц</td>
-                        </tr>,
-                      ]
-                    }
-
-                    return entry.campaigns.map((campaign, index) => (
-                      <tr key={`${entry.entrepreneur}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
-                        <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{entry.entrepreneur}</td>
-                        <td className="px-3 py-2 text-right text-muted-foreground">{index + 1}</td>
-                        <td className="px-3 py-2">{campaign.name}</td>
-                        <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '-'}</td>
-                        <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
-                      </tr>
-                    ))
-                  })}
+                  {campaignRows.length === 0 ? (
+                    <tr className="border-b">
+                      <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Нет затрат по кампаниям за выбранный период</td>
+                    </tr>
+                  ) : campaignRows.map((campaign, index) => (
+                    <tr key={`${campaign.entrepreneur}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
+                      <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{campaign.entrepreneur}</td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{index + 1}</td>
+                      <td className="px-3 py-2">{campaign.name}</td>
+                      <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '-'}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
+                      <td className="px-3 py-2 text-right">{formatNumber(Math.round(campaign.revenue || 0))} ₽</td>
+                      <td className="px-3 py-2 text-right">{campaign.drr === null || campaign.drr === undefined ? '—' : `${campaign.drr}%`}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               <ScrollBar orientation="horizontal" />
             </ScrollArea>
           </CardContent>
         </Card>
+      )}
+        </>
       )}
     </div>
   )
@@ -4812,7 +4968,7 @@ export default function Home() {
           )}
           {tabEnabled('ads') && (
             <TabsContent value="ads">
-              <AdSpendTab />
+              <AdSpendTab entrepreneurs={entrepreneurs} />
             </TabsContent>
           )}
           {tabEnabled('growth') && (

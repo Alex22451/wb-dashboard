@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 interface EntrepreneurWithPromotionKey {
   id: number
   name: string
+  wbApiKey: string | null
   promotionApiKey: string | null
 }
 
@@ -21,6 +22,9 @@ interface CampaignSpend {
   advertId: number
   name: string
   spend: number
+  revenue?: number
+  orders?: number
+  drr?: number | null
 }
 
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
@@ -56,6 +60,59 @@ async function fetchWbAdCosts(apiKey: string, from: string, to: string): Promise
   return Array.isArray(data) ? data : []
 }
 
+function aggregateCampaignStatsNode(node: unknown, target: { revenue: number; orders: number }) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    node.forEach((item) => aggregateCampaignStatsNode(item, target))
+    return
+  }
+
+  const record = node as Record<string, unknown>
+  const nmId = Number(record.nmId ?? record.nm_id ?? record.nm)
+  if (nmId) {
+    target.revenue += Number(record.sum_price ?? record.orderSum ?? record.price) || 0
+    target.orders += Number(record.orders ?? record.orderCount) || 0
+  }
+
+  for (const value of Object.values(record)) aggregateCampaignStatsNode(value, target)
+}
+
+async function fetchCampaignStats(apiKey: string, advertIds: number[], from: string, to: string): Promise<Map<number, { revenue: number; orders: number }>> {
+  const result = new Map<number, { revenue: number; orders: number }>()
+  const uniqueIds = [...new Set(advertIds.filter(Boolean))]
+  for (let offset = 0; offset < uniqueIds.length; offset += 50) {
+    const chunk = uniqueIds.slice(offset, offset + 50)
+    if (chunk.length === 0) continue
+
+    const response = await fetch(
+      `${AD_API_BASE}/adv/v3/fullstats?ids=${chunk.join(',')}&beginDate=${from}&endDate=${to}`,
+      {
+        headers: { Authorization: apiKey },
+        signal: AbortSignal.timeout(30000),
+      }
+    )
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      const detail = body ? body.slice(0, 180).replace(/\s+/g, ' ') : 'unknown error'
+      throw new Error(`${response.status}: ${detail}`)
+    }
+
+    const data = await response.json()
+    const rows = Array.isArray(data) ? data : []
+    for (const row of rows) {
+      const advertId = Number(row?.advertId ?? row?.advert_id ?? row?.id)
+      if (!advertId) continue
+      const stats = result.get(advertId) || { revenue: 0, orders: 0 }
+      aggregateCampaignStatsNode(row, stats)
+      result.set(advertId, stats)
+    }
+
+    if (offset + 50 < uniqueIds.length) await new Promise(resolve => setTimeout(resolve, 1100))
+  }
+  return result
+}
+
 async function getLocalEntrepreneurs(userId?: number): Promise<EntrepreneurWithPromotionKey[]> {
   try {
     const scope = userId ? `WHERE userId = ${userId}` : ''
@@ -65,6 +122,7 @@ async function getLocalEntrepreneurs(userId?: number): Promise<EntrepreneurWithP
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
+      wbApiKey: row.wbApiKey,
       promotionApiKey: row.wbPromotionApiKey || row.wbApiKey,
     }))
   } catch {
@@ -75,6 +133,7 @@ async function getLocalEntrepreneurs(userId?: number): Promise<EntrepreneurWithP
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
+      wbApiKey: row.wbApiKey,
       promotionApiKey: row.wbApiKey,
     }))
   }
@@ -84,6 +143,7 @@ function getVercelEntrepreneurs(): EntrepreneurWithPromotionKey[] {
   return getEntrepreneurs().map((e) => ({
     id: e.id,
     name: e.name,
+    wbApiKey: e.apiKey || null,
     promotionApiKey: e.promotionApiKey || e.apiKey || null,
   }))
 }
@@ -107,6 +167,7 @@ export async function GET(request: NextRequest) {
       ? (await getVercelWbTargets(user, entrepreneurId || 'all')).map((e) => ({
           id: e.id,
           name: e.name,
+          wbApiKey: e.wbApiKey,
           promotionApiKey: e.wbPromotionApiKey || e.wbApiKey,
         }))
       : filterEntrepreneurs(await getLocalEntrepreneurs(user.role === 'admin' ? undefined : user.id), entrepreneurId)
@@ -116,15 +177,50 @@ export async function GET(request: NextRequest) {
       const rows = await Promise.all(entrepreneurs.map(async (ent) => {
         if (!ent.promotionApiKey || ent.promotionApiKey.trim() === '') {
           errors.push({ id: ent.id, name: ent.name, error: 'Нет WB токена категории Продвижение' })
-          return { id: ent.id, name: ent.name, spend: 0 }
+          return { id: ent.id, name: ent.name, spend: 0, campaigns: [] as CampaignSpend[] }
         }
         try {
           const costs = await fetchWbAdCosts(ent.promotionApiKey, from, to)
-          const spend = costs.reduce((sum, row) => sum + (Number(row.updSum) || 0), 0)
-          return { id: ent.id, name: ent.name, spend: Math.round(spend) }
+          const campaignTotals = new Map<number, CampaignSpend>()
+
+          for (const cost of costs) {
+            const spend = Number(cost.updSum) || 0
+            if (spend <= 0) continue
+            const advertId = Number(cost.advertId) || 0
+            const existing = campaignTotals.get(advertId)
+            campaignTotals.set(advertId, {
+              advertId,
+              name: existing?.name || cost.campName || `Кампания ${advertId}`,
+              spend: (existing?.spend || 0) + spend,
+            })
+          }
+
+          let stats = new Map<number, { revenue: number; orders: number }>()
+          try {
+            stats = await fetchCampaignStats(ent.promotionApiKey, [...campaignTotals.keys()], from, to)
+          } catch (error: any) {
+            errors.push({ id: ent.id, name: ent.name, error: `Статистика кампаний: ${error.message || 'ошибка WB Promotion API'}` })
+          }
+
+          const campaigns = [...campaignTotals.values()]
+            .map((campaign) => {
+              const campaignStats = stats.get(campaign.advertId)
+              const revenue = campaignStats?.revenue || 0
+              return {
+                ...campaign,
+                spend: Math.round(campaign.spend),
+                revenue: Math.round(revenue),
+                orders: campaignStats?.orders || 0,
+                drr: revenue > 0 ? Math.round((campaign.spend / revenue) * 1000) / 10 : null,
+              }
+            })
+            .sort((a, b) => b.spend - a.spend)
+
+          const spend = campaigns.reduce((sum, row) => sum + row.spend, 0)
+          return { id: ent.id, name: ent.name, spend, campaigns }
         } catch (error: any) {
           errors.push({ id: ent.id, name: ent.name, error: error.message || 'Ошибка WB Promotion API' })
-          return { id: ent.id, name: ent.name, spend: 0 }
+          return { id: ent.id, name: ent.name, spend: 0, campaigns: [] as CampaignSpend[] }
         }
       }))
 
