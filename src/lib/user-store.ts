@@ -1,5 +1,6 @@
 import type { CurrentUser } from './auth'
 import { getEntrepreneurs } from './entrepreneurs-config'
+import { hasRedisConfig, redisCommand } from './redis-cache'
 
 export interface StoredUser {
   id: number
@@ -26,13 +27,6 @@ export interface WbTarget {
   wbPromotionApiKey?: string | null
 }
 
-function getRedisConfig() {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-  if (!url || !token) return null
-  return { url: url.replace(/\/$/, ''), token }
-}
-
 function getEdgeConfig() {
   const edgeConfigId = process.env.WB_USERS_EDGE_CONFIG_ID || process.env.EDGE_CONFIG_ID
   const token = process.env.WB_VERCEL_API_TOKEN || process.env.VERCEL_API_TOKEN
@@ -42,31 +36,7 @@ function getEdgeConfig() {
 }
 
 export function hasUserStore(): boolean {
-  return !!getRedisConfig() || !!getEdgeConfig()
-}
-
-async function redisCommand<T = unknown>(command: unknown[]): Promise<T> {
-  const config = getRedisConfig()
-  if (!config) throw new Error('KV_REST_API_URL/KV_REST_API_TOKEN не настроены')
-
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(command),
-    cache: 'no-store',
-  })
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new Error(`Redis ${response.status}: ${body.slice(0, 160)}`)
-  }
-
-  const json = await response.json()
-  if (json.error) throw new Error(String(json.error))
-  return json.result as T
+  return hasRedisConfig() || !!getEdgeConfig()
 }
 
 async function edgeRequest<T = unknown>(path: string, init?: RequestInit): Promise<T | null> {
@@ -101,7 +71,7 @@ async function edgeGet<T = unknown>(key: string): Promise<T | null> {
 }
 
 async function kvGet<T = string>(key: string): Promise<T | null> {
-  if (getRedisConfig()) {
+  if (hasRedisConfig()) {
     try {
       const redisValue = await redisCommand<T | null>(['GET', key])
       if (redisValue !== null && redisValue !== undefined) return redisValue
@@ -117,10 +87,10 @@ async function kvGet<T = string>(key: string): Promise<T | null> {
 }
 
 async function kvSet(key: string, value: unknown): Promise<void> {
-  if (getRedisConfig()) {
+  if (hasRedisConfig()) {
     try {
-      await redisCommand(['SET', key, value])
-      return
+      const result = await redisCommand<string>(['SET', key, value])
+      if (result) return
     } catch {
       // Fall back to Edge Config below.
     }
@@ -137,9 +107,10 @@ async function kvSet(key: string, value: unknown): Promise<void> {
 }
 
 async function kvSetNx(key: string, value: unknown): Promise<number> {
-  if (getRedisConfig()) {
+  if (hasRedisConfig()) {
     try {
-      return redisCommand<number>(['SETNX', key, value])
+      const result = await redisCommand<number>(['SETNX', key, value])
+      if (result !== null && result !== undefined) return result
     } catch {
       // Fall back to Edge Config below.
     }
@@ -151,9 +122,10 @@ async function kvSetNx(key: string, value: unknown): Promise<number> {
 }
 
 async function kvIncr(key: string): Promise<number> {
-  if (getRedisConfig()) {
+  if (hasRedisConfig()) {
     try {
-      return redisCommand<number>(['INCR', key])
+      const result = await redisCommand<number>(['INCR', key])
+      if (result !== null && result !== undefined) return result
     } catch {
       // Fall back to Edge Config below.
     }
