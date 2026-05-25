@@ -684,11 +684,11 @@ function formatDateFull(dateStr: string): string {
 function RateLimitAlert({ errors }: { errors: RateLimitError[] }) {
   if (!errors || errors.length === 0) return null
   return (
-    <Alert variant="destructive" className="mb-4">
+    <Alert className="mb-4">
       <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Превышен лимит запросов</AlertTitle>
+      <AlertTitle>Данные загружаются с задержкой</AlertTitle>
       <AlertDescription>
-        Не удалось загрузить данные для: {errors.map(e => e.name).join(', ')}. Попробуйте через минуту или выберите одно ИП.
+        Для некоторых ИП WB API отвечает медленнее из-за лимитов: {errors.map(e => e.name).join(', ')}. Уже загруженные данные отображаются, остальные подтянутся позже.
       </AlertDescription>
     </Alert>
   )
