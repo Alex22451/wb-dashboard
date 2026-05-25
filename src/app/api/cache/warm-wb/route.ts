@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'WB_VERCEL_API_TOKEN is required for cache warmup' }, { status: 500 })
   }
 
-  const scope = request.nextUrl.searchParams.get('scope') === 'all' ? 'all' : 'admin'
+  const scope = request.nextUrl.searchParams.get('scope') === 'admin' ? 'admin' : 'all'
   const explicitDate = request.nextUrl.searchParams.get('date') || ''
   const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || (scope === 'all' ? 30 : 14))
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), 30) : (scope === 'all' ? 30 : 14)
@@ -164,6 +164,7 @@ export async function GET(request: NextRequest) {
     const range = getMoscowDashboardWarmRange(days)
     const url = new URL('/api/ad-spend', baseUrl)
     url.searchParams.set('entrepreneurId', 'all')
+    url.searchParams.set('scope', scope)
     url.searchParams.set('from', range.from)
     url.searchParams.set('to', range.to)
 

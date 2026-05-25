@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs } from '@/lib/entrepreneurs-config'
 import { redisCommand } from '@/lib/redis-cache'
-import { getVercelWbTargets } from '@/lib/user-store'
+import { getAllVercelWbTargets, getVercelWbTargets } from '@/lib/user-store'
 import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -213,6 +213,7 @@ function filterEntrepreneurs(rows: EntrepreneurWithPromotionKey[], entrepreneurI
 export async function GET(request: NextRequest) {
   try {
     const internalWarmRequest = !!(process.env.WB_VERCEL_API_TOKEN && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN)
+    const warmAllUsers = internalWarmRequest && request.nextUrl.searchParams.get('scope') === 'all'
     const user = internalWarmRequest
       ? { id: 0, username: 'cron', role: 'admin' as const }
       : await getCurrentUser()
@@ -223,7 +224,7 @@ export async function GET(request: NextRequest) {
     const to = request.nextUrl.searchParams.get('to')
     const isVercel = !!process.env.VERCEL
     const entrepreneurs = isVercel
-      ? (await getVercelWbTargets(user, entrepreneurId || 'all')).map((e) => ({
+      ? (await (warmAllUsers ? getAllVercelWbTargets() : getVercelWbTargets(user, entrepreneurId || 'all'))).map((e) => ({
           id: e.id,
           name: e.name,
           wbApiKey: e.wbApiKey,
