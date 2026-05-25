@@ -212,7 +212,10 @@ function filterEntrepreneurs(rows: EntrepreneurWithPromotionKey[], entrepreneurI
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await getCurrentUser()
+    const internalWarmRequest = !!(process.env.WB_VERCEL_API_TOKEN && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN)
+    const user = internalWarmRequest
+      ? { id: 0, username: 'cron', role: 'admin' as const }
+      : await getCurrentUser()
     if (!user) return unauthorized()
 
     const entrepreneurId = request.nextUrl.searchParams.get('entrepreneurId')

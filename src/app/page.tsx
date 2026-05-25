@@ -177,6 +177,72 @@ const DAILY_REQUEST_BATCH_SIZE = 3
 const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
 const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
 const DAILY_BROWSER_CACHE_VERSION = 'v10'
+const REPORT_BROWSER_CACHE_VERSION = 'v1'
+
+function nextMoscowWarmupIso() {
+  const mskOffset = 3 * 60 * 60 * 1000
+  const nowUtc = Date.now()
+  const nowMsk = new Date(nowUtc + mskOffset)
+  const warmMsk = new Date(nowMsk)
+  warmMsk.setUTCHours(8, 30, 0, 0)
+  if (nowMsk >= warmMsk) warmMsk.setUTCDate(warmMsk.getUTCDate() + 1)
+  return new Date(warmMsk.getTime() - mskOffset).toISOString()
+}
+
+function reportCacheKey(section: string, scope: string, params: string) {
+  return `wb-report-cache-${REPORT_BROWSER_CACHE_VERSION}:${section}:${scope}:${params}`
+}
+
+function latestReportCacheKey(section: string) {
+  return `wb-report-cache-${REPORT_BROWSER_CACHE_VERSION}:latest:${section}`
+}
+
+function readReportCache<T>(section: string, scope: string, params: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(reportCacheKey(section, scope, params))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed.expiresAt && Date.now() > new Date(parsed.expiresAt).getTime()) {
+      window.localStorage.removeItem(reportCacheKey(section, scope, params))
+      return null
+    }
+    return parsed.data || null
+  } catch {
+    return null
+  }
+}
+
+function readLatestReportCache<T>(section: string, scope: string): { params: string; data: T } | null {
+  try {
+    const raw = window.localStorage.getItem(latestReportCacheKey(section))
+    if (!raw) return null
+    const latest = JSON.parse(raw)
+    if (!latest?.params || latest.scope !== scope) return null
+    const data = readReportCache<T>(section, scope, latest.params)
+    return data ? { params: latest.params, data } : null
+  } catch {
+    return null
+  }
+}
+
+function writeReportCache<T>(section: string, scope: string, params: string, data: T) {
+  try {
+    const key = reportCacheKey(section, scope, params)
+    window.localStorage.setItem(key, JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      expiresAt: nextMoscowWarmupIso(),
+      data,
+    }))
+    window.localStorage.setItem(latestReportCacheKey(section), JSON.stringify({
+      scope,
+      params,
+      key,
+      cachedAt: new Date().toISOString(),
+    }))
+  } catch {
+    // Browser storage can be full or disabled; live loading still works.
+  }
+}
 
 function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
   const selectedIds = selection === ALL_ENTREPRENEURS
@@ -2102,23 +2168,46 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     return { ...ent, total, revenue, adSpend, drr: revenue > 0 ? (adSpend / revenue) * 100 : null }
   }).sort((a, b) => b.total - a.total) : []
 
+  useEffect(() => {
+    const selection = selectionToParam(selectedEnt)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const latest = readLatestReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope)
+    if (!latest) return
+    setFetchedData(latest.data.data)
+    setRateLimitErrors(latest.data.errors || [])
+  }, [entrepreneurs, selectedEnt])
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     setRateLimitErrors([])
     try {
+      const selection = selectionToParam(selectedEnt)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheParams = 'section=monthly'
+      const cached = readReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope, cacheParams)
+      if (cached) {
+        setFetchedData(cached.data)
+        setRateLimitErrors(cached.errors || [])
+        return
+      }
+
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectionToParam(selectedEnt))
+      params.set('entrepreneurId', selection)
       params.set('section', 'monthly')
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
-      if (json.monthly) setFetchedData(json.monthly)
-      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+      const errors = json.rateLimitErrors || []
+      if (json.monthly) {
+        setFetchedData(json.monthly)
+        if (errors.length === 0) writeReportCache('monthly', cacheScope, cacheParams, { data: json.monthly, errors })
+      }
+      setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt])
+  }, [selectedEnt, entrepreneurs])
 
   // NO auto-fetch on mount — only fetch when user clicks "Загрузить"
 
@@ -2326,23 +2415,37 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     setRateLimitErrors([])
     try {
       const activeRange = range || { from: dateFrom, to: dateTo }
+      const selection = selectionToParam(entIds || selectedEnt)
+      const capacity = capacityOverride || capacityInput
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheParams = `${activeRange.from}:${activeRange.to}:capacity=${capacity}`
+      const cached = readReportCache<{ data: ProductionLoadData; errors: RateLimitError[] }>('production', cacheScope, cacheParams)
+      if (cached) {
+        setFetchedData(cached.data)
+        setRateLimitErrors(cached.errors || [])
+        return
+      }
 
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectionToParam(entIds || selectedEnt))
+      params.set('entrepreneurId', selection)
       params.set('section', 'production')
       params.set('dateFrom', activeRange.from)
       params.set('dateTo', activeRange.to)
-      params.set('capacity', capacityOverride || capacityInput)
+      params.set('capacity', capacity)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
-      if (json.production) setFetchedData(json.production)
-      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+      const errors = json.rateLimitErrors || []
+      if (json.production) {
+        setFetchedData(json.production)
+        if (errors.length === 0) writeReportCache('production', cacheScope, cacheParams, { data: json.production, errors })
+      }
+      setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, capacityInput, dateFrom, dateTo])
+  }, [selectedEnt, capacityInput, dateFrom, dateTo, entrepreneurs])
 
   useEffect(() => {
     const savedCapacity = window.localStorage.getItem('productionCapacity')
@@ -2973,8 +3076,18 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     setRateLimitErrors([])
     setPage(0)
     try {
+      const selection = selectionToParam(selectedEnt)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheParams = `${dateFrom}:${dateTo}:days=${supplyDays}:coef=${coefficient}`
+      const cached = readReportCache<{ data: SupplyData; errors: RateLimitError[] }>('supply', cacheScope, cacheParams)
+      if (cached) {
+        setFetchedData(cached.data)
+        setRateLimitErrors(cached.errors || [])
+        return
+      }
+
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectionToParam(selectedEnt))
+      params.set('entrepreneurId', selection)
       params.set('section', 'supply')
       params.set('dateFrom', dateFrom)
       params.set('dateTo', dateTo)
@@ -2982,14 +3095,18 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       params.set('coefficient', String(coefficient))
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
-      if (json.supply) setFetchedData(json.supply)
-      if (json.rateLimitErrors) setRateLimitErrors(json.rateLimitErrors)
+      const errors = json.rateLimitErrors || []
+      if (json.supply) {
+        setFetchedData(json.supply)
+        if (errors.length === 0) writeReportCache('supply', cacheScope, cacheParams, { data: json.supply, errors })
+      }
+      setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateFrom, dateTo, supplyDays, coefficient])
+  }, [selectedEnt, dateFrom, dateTo, supplyDays, coefficient, entrepreneurs])
 
   const supplyPeriods = [
     { label: '7 дней', value: 7 },
@@ -3321,20 +3438,30 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
     setLoading(true)
     try {
       const dates = getDates()
+      const selection = selectionToParam(selectedEnt)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheParams = `${dates.from}:${dates.to}:minOpens=${minOpens}`
+      const cached = readReportCache<GrowthPotentialData>('growth', cacheScope, cacheParams)
+      if (cached) {
+        setData(cached)
+        return
+      }
+
       const params = new URLSearchParams()
-      params.set('entrepreneurId', selectionToParam(selectedEnt))
+      params.set('entrepreneurId', selection)
       params.set('dateFrom', dates.from)
       params.set('dateTo', dates.to)
       params.set('minOpens', String(minOpens))
       const res = await fetch(`/api/growth-potential?${params.toString()}`)
       const json = await res.json()
       setData(json)
+      if (!json?.errors?.length) writeReportCache('growth', cacheScope, cacheParams, json)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [getDates, selectedEnt, minOpens])
+  }, [getDates, selectedEnt, minOpens, entrepreneurs])
 
   const totalPotential = data?.items.filter((item) => item.potentialScore >= 50).length || 0
   const avgConversion = data?.items.length
@@ -3531,6 +3658,20 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const [dateFrom, setDateFrom] = useState(defaultRange.from)
   const [dateTo, setDateTo] = useState(defaultRange.to)
 
+  useEffect(() => {
+    const selection = selectionToParam(selectedEnt)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const latest = readLatestReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope)
+    if (!latest) return
+    const [from, to] = latest.params.split(':')
+    if (from && to) {
+      setDateFrom(from)
+      setDateTo(to)
+    }
+    setData(latest.data.data)
+    setRateLimitErrors(latest.data.errors || [])
+  }, [entrepreneurs, selectedEnt])
+
   const periodLabel = data?.period ? `${formatDateShort(data.period.from)} — ${formatDateShort(data.period.to)}` : ''
   const entRows = data?.entrepreneurs || []
   const campaignRows = entRows.flatMap((ent) => (ent.campaigns || []).map((campaign) => ({
@@ -3546,11 +3687,21 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
   const fetchData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
     const from = overrideFrom || dateFrom
     const to = overrideTo || dateTo
+    const selection = selectionToParam(selectedEnt)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const cacheParams = `${from}:${to}`
+    const cached = readReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope, cacheParams)
+    if (cached) {
+      setData(cached.data)
+      setRateLimitErrors(cached.errors || [])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setRateLimitErrors([])
     setData(null)
     try {
-      const selection = selectionToParam(selectedEnt)
       const adParams = new URLSearchParams()
       adParams.set('entrepreneurId', selection)
       adParams.set('from', from)
@@ -3588,7 +3739,7 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       const totalSpend = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.spend || 0), 0)
       const totalRevenue = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.revenue || 0), 0)
 
-      setData({
+      const nextData = {
         ...adJson,
         period: { from, to },
         entrepreneurs: enrichedEntrepreneurs,
@@ -3596,14 +3747,17 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
         totalSpend,
         totalRevenue,
         drr: totalRevenue > 0 ? Math.round((totalSpend / totalRevenue) * 1000) / 10 : null,
-      })
-      setRateLimitErrors([...(adJson.errors || []), ...(dailyJson.rateLimitErrors || [])])
+      }
+      const errors = [...(adJson.errors || []), ...(dailyJson.rateLimitErrors || [])]
+      setData(nextData)
+      setRateLimitErrors(errors)
+      if (errors.length === 0) writeReportCache('ads', cacheScope, cacheParams, { data: nextData, errors })
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [dateFrom, dateTo, selectedEnt])
+  }, [dateFrom, dateTo, selectedEnt, entrepreneurs])
 
   const applyQuickRange = (days: number) => {
     const range = getRangeFromYesterday(days)
@@ -3931,6 +4085,15 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
     if (ids.length === 0) return
     setLoading(true)
     try {
+      const selection = ids.join(',')
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheParams = `${dateFrom}:${dateTo}`
+      const cached = readReportCache<CompareData | null>('compare', cacheScope, cacheParams)
+      if (cached) {
+        setData(cached)
+        return
+      }
+
       const results = await Promise.all(ids.map(async (id) => {
         const params = new URLSearchParams({
           entrepreneurId: id,
@@ -3940,7 +4103,9 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
         const res = await fetch(`/api/wb-compare?${params.toString()}`)
         return await res.json()
       }))
-      setData(combineCompareData(results.filter((item) => !item.error), entrepreneurs, ids))
+      const combined = combineCompareData(results.filter((item) => !item.error), entrepreneurs, ids)
+      setData(combined)
+      if (combined && !combined.wbError) writeReportCache('compare', cacheScope, cacheParams, combined)
     } catch (e) {
       console.error(e)
     } finally {
