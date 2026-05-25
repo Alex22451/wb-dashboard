@@ -27,6 +27,8 @@ export interface WbTarget {
   wbPromotionApiKey?: string | null
 }
 
+const REDIS_USER_ID_OFFSET = 100000
+
 function getEdgeConfig() {
   const edgeConfigId = process.env.WB_USERS_EDGE_CONFIG_ID || process.env.EDGE_CONFIG_ID
   const token = process.env.WB_VERCEL_API_TOKEN || process.env.VERCEL_API_TOKEN
@@ -154,11 +156,19 @@ function preferencesKey(id: number) {
 }
 
 export async function getStoredUserById(id: number): Promise<StoredUser | null> {
+  if (id < REDIS_USER_ID_OFFSET && getEdgeConfig()) {
+    const edgeRaw = await edgeGet<string | StoredUser>(userKey(id))
+    if (edgeRaw) return typeof edgeRaw === 'string' ? JSON.parse(edgeRaw) : edgeRaw
+  }
   const raw = await kvGet<string>(userKey(id))
   return raw ? JSON.parse(raw) : null
 }
 
 export async function getStoredUserByUsername(username: string): Promise<StoredUser | null> {
+  if (getEdgeConfig()) {
+    const edgeIdRaw = await edgeGet<string | number>(usernameKey(username))
+    if (edgeIdRaw) return getStoredUserById(Number(edgeIdRaw))
+  }
   const idRaw = await kvGet<string>(usernameKey(username))
   if (!idRaw) return null
   return getStoredUserById(Number(idRaw))
@@ -168,7 +178,8 @@ export async function createStoredUser(username: string, passwordHash: string): 
   const existing = await kvGet<string>(usernameKey(username))
   if (existing) throw new Error('USERNAME_TAKEN')
 
-  const id = await kvIncr('wb_user_id')
+  const rawId = await kvIncr('wb_user_id')
+  const id = rawId >= REDIS_USER_ID_OFFSET ? rawId : rawId + REDIS_USER_ID_OFFSET
   const user: StoredUser = {
     id,
     username,
