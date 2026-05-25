@@ -119,6 +119,68 @@ async function writeRedisDailyPayload(apiKey: string, date: string, daily: any) 
   ])
 }
 
+function secondsUntilNextMoscowWarmup() {
+  const mskNow = new Date(Date.now() + 3 * 3600000)
+  const next = new Date(mskNow)
+  next.setUTCHours(8, 30, 0, 0)
+  if (next <= mskNow) next.setUTCDate(next.getUTCDate() + 1)
+  return Math.max(60, Math.ceil((next.getTime() - mskNow.getTime()) / 1000))
+}
+
+function redisReportKey(
+  section: string,
+  targets: Array<{ id: number; wbApiKey: string }>,
+  from: string,
+  to: string
+) {
+  const scope = targets
+    .map((target) => `${target.id}:${apiKeyFingerprint(target.wbApiKey)}`)
+    .sort()
+    .join('|')
+  const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
+  return `wb:report:${section}:v1:${scopeHash}:${from}:${to}`
+}
+
+async function readRedisReportResponse(
+  section: string,
+  targets: Array<{ id: number; wbApiKey: string }>,
+  from: string,
+  to: string
+): Promise<Record<string, any> | null> {
+  const raw = await redisCommand<string>(['GET', redisReportKey(section, targets, from, to)])
+  if (!raw || typeof raw !== 'string') return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed?.response || typeof parsed.response !== 'object') return null
+    return parsed.response
+  } catch {
+    return null
+  }
+}
+
+async function writeRedisReportResponse(
+  section: string,
+  targets: Array<{ id: number; wbApiKey: string }>,
+  from: string,
+  to: string,
+  response: Record<string, any>
+) {
+  await redisCommand([
+    'SET',
+    redisReportKey(section, targets, from, to),
+    JSON.stringify({
+      section,
+      from,
+      to,
+      fetchedAt: new Date().toISOString(),
+      source: 'wb-report-response-v1',
+      response,
+    }),
+    'EX',
+    secondsUntilNextMoscowWarmup(),
+  ])
+}
+
 function sliceDailyPayloadByDate(daily: any, date: string) {
   const sourceDateIdx = daily?.dates?.indexOf(date)
   if (sourceDateIdx === undefined || sourceDateIdx < 0) return null
@@ -987,6 +1049,18 @@ export async function GET(request: NextRequest) {
         monthly: { entrepreneurs: [], products: [], months: [], monthlyData: {}, productMonthlyData: {}, monthStats: [], entrepreneurMonthly: {}, productDynamics: { growth: [], decline: [] }, seasonality: [] },
         rateLimitErrors: [],
       })
+    }
+
+    const reportCacheSection = section === 'monthly' ? 'monthly' : null
+    const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
+    if (reportCacheSection && !shouldRefreshReportCache) {
+      const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo)
+      if (cachedReport) {
+        return NextResponse.json({
+          ...cachedReport,
+          cacheSource: 'redis-report',
+        })
+      }
     }
 
     const mappedAdminApiKeys = new Set(
@@ -2051,6 +2125,10 @@ export async function GET(request: NextRequest) {
         criticalArticles: supplyTable.filter((r) => r.daysUntilOos !== null && r.daysUntilOos <= 7).length,
         articles: supplyTable,
       }
+    }
+
+    if (reportCacheSection && rateLimitErrors.length === 0) {
+      await writeRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo, response)
     }
 
     return NextResponse.json(response)

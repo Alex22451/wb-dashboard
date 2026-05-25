@@ -109,6 +109,7 @@ export async function GET(request: NextRequest) {
   const cacheHitDates: string[] = []
   const rateLimitErrors: any[] = []
   const adWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; totalSpend: number; errors: any[] }> = []
+  const monthlyWarmups: Array<{ ok: boolean; status: number; cacheSource: string | null; months: number; errors: any[] }> = []
   let entrepreneurs = 0
   let ok = true
   let status = 200
@@ -194,6 +195,36 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const requestMonthly = async () => {
+    const url = new URL('/api/wb-data', baseUrl)
+    url.searchParams.set('entrepreneurId', 'all')
+    url.searchParams.set('section', 'monthly')
+    url.searchParams.set('refresh', '1')
+
+    const response = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        'x-wb-internal-warm': internalToken,
+      },
+      signal: AbortSignal.timeout(240000),
+    })
+    const json = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      ok = false
+      status = response.status
+    }
+    if (Array.isArray(json?.rateLimitErrors) && json.rateLimitErrors.length) {
+      rateLimitErrors.push(...json.rateLimitErrors)
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      cacheSource: json?.cacheSource || null,
+      months: Array.isArray(json?.monthly?.months) ? json.monthly.months.length : 0,
+      errors: Array.isArray(json?.rateLimitErrors) ? json.rateLimitErrors : [],
+    }
+  }
+
   const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null }>> = []
   const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
   for (let offset = 0; offset < warmDates.length; offset += batchSize) {
@@ -209,6 +240,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!explicitDate) {
+    monthlyWarmups.push(await requestMonthly())
     for (const days of [7, 14, 30]) {
       adWarmups.push(await requestAdPeriod(days))
     }
@@ -220,7 +252,7 @@ export async function GET(request: NextRequest) {
     scope,
     period: { from, to },
     section: 'daily',
-    warmedSections: explicitDate ? ['daily'] : ['daily', 'ads'],
+    warmedSections: explicitDate ? ['daily'] : ['daily', 'monthly', 'ads'],
     ok,
     status,
     durationMs: Date.now() - startedAt,
@@ -230,6 +262,7 @@ export async function GET(request: NextRequest) {
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
     rateLimitErrors,
     batches,
+    monthlyWarmups,
     adWarmups,
     redisPrune,
     redisProbe,
