@@ -3763,39 +3763,74 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
             <CardTitle className="text-base">Кампании по затратам ({periodLabel})</CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="w-full">
-              <table className="min-w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="sticky left-0 z-10 min-w-[150px] bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
-                    <th className="min-w-[60px] px-3 py-2 text-right font-medium">#</th>
-                    <th className="min-w-[260px] px-3 py-2 text-left font-medium">Кампания</th>
-                    <th className="min-w-[90px] px-3 py-2 text-right font-medium">ID</th>
-                    <th className="min-w-[120px] px-3 py-2 text-right font-medium">Затраты</th>
-                    <th className="min-w-[120px] px-3 py-2 text-right font-medium">Выручка</th>
-                    <th className="min-w-[80px] px-3 py-2 text-right font-medium">ДРР</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaignRows.length === 0 ? (
-                    <tr className="border-b">
-                      <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Нет затрат по кампаниям за выбранный период</td>
-                    </tr>
-                  ) : campaignRows.map((campaign, index) => (
-                    <tr key={`${campaign.entrepreneur}-${campaign.advertId}-${index}`} className="border-b hover:bg-muted/30">
-                      <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{campaign.entrepreneur}</td>
-                      <td className="px-3 py-2 text-right text-muted-foreground">{index + 1}</td>
-                      <td className="px-3 py-2">{campaign.name}</td>
-                      <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '-'}</td>
-                      <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
-                      <td className="px-3 py-2 text-right">{formatNumber(Math.round(campaign.revenue || 0))} ₽</td>
-                      <td className="px-3 py-2 text-right">{campaign.drr === null || campaign.drr === undefined ? '—' : `${campaign.drr}%`}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <ScrollBar orientation="horizontal" />
-            </ScrollArea>
+            {campaignRows.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">Нет затрат по кампаниям за выбранный период</div>
+            ) : (
+              <Accordion type="multiple" className="space-y-2">
+                {entRows.map((ent) => {
+                  const campaigns = [...(ent.campaigns || [])].sort((a, b) => b.spend - a.spend)
+                  const spend = campaigns.reduce((sum, campaign) => sum + campaign.spend, 0)
+                  const revenue = campaigns.reduce((sum, campaign) => sum + Number(campaign.revenue || 0), 0)
+                  const drr = revenue > 0 ? Math.round((spend / revenue) * 1000) / 10 : null
+
+                  return (
+                    <AccordionItem key={ent.id} value={String(ent.id)} className="rounded-md border px-3">
+                      <AccordionTrigger className="gap-3 py-3 hover:no-underline">
+                        <div className="grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-[minmax(180px,1fr)_auto_auto_auto_auto] sm:items-center">
+                          <div className="font-medium">{ent.name}</div>
+                          <div className="text-xs text-muted-foreground sm:text-right">{campaigns.length} камп.</div>
+                          <div className="text-xs sm:text-right">
+                            <span className="text-muted-foreground">Затраты </span>
+                            <span className="font-semibold">{formatNumber(Math.round(spend))} ₽</span>
+                          </div>
+                          <div className="text-xs sm:text-right">
+                            <span className="text-muted-foreground">Выручка </span>
+                            <span className="font-semibold">{formatNumber(Math.round(revenue))} ₽</span>
+                          </div>
+                          <div className="text-xs sm:text-right">
+                            <span className="text-muted-foreground">ДРР </span>
+                            <span className="font-semibold">{drr === null ? '—' : `${drr}%`}</span>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        {campaigns.length === 0 ? (
+                          <div className="pb-3 text-sm text-muted-foreground">Нет затрат по кампаниям за выбранный период</div>
+                        ) : (
+                          <ScrollArea className="w-full">
+                            <table className="min-w-full text-xs sm:text-sm">
+                              <thead>
+                                <tr className="border-b bg-muted/50">
+                                  <th className="min-w-[60px] px-3 py-2 text-right font-medium">#</th>
+                                  <th className="min-w-[260px] px-3 py-2 text-left font-medium">Кампания</th>
+                                  <th className="min-w-[90px] px-3 py-2 text-right font-medium">ID</th>
+                                  <th className="min-w-[120px] px-3 py-2 text-right font-medium">Затраты</th>
+                                  <th className="min-w-[120px] px-3 py-2 text-right font-medium">Выручка</th>
+                                  <th className="min-w-[80px] px-3 py-2 text-right font-medium">ДРР</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {campaigns.map((campaign, index) => (
+                                  <tr key={`${ent.id}-${campaign.advertId}-${index}`} className="border-b last:border-b-0 hover:bg-muted/30">
+                                    <td className="px-3 py-2 text-right text-muted-foreground">{index + 1}</td>
+                                    <td className="px-3 py-2">{campaign.name}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-muted-foreground">{campaign.advertId || '-'}</td>
+                                    <td className="px-3 py-2 text-right font-semibold">{formatNumber(campaign.spend)} ₽</td>
+                                    <td className="px-3 py-2 text-right">{formatNumber(Math.round(campaign.revenue || 0))} ₽</td>
+                                    <td className="px-3 py-2 text-right">{campaign.drr === null || campaign.drr === undefined ? '—' : `${campaign.drr}%`}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <ScrollBar orientation="horizontal" />
+                          </ScrollArea>
+                        )}
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                })}
+              </Accordion>
+            )}
           </CardContent>
         </Card>
       )}
