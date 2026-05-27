@@ -178,6 +178,7 @@ const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
 const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
 const DAILY_BROWSER_CACHE_VERSION = 'v10'
 const REPORT_BROWSER_CACHE_VERSION = 'v1'
+const DAILY_TABLE_ROW_HOVER = 'transition-colors hover:bg-sky-50/70 hover:[&>td]:shadow-[inset_0_0_0_9999px_rgba(14,165,233,0.10)] dark:hover:bg-sky-950/20 dark:hover:[&>td]:shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.10)]'
 
 function nextMoscowWarmupIso() {
   const mskOffset = 3 * 60 * 60 * 1000
@@ -1617,7 +1618,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                 const productPivot = activePivot[p.id]
                 if (!productPivot || total === 0) return null
                 return (
-                  <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors">
+                  <tr key={p.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
                     <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">
                       <button type="button" className="text-left hover:underline" onClick={() => selectProductChart(p.id)}>{p.name}</button>
                     </td>
@@ -1638,7 +1639,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
               return (
                 <Fragment key={group.baseName}>
                   <tr
-                    className="border-b hover:bg-muted/30 transition-colors cursor-pointer select-none"
+                    className={`border-b cursor-pointer select-none ${DAILY_TABLE_ROW_HOVER}`}
                     onClick={() => {
                       selectGroupChart(group.baseName)
                       toggleGroup(group.baseName)
@@ -1670,7 +1671,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
                       // Extract just the size/variant part (case-insensitive match)
                       const sizePart = p.name.replace(new RegExp('^' + group.baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').trim() || '(без размера)'
                       return (
-                        <tr key={p.id} className="border-b hover:bg-muted/30 transition-colors bg-muted/10">
+                        <tr key={p.id} className={`border-b bg-muted/10 ${DAILY_TABLE_ROW_HOVER}`}>
                           <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
                             <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => selectProductChart(p.id)}>{sizePart}</button>
                           </td>
@@ -2086,7 +2087,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
                     </thead>
                     <tbody>
                       {fetchedData.dates.map((date, dateIdx) => (
-                        <tr key={date} className="border-b last:border-b-0">
+                        <tr key={date} className={`border-b last:border-b-0 ${DAILY_TABLE_ROW_HOVER}`}>
                           <td className="px-3 py-2 font-medium">{formatDateShort(date)}</td>
                           {fetchedData.entrepreneurs.map((ent) => {
                             const total = fetchedData.entrepreneurDailyData[date]?.[ent.id] || 0
