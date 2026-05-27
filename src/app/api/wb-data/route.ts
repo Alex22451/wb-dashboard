@@ -1161,6 +1161,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
+      const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
+      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates)
+      if (cachedDaily.daily && cachedDaily.missing === 0) {
+        return NextResponse.json({
+          rateLimitErrors: [],
+          cacheSource: 'redis',
+          cacheStats: {
+            present: cachedDaily.present,
+            missing: cachedDaily.missing,
+            total: cachedDaily.total,
+          },
+          daily: cachedDaily.daily,
+        })
+      }
+    }
+
     if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
         ent,
