@@ -222,9 +222,10 @@ export async function GET(request: NextRequest) {
     const entrepreneurId = request.nextUrl.searchParams.get('entrepreneurId')
     const from = request.nextUrl.searchParams.get('from')
     const to = request.nextUrl.searchParams.get('to')
+    const includeAdminAngelina = user.role === 'admin' && request.nextUrl.searchParams.get('includeAngelina') === '1'
     const isVercel = !!process.env.VERCEL
     const entrepreneurs = isVercel
-      ? (await (warmAllUsers ? getAllVercelWbTargets() : getVercelWbTargets(user, entrepreneurId || 'all'))).map((e) => ({
+      ? (await (warmAllUsers ? getAllVercelWbTargets() : getVercelWbTargets(user, entrepreneurId || 'all', { includeAdminAngelina }))).map((e) => ({
           id: e.id,
           name: e.name,
           wbApiKey: e.wbApiKey,

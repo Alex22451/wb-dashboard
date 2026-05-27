@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { getVercelEntrepreneursForUser } from '@/lib/user-store'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 function maskApiKey(key: string | null | undefined): string | null {
   if (!key) return null
@@ -10,14 +10,15 @@ function maskApiKey(key: string | null | undefined): string | null {
   return `${key.slice(0, 4)}********${key.slice(-4)}`
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) return unauthorized()
+    const includeAngelina = user.role === 'admin' && request.nextUrl.searchParams.get('includeAngelina') === '1'
 
     // On Vercel, use config-based data directly (no DB)
     if (isVercel()) {
-      const entrepreneurs = await getVercelEntrepreneursForUser(user)
+      const entrepreneurs = await getVercelEntrepreneursForUser(user, { includeAdminAngelina: includeAngelina })
       const result = entrepreneurs.map((e) => ({
         id: e.id,
         name: e.name,

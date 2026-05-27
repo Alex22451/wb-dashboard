@@ -25,6 +25,7 @@ export interface WbTarget {
   name: string
   wbApiKey: string
   wbPromotionApiKey?: string | null
+  useCategoryMapping?: boolean
 }
 
 const REDIS_USER_ID_OFFSET = 100000
@@ -232,15 +233,50 @@ export async function saveUserPreferences(id: number, preferences: UserPreferenc
   return preferences
 }
 
-export async function getVercelEntrepreneursForUser(user: CurrentUser) {
+function normalizeApiKey(apiKey: string) {
+  return apiKey.trim().replace(/^bearer\s+/i, '').trim()
+}
+
+async function getAdminAngelinaTarget(): Promise<WbTarget | null> {
+  let angelinaUser: StoredUser | null = null
+  for (const username of ['Angelina', 'angelina']) {
+    angelinaUser = await getStoredUserByUsername(username)
+    if (angelinaUser) break
+  }
+  if (!angelinaUser) return null
+  const keys = await getUserApiKeys(angelinaUser.id)
+  if (!keys.apiKey?.trim()) return null
+  return {
+    id: 100000 + angelinaUser.id,
+    name: keys.sellerName || angelinaUser.username,
+    wbApiKey: keys.apiKey,
+    wbPromotionApiKey: keys.promotionApiKey || keys.apiKey,
+    useCategoryMapping: true,
+  }
+}
+
+export async function getVercelEntrepreneursForUser(user: CurrentUser, options?: { includeAdminAngelina?: boolean }) {
   if (user.role === 'admin') {
-    return getEntrepreneurs().map((e) => ({
+    const rows = getEntrepreneurs().map((e) => ({
       id: e.id,
       name: e.name,
       wbApiKey: e.apiKey || null,
       totalOrders: 0,
       hasApiKey: !!e.apiKey,
     }))
+    if (options?.includeAdminAngelina) {
+      const angelinaTarget = await getAdminAngelinaTarget()
+      if (angelinaTarget) {
+        rows.push({
+          id: angelinaTarget.id,
+          name: angelinaTarget.name,
+          wbApiKey: angelinaTarget.wbApiKey,
+          totalOrders: 0,
+          hasApiKey: true,
+        })
+      }
+    }
+    return rows
   }
 
   const keys = await getUserApiKeys(user.id)
@@ -251,10 +287,6 @@ export async function getVercelEntrepreneursForUser(user: CurrentUser) {
     totalOrders: 0,
     hasApiKey: !!keys.apiKey,
   }]
-}
-
-function normalizeApiKey(apiKey: string) {
-  return apiKey.trim().replace(/^bearer\s+/i, '').trim()
 }
 
 export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
@@ -302,9 +334,13 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
   return targets
 }
 
-export async function getVercelWbTargets(user: CurrentUser, entrepreneurId: string | null | undefined): Promise<WbTarget[]> {
+export async function getVercelWbTargets(
+  user: CurrentUser,
+  entrepreneurId: string | null | undefined,
+  options?: { includeAdminAngelina?: boolean },
+): Promise<WbTarget[]> {
   if (user.role === 'admin') {
-    const rows = getEntrepreneurs()
+    const rows: WbTarget[] = getEntrepreneurs()
       .filter((e) => e.apiKey && e.apiKey.trim() !== '')
       .map((e) => ({
         id: e.id,
@@ -312,6 +348,13 @@ export async function getVercelWbTargets(user: CurrentUser, entrepreneurId: stri
         wbApiKey: e.apiKey,
         wbPromotionApiKey: e.promotionApiKey || e.apiKey,
       }))
+    if (options?.includeAdminAngelina) {
+      const angelinaTarget = await getAdminAngelinaTarget()
+      if (angelinaTarget) {
+        const seen = new Set(rows.map((row) => normalizeApiKey(row.wbApiKey)))
+        if (!seen.has(normalizeApiKey(angelinaTarget.wbApiKey))) rows.push(angelinaTarget)
+      }
+    }
 
     if (!entrepreneurId || entrepreneurId === 'all') return rows
     const ids = new Set(entrepreneurId.split(',').map((id) => Number(id.trim())).filter(Number.isFinite))

@@ -117,6 +117,67 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    background:
+      radial-gradient(circle at top left, oklch(0.96 0.035 166 / 0.48), transparent 28rem),
+      linear-gradient(180deg, oklch(0.99 0.006 180), var(--background) 18rem);
+  }
+
+  button,
+  a,
+  input,
+  [role="button"],
+  [data-slot="tabs-trigger"],
+  [data-slot="select-trigger"] {
+    @apply transition-[background-color,border-color,color,box-shadow,transform,opacity] duration-200 ease-out;
+  }
+}
+
+@layer components {
+  [data-slot="card"] {
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 12px 36px oklch(0 0 0 / 0.035);
+  }
+
+  [data-slot="tabs-content"] {
+    animation: wb-fade-up 180ms ease-out;
+  }
+
+  [data-slot="button"]:not(:disabled):hover,
+  [role="button"]:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes wb-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top left, oklch(0.27 0.04 166 / 0.4), transparent 28rem),
+    linear-gradient(180deg, oklch(0.17 0.01 180), var(--background) 18rem);
+}
+
+@supports not (color: oklch(0 0 0)) {
+  body {
+    background: #fff;
   }
 }

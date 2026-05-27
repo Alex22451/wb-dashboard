@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
-import { getVercelWbTargets } from '@/lib/user-store'
+import { getVercelWbTargets, type WbTarget } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
@@ -986,6 +986,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
+    const includeAdminAngelina = user.role === 'admin' && searchParams.get('includeAngelina') === '1'
 
     // Calculate date range based on section
     const mskOffset = 3 * 60 * 60 * 1000
@@ -1039,7 +1040,7 @@ export async function GET(request: NextRequest) {
       return d.toISOString().split('T')[0]
     })()
 
-    let targets: Array<{ id: number; name: string; wbApiKey: string }>
+    let targets: WbTarget[]
     const warmApiKey = internalWarmRequest ? searchParams.get('warmApiKey')?.trim() : null
     const warmName = internalWarmRequest ? searchParams.get('warmName')?.trim() : null
     const warmId = internalWarmRequest ? Number(searchParams.get('warmId') || 0) : 0
@@ -1051,7 +1052,7 @@ export async function GET(request: NextRequest) {
         wbApiKey: warmApiKey,
       }]
     } else if (isVercel()) {
-      targets = await getVercelWbTargets(user, entrepreneurId)
+      targets = await getVercelWbTargets(user, entrepreneurId, { includeAdminAngelina })
     } else {
       // Get entrepreneurs with API keys
       const userScope = user.role === 'admin' ? '' : `AND userId = ${user.id}`
@@ -1117,7 +1118,7 @@ export async function GET(request: NextRequest) {
         .map((ent) => normalizeApiKey(ent.apiKey || ''))
         .filter(Boolean)
     )
-    const shouldUseExcelMapping = (apiKey: string) => mappedAdminApiKeys.has(normalizeApiKey(apiKey))
+    const shouldUseExcelMapping = (target: WbTarget) => !!target.useCategoryMapping || mappedAdminApiKeys.has(normalizeApiKey(target.wbApiKey))
 
     // Determine cache TTL based on section
     const CACHE_TTL_PRODUCTION = 2 * 60 * 1000  // 2 min
@@ -1318,7 +1319,7 @@ export async function GET(request: NextRequest) {
     for (const result of results) {
       const { entrepreneurId, entrepreneurName, orders, fulfillmentOrders = [] } = result
       const target = targets.find((ent) => ent.id === entrepreneurId)
-      const useExcelMapping = target ? shouldUseExcelMapping(target.wbApiKey) : false
+      const useExcelMapping = target ? shouldUseExcelMapping(target) : false
 
       const mapOrders = (sourceOrders: any[], targetRows: typeof allMappedOrders) => {
       for (const order of sourceOrders) {

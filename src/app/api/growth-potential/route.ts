@@ -213,9 +213,10 @@ export async function GET(request: NextRequest) {
       return d.toISOString().split('T')[0]
     })()
     const minClicks = Number(searchParams.get('minOpens')) || 20
+    const includeAdminAngelina = user.role === 'admin' && searchParams.get('includeAngelina') === '1'
 
     const rows = isVercel()
-      ? await getVercelWbTargets(user, entrepreneurId)
+      ? await getVercelWbTargets(user, entrepreneurId, { includeAdminAngelina })
       : await db.$queryRawUnsafe<EntrepreneurRow[]>(
           `SELECT id, name, wbApiKey FROM Entrepreneur WHERE wbApiKey IS NOT NULL AND wbApiKey != '' ${user.role === 'admin' ? '' : `AND userId = ${user.id}`}`
         )

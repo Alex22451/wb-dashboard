@@ -245,7 +245,11 @@ function writeReportCache<T>(section: string, scope: string, params: string, dat
   }
 }
 
-function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null) {
+function appendAngelinaParam(params: URLSearchParams, includeAngelina: boolean) {
+  if (includeAngelina) params.set('includeAngelina', '1')
+}
+
+function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null, includeAngelina = false) {
   const selectedIds = selection === ALL_ENTREPRENEURS
     ? entrepreneurs.filter((ent) => ent.hasApiKey).map((ent) => String(ent.id))
     : selection.split(',').map((id) => id.trim()).filter(Boolean)
@@ -258,7 +262,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
       return `${id}:${ent?.name || ''}:${ent?.wbApiKey || ''}`
     })
     .join('|')
-    .concat(`::${userScope}`)
+    .concat(`::${userScope}${includeAngelina ? '::with-angelina' : ''}`)
 }
 
 function dailyCacheKey(scope: string, date: string) {
@@ -346,6 +350,7 @@ function writeDailyResponseCache(
   user: AuthUser | null,
   date: string,
   response: DailyResponse,
+  includeAngelina = false,
 ) {
   if (response.daily) writeDailyCache(cacheScope, date, response.daily)
   if (!response.dailyByEntrepreneur) return
@@ -353,7 +358,7 @@ function writeDailyResponseCache(
   for (const [entId, daily] of Object.entries(response.dailyByEntrepreneur)) {
     const ent = entrepreneurs.find((item) => String(item.id) === String(entId))
     if (!ent) continue
-    const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user)
+    const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user, includeAngelina)
     writeDailyCache(singleScope, date, daily)
   }
 
@@ -362,7 +367,7 @@ function writeDailyResponseCache(
     for (const entId of selectedIds) {
       const daily = response.dailyByEntrepreneur[String(entId)]
       if (!daily) continue
-      const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user)
+      const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user, includeAngelina)
       writeDailyCache(singleScope, date, daily)
     }
   }
@@ -1699,7 +1704,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 }
 
 // --- Daily Orders Tab ---
-function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurInfo[]; user: AuthUser | null }) {
+function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; user: AuthUser | null; includeAngelina: boolean }) {
   const [fetchedData, setFetchedData] = useState<DailyOrdersData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -1861,7 +1866,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
       const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina)
       const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
       const requestDay = async (date: string) => {
         const params = new URLSearchParams()
@@ -1869,6 +1874,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
         params.set('section', 'daily')
         params.set('dateFrom', date)
         params.set('dateTo', date)
+        appendAngelinaParam(params, includeAngelina)
 
         const res = await fetch(`/api/wb-data?${params.toString()}`)
         return { date, json: await res.json() }
@@ -1899,7 +1905,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
           }
           if (json.daily && dayErrors.length === 0) {
             loadedDays.push(json.daily)
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina)
             setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
@@ -1918,7 +1924,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
         }
         if (json.daily) {
           loadedDays.push(json.daily)
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina)
           setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
         }
       }
@@ -1929,7 +1935,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, mergeDailyResponses])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
 
@@ -2133,7 +2139,7 @@ function DailyOrdersTab({ entrepreneurs, user }: { entrepreneurs: EntrepreneurIn
 }
 
 // --- Monthly Tab ---
-function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; includeAngelina: boolean }) {
   const [fetchedData, setFetchedData] = useState<MonthlyData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -2171,19 +2177,19 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
     const latest = readLatestReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope)
     if (!latest) return
     setFetchedData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt])
+  }, [entrepreneurs, selectedEnt, includeAngelina])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     setRateLimitErrors([])
     try {
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
       const cacheParams = 'section=monthly'
       const cached = readReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope, cacheParams)
       if (cached) {
@@ -2195,6 +2201,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       const params = new URLSearchParams()
       params.set('entrepreneurId', selection)
       params.set('section', 'monthly')
+      appendAngelinaParam(params, includeAngelina)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       const errors = json.rateLimitErrors || []
@@ -2208,7 +2215,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, entrepreneurs])
+  }, [selectedEnt, entrepreneurs, includeAngelina])
 
   // NO auto-fetch on mount — only fetch when user clicks "Загрузить"
 
@@ -2388,7 +2395,7 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 }
 
 // --- Production Load Tab ---
-function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function ProductionLoadTab({ entrepreneurs, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; includeAngelina: boolean }) {
   type ProductionRange = 'week' | 'twoWeeks' | 'month' | 'custom'
   const getPresetRange = (days: number) => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -2422,7 +2429,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
       const activeRange = range || { from: dateFrom, to: dateTo }
       const selection = selectionToParam(entIds || selectedEnt)
       const capacity = capacityOverride || capacityInput
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
       const cacheParams = `${activeRange.from}:${activeRange.to}:capacity=${capacity}`
       const cached = readReportCache<{ data: ProductionLoadData; errors: RateLimitError[] }>('production', cacheScope, cacheParams)
       if (cached) {
@@ -2437,6 +2444,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
       params.set('dateFrom', activeRange.from)
       params.set('dateTo', activeRange.to)
       params.set('capacity', capacity)
+      appendAngelinaParam(params, includeAngelina)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       const errors = json.rateLimitErrors || []
@@ -2450,7 +2458,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, capacityInput, dateFrom, dateTo, entrepreneurs])
+  }, [selectedEnt, capacityInput, dateFrom, dateTo, entrepreneurs, includeAngelina])
 
   useEffect(() => {
     const savedCapacity = window.localStorage.getItem('productionCapacity')
@@ -3037,7 +3045,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
 }
 
 // --- Supply Tab (Поставки) ---
-function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function SupplyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; includeAngelina: boolean }) {
   const [fetchedData, setFetchedData] = useState<SupplyData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -3067,7 +3075,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     setPage(0)
     try {
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
       const cacheParams = `${dateFrom}:${dateTo}:days=${supplyDays}:coef=${coefficient}`
       const cached = readReportCache<{ data: SupplyData; errors: RateLimitError[] }>('supply', cacheScope, cacheParams)
       if (cached) {
@@ -3083,6 +3091,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       params.set('dateTo', dateTo)
       params.set('supplyDays', String(supplyDays))
       params.set('coefficient', String(coefficient))
+      appendAngelinaParam(params, includeAngelina)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       const errors = json.rateLimitErrors || []
@@ -3096,7 +3105,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateFrom, dateTo, supplyDays, coefficient, entrepreneurs])
+  }, [selectedEnt, dateFrom, dateTo, supplyDays, coefficient, entrepreneurs, includeAngelina])
 
   const supplyPeriods = [
     { label: '7 дней', value: 7 },
@@ -3408,7 +3417,7 @@ function SupplyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 }
 
 // --- Growth Potential Tab ---
-function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function GrowthPotentialTab({ entrepreneurs, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; includeAngelina: boolean }) {
   const [data, setData] = useState<GrowthPotentialData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([])
@@ -3429,7 +3438,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
     try {
       const dates = getDates()
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
       const cacheParams = `${dates.from}:${dates.to}:minOpens=${minOpens}`
       const cached = readReportCache<GrowthPotentialData>('growth', cacheScope, cacheParams)
       if (cached) {
@@ -3442,6 +3451,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
       params.set('dateFrom', dates.from)
       params.set('dateTo', dates.to)
       params.set('minOpens', String(minOpens))
+      appendAngelinaParam(params, includeAngelina)
       const res = await fetch(`/api/growth-potential?${params.toString()}`)
       const json = await res.json()
       setData(json)
@@ -3451,7 +3461,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
     } finally {
       setLoading(false)
     }
-  }, [getDates, selectedEnt, minOpens, entrepreneurs])
+  }, [getDates, selectedEnt, minOpens, entrepreneurs, includeAngelina])
 
   const totalPotential = data?.items.filter((item) => item.potentialScore >= 50).length || 0
   const avgConversion = data?.items.length
@@ -3624,7 +3634,7 @@ function GrowthPotentialTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo
 }
 
 // --- Ad Spend Tab ---
-function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
+function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: EntrepreneurInfo[]; includeAngelina: boolean }) {
   const [data, setData] = useState<AdSpendData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
@@ -3650,7 +3660,7 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
     const latest = readLatestReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope)
     if (!latest) return
     const [from, to] = latest.params.split(':')
@@ -3660,7 +3670,7 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     }
     setData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt])
+  }, [entrepreneurs, selectedEnt, includeAngelina])
 
   const periodLabel = data?.period ? `${formatDateShort(data.period.from)} — ${formatDateShort(data.period.to)}` : ''
   const entRows = data?.entrepreneurs || []
@@ -3678,7 +3688,7 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     const from = overrideFrom || dateFrom
     const to = overrideTo || dateTo
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
     const cacheParams = `${from}:${to}`
     const cached = readReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope, cacheParams)
     if (cached) {
@@ -3696,12 +3706,14 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
       adParams.set('entrepreneurId', selection)
       adParams.set('from', from)
       adParams.set('to', to)
+      appendAngelinaParam(adParams, includeAngelina)
 
       const dailyParams = new URLSearchParams()
       dailyParams.set('entrepreneurId', selection)
       dailyParams.set('section', 'daily')
       dailyParams.set('dateFrom', from)
       dailyParams.set('dateTo', to)
+      appendAngelinaParam(dailyParams, includeAngelina)
 
       const [adRes, dailyRes] = await Promise.all([
         fetch(`/api/ad-spend?${adParams.toString()}`),
@@ -3747,7 +3759,7 @@ function AdSpendTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
     } finally {
       setLoading(false)
     }
-  }, [dateFrom, dateTo, selectedEnt, entrepreneurs])
+  }, [dateFrom, dateTo, selectedEnt, entrepreneurs, includeAngelina])
 
   const applyQuickRange = (days: number) => {
     const range = getRangeFromYesterday(days)
@@ -4066,7 +4078,7 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
   const [selectedEnt, setSelectedEnt] = useState<string[]>(['5']) // Масляков А.А. by default
   const [dateFrom, setDateFrom] = useState<string>('2026-04-01')
   const [dateTo, setDateTo] = useState<string>('2026-04-29')
-  const apiEntrepreneurs = entrepreneurs.filter((e) => e.hasApiKey)
+  const apiEntrepreneurs = entrepreneurs.filter((e) => e.hasApiKey && e.id < 100000)
 
   const fetchData = useCallback(async () => {
     const ids = selectedEnt.includes(ALL_ENTREPRENEURS)
@@ -4641,18 +4653,25 @@ export default function Home() {
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [visibleOptionalTabs, setVisibleOptionalTabs] = useState<OptionalTabId[]>(DEFAULT_VISIBLE_OPTIONAL_TABS)
+  const [includeAngelina, setIncludeAngelina] = useState(false)
   const isAdmin = authUser?.role === 'admin'
   const tabEnabled = useCallback((tabId: OptionalTabId) => {
     if (tabId === 'compare' && !isAdmin) return false
     return visibleOptionalTabs.includes(tabId)
   }, [isAdmin, visibleOptionalTabs])
 
-  const refreshEntrepreneurs = useCallback(() => {
-    fetch('/api/entrepreneurs')
+  const loadEntrepreneurs = useCallback((withAngelina: boolean) => {
+    const params = new URLSearchParams()
+    if (withAngelina) params.set('includeAngelina', '1')
+    fetch(`/api/entrepreneurs${params.size ? `?${params.toString()}` : ''}`)
       .then((r) => r.ok ? r.json() : [])
       .then(setEntrepreneurs)
       .catch(console.error)
   }, [])
+
+  const refreshEntrepreneurs = useCallback(() => {
+    loadEntrepreneurs(includeAngelina)
+  }, [loadEntrepreneurs, includeAngelina])
 
   // Fetch current user, then entrepreneurs list (local DB only, no WB API)
   useEffect(() => {
@@ -4660,16 +4679,16 @@ export default function Home() {
       .then((r) => r.json())
       .then((json) => {
         setAuthUser(json.user)
-        if (json.user) refreshEntrepreneurs()
+        if (json.user) loadEntrepreneurs(false)
       })
       .catch(console.error)
       .finally(() => setAuthChecked(true))
-  }, [refreshEntrepreneurs])
+  }, [loadEntrepreneurs])
 
   const handleAuth = useCallback((user: AuthUser) => {
     setAuthUser(user)
-    refreshEntrepreneurs()
-  }, [refreshEntrepreneurs])
+    loadEntrepreneurs(false)
+  }, [loadEntrepreneurs])
 
   useEffect(() => {
     if (!authUser) return
@@ -4735,9 +4754,17 @@ export default function Home() {
     setEntrepreneurs([])
     setDashboard(null)
     setSelectedDashEnt([])
+    setIncludeAngelina(false)
     setVisibleOptionalTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
     setActiveTab('dashboard')
   }, [])
+
+  useEffect(() => {
+    if (!authUser || !isAdmin) return
+    loadEntrepreneurs(includeAngelina)
+    setDashboard(null)
+    setSelectedDashEnt([])
+  }, [includeAngelina, authUser, isAdmin, loadEntrepreneurs])
 
   // Explicit dashboard data load — only triggered by user clicking "Загрузить"
   const loadDashboardData = useCallback(async () => {
@@ -4747,7 +4774,7 @@ export default function Home() {
     try {
       const baseDashboard = createDashboardShell(selectedDashEnt, entrepreneurs)
       const selection = selectionToParam(selectedDashEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina)
       const dailyByDate = new Map<string, DailyOrdersData>()
       const adSpendByPeriod = new Map<DashboardPeriod, Record<number, number>>()
       const failedDates = new Set<string>()
@@ -4926,6 +4953,7 @@ export default function Home() {
         params.set('entrepreneurId', selection)
         params.set('from', stats.dateFrom)
         params.set('to', stats.dateTo)
+        appendAngelinaParam(params, includeAngelina)
         const res = await fetch(`/api/ad-spend?${params.toString()}`)
         const json = await res.json()
         if (json.errors?.length) setRateLimitErrors((current) => [...current, ...json.errors])
@@ -4947,6 +4975,7 @@ export default function Home() {
         dayParams.set('section', 'daily')
         dayParams.set('dateFrom', date)
         dayParams.set('dateTo', date)
+        appendAngelinaParam(dayParams, includeAngelina)
         const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
         return { date, json: await dayRes.json() }
       }
@@ -4964,7 +4993,7 @@ export default function Home() {
             failedDates.add(date)
           }
           if (dayJson.daily && dayErrors.length === 0) {
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina)
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
@@ -4984,7 +5013,7 @@ export default function Home() {
           continue
         }
         if (dayJson.daily) {
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina)
           dailyByDate.set(date, dayJson.daily)
           applyExactDashboard()
         }
@@ -4995,7 +5024,7 @@ export default function Home() {
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod])
+  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod, includeAngelina])
 
   if (!authChecked) {
     return (
@@ -5025,6 +5054,12 @@ export default function Home() {
               <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex sm:text-xs">
                 Данные по: {formatDateFull(dashboard.latestDate)}
               </Badge>
+            )}
+            {isAdmin && (
+              <label className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs shadow-sm">
+                <Switch checked={includeAngelina} onCheckedChange={setIncludeAngelina} />
+                <span className="whitespace-nowrap font-medium">С ангелиной</span>
+              </label>
             )}
             <Badge variant={isAdmin ? 'default' : 'outline'} className="shrink-0 text-[10px] sm:text-xs">
               {authUser.username}{isAdmin ? ' · админ' : ''}
@@ -5138,32 +5173,32 @@ export default function Home() {
           </TabsContent>
           {tabEnabled('daily') && (
             <TabsContent value="daily">
-              <DailyOrdersTab entrepreneurs={entrepreneurs} user={authUser} />
+              <DailyOrdersTab entrepreneurs={entrepreneurs} user={authUser} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('production') && (
             <TabsContent value="production">
-              <ProductionLoadTab entrepreneurs={entrepreneurs} />
+              <ProductionLoadTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('supply') && (
             <TabsContent value="supply">
-              <SupplyTab entrepreneurs={entrepreneurs} />
+              <SupplyTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('monthly') && (
             <TabsContent value="monthly">
-              <MonthlyTab entrepreneurs={entrepreneurs} />
+              <MonthlyTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('ads') && (
             <TabsContent value="ads">
-              <AdSpendTab entrepreneurs={entrepreneurs} />
+              <AdSpendTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('growth') && (
             <TabsContent value="growth">
-              <GrowthPotentialTab entrepreneurs={entrepreneurs} />
+              <GrowthPotentialTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
             </TabsContent>
           )}
           {tabEnabled('compare') && (
