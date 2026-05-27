@@ -1101,6 +1101,7 @@ export async function GET(request: NextRequest) {
         ? `production:${productionCapacity}`
         : null
     const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
+    const shouldRefreshDailyCache = section === 'daily' && shouldRefreshReportCache
     if (reportCacheSection && !shouldRefreshReportCache) {
       const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo)
       if (cachedReport) {
@@ -1153,7 +1154,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (section === 'daily' && useExactSingleDayStats) {
+    if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
         ent,
         daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom),

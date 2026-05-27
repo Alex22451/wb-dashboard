@@ -10,6 +10,7 @@ function getBaseUrl(request: NextRequest): string {
 
 const WARM_BATCH_SIZE = 3
 const WARM_BATCH_PAUSE_MS = 61_000
+const FORCE_REFRESH_RECENT_DAYS = 3
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -34,6 +35,13 @@ function getDateRange(from: string, to: string) {
     current.setUTCDate(current.getUTCDate() + 1)
   }
   return dates
+}
+
+function getRecentDates(to: string, days: number) {
+  return getDateRange(
+    new Date(new Date(`${to}T00:00:00.000Z`).getTime() - (days - 1) * 86400000).toISOString().split('T')[0],
+    to,
+  )
 }
 
 async function pruneOldDailyRedisKeys() {
@@ -100,6 +108,7 @@ export async function GET(request: NextRequest) {
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), 30) : (scope === 'all' ? 30 : 14)
   const { from, to } = getMoscowDashboardWarmRange(periodDays)
   const warmDates = explicitDate ? [explicitDate] : getDateRange(from, to)
+  const forceRefreshDates = new Set(explicitDate ? [explicitDate] : getRecentDates(to, FORCE_REFRESH_RECENT_DAYS))
   const allTargets = scope === 'all' ? await getAllVercelWbTargets() : []
   const redisPrune = await pruneOldDailyRedisKeys()
   const redisProbe = await probeRedis()
@@ -121,6 +130,8 @@ export async function GET(request: NextRequest) {
     url.searchParams.set('section', 'daily')
     url.searchParams.set('dateFrom', date)
     url.searchParams.set('dateTo', date)
+    const forceRefresh = forceRefreshDates.has(date)
+    if (forceRefresh) url.searchParams.set('refresh', '1')
     if (target) {
       url.searchParams.set('warmId', String(target.id))
       url.searchParams.set('warmName', target.name)
@@ -159,6 +170,7 @@ export async function GET(request: NextRequest) {
       ok: response.ok,
       status: response.status,
       cacheSource: json?.cacheSource || null,
+      refreshed: forceRefresh,
     }
   }
 
@@ -263,7 +275,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null }>> = []
+  const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }>> = []
   const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
   for (let offset = 0; offset < warmDates.length; offset += batchSize) {
     const batchDates = warmDates.slice(offset, offset + batchSize)
@@ -289,7 +301,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     warmedAt: new Date().toISOString(),
-    moscowSchedule: '08:30',
+    moscowSchedule: '07:00',
     scope,
     period: { from, to },
     section: 'daily',
@@ -299,6 +311,7 @@ export async function GET(request: NextRequest) {
     durationMs: Date.now() - startedAt,
     dates: warmedDates,
     cacheHitDates,
+    forceRefreshDates: [...forceRefreshDates],
     entrepreneurs,
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
     rateLimitErrors,
