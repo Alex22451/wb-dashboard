@@ -136,6 +136,7 @@ export async function GET(request: NextRequest) {
       url.searchParams.set('warmId', String(target.id))
       url.searchParams.set('warmName', target.name)
       url.searchParams.set('warmApiKey', target.wbApiKey)
+      if (target.useCategoryMapping) url.searchParams.set('warmUseCategoryMapping', '1')
     }
 
     const response = await fetch(url, {

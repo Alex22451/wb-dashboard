@@ -323,11 +323,13 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
     const normalized = normalizeApiKey(keys.apiKey)
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
+    const isAngelina = user.username.toLowerCase() === 'angelina'
     targets.push({
       id: 100000 + user.id,
       name: keys.sellerName || user.username,
       wbApiKey: keys.apiKey,
       wbPromotionApiKey: keys.promotionApiKey || keys.apiKey,
+      useCategoryMapping: isAngelina,
     })
   }
 

@@ -78,8 +78,13 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
   return promise
 }
 
-function redisDailyKey(apiKey: string, date: string) {
-  return `wb:daily:v6:${apiKeyFingerprint(apiKey)}:${date}`
+function redisDailyKey(apiKey: string, date: string, variant = 'default') {
+  const variantSuffix = variant === 'default' ? '' : `:${variant}`
+  return `wb:daily:v6:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+}
+
+function dailyCacheVariant(target: { useCategoryMapping?: boolean }) {
+  return target.useCategoryMapping ? 'category' : 'default'
 }
 
 function redisDailyTtlSeconds(date: string) {
@@ -91,8 +96,8 @@ function redisDailyTtlSeconds(date: string) {
   return 180 * 24 * 60 * 60
 }
 
-async function readRedisDailyPayload(apiKey: string, date: string): Promise<any | null> {
-  const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date)])
+async function readRedisDailyPayload(apiKey: string, date: string, variant = 'default'): Promise<any | null> {
+  const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date, variant)])
   if (!raw || typeof raw !== 'string') return null
   try {
     const parsed = JSON.parse(raw)
@@ -103,10 +108,10 @@ async function readRedisDailyPayload(apiKey: string, date: string): Promise<any 
   }
 }
 
-async function writeRedisDailyPayload(apiKey: string, date: string, daily: any) {
+async function writeRedisDailyPayload(apiKey: string, date: string, daily: any, variant = 'default') {
   await redisCommand([
     'SET',
-    redisDailyKey(apiKey, date),
+    redisDailyKey(apiKey, date, variant),
     JSON.stringify({
       date,
       fetchedAt: new Date().toISOString(),
@@ -384,26 +389,26 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
 }
 
 async function readMergedRedisDailyPayload(
-  targets: Array<{ wbApiKey: string }>,
+  targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
   dates: string[]
 ): Promise<any | null> {
   if (dates.length === 0 || targets.length === 0) return null
 
   const rows = await Promise.all(targets.flatMap((target) =>
-    dates.map((date) => readRedisDailyPayload(target.wbApiKey, date))
+    dates.map((date) => readRedisDailyPayload(target.wbApiKey, date, dailyCacheVariant(target)))
   ))
   if (rows.some((row) => !row)) return null
   return mergeDailyPayloads(rows, dates)
 }
 
 async function readAvailableMergedRedisDailyPayload(
-  targets: Array<{ wbApiKey: string }>,
+  targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
   dates: string[]
 ): Promise<{ daily: any | null; present: number; missing: number; total: number }> {
   const total = targets.length * dates.length
   if (dates.length === 0 || targets.length === 0) return { daily: null, present: 0, missing: total, total }
 
-  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date)))
+  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target))))
   let rawRows: unknown[] | null = null
 
   try {
@@ -415,7 +420,7 @@ async function readAvailableMergedRedisDailyPayload(
 
   if (!rawRows) {
     rawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date)]))
+      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target))]))
     ))
   }
 
@@ -1050,6 +1055,7 @@ export async function GET(request: NextRequest) {
         id: Number.isFinite(warmId) && warmId > 0 ? warmId : 900000,
         name: warmName || 'Warm API key',
         wbApiKey: warmApiKey,
+        useCategoryMapping: searchParams.get('warmUseCategoryMapping') === '1',
       }]
     } else if (isVercel()) {
       targets = await getVercelWbTargets(user, entrepreneurId, { includeAdminAngelina })
@@ -1158,7 +1164,7 @@ export async function GET(request: NextRequest) {
     if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
         ent,
-        daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom),
+        daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent)),
       })))
       if (cachedDailyRows.every((row) => row.daily)) {
         const dailyByEntrepreneur = Object.fromEntries(cachedDailyRows.map((row) => [row.ent.id, row.daily]))
@@ -1850,7 +1856,7 @@ export async function GET(request: NextRequest) {
         const datesToCache = dailyPayload?.dates || []
         await Promise.all(targets.flatMap((ent) => datesToCache.map((date: string) => {
           const dayPayload = sliceDailyPayloadByDate(dailyByEntrepreneurPayload[ent.id], date)
-          return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload) : Promise.resolve()
+          return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload, dailyCacheVariant(ent)) : Promise.resolve()
         })))
       }
     }
