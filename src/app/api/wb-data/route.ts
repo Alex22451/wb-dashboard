@@ -396,6 +396,48 @@ async function readMergedRedisDailyPayload(
   return mergeDailyPayloads(rows, dates)
 }
 
+async function readAvailableMergedRedisDailyPayload(
+  targets: Array<{ wbApiKey: string }>,
+  dates: string[]
+): Promise<{ daily: any | null; present: number; missing: number; total: number }> {
+  const total = targets.length * dates.length
+  if (dates.length === 0 || targets.length === 0) return { daily: null, present: 0, missing: total, total }
+
+  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date)))
+  let rawRows: unknown[] | null = null
+
+  try {
+    const mgetRows = await redisCommand<unknown[]>(['MGET', ...keys])
+    if (Array.isArray(mgetRows)) rawRows = mgetRows
+  } catch {
+    rawRows = null
+  }
+
+  if (!rawRows) {
+    rawRows = await Promise.all(targets.flatMap((target) =>
+      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date)]))
+    ))
+  }
+
+  const dailyRows: any[] = []
+  for (const raw of rawRows) {
+    if (!raw || typeof raw !== 'string') continue
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.daily?.dates && Array.isArray(parsed.daily.dates)) dailyRows.push(parsed.daily)
+    } catch {
+      // Ignore malformed cache entries; the next warmup will replace them.
+    }
+  }
+
+  return {
+    daily: dailyRows.length ? mergeDailyPayloads(dailyRows, dates) : null,
+    present: dailyRows.length,
+    missing: Math.max(total - dailyRows.length, 0),
+    total,
+  }
+}
+
 function buildProductionLoadPayload(daily: any, capacity: number, requestedDateFrom: string, requestedDateTo: string) {
   const DAILY_CAPACITY = capacity
   const visibleProdDates: string[] = Array.isArray(daily?.dates) ? daily.dates : []
@@ -1096,12 +1138,17 @@ export async function GET(request: NextRequest) {
 
     if (section === 'production') {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
-      const cachedDaily = await readMergedRedisDailyPayload(targets, currentDates)
-      if (cachedDaily) {
+      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates)
+      if (cachedDaily.daily) {
         return NextResponse.json({
           rateLimitErrors: [],
-          cacheSource: 'redis',
-          production: buildProductionLoadPayload(cachedDaily, productionCapacity, requestedDateFrom, requestedDateTo),
+          cacheSource: cachedDaily.missing === 0 ? 'redis' : 'redis-partial',
+          cacheStats: {
+            present: cachedDaily.present,
+            missing: cachedDaily.missing,
+            total: cachedDaily.total,
+          },
+          production: buildProductionLoadPayload(cachedDaily.daily, productionCapacity, requestedDateFrom, requestedDateTo),
         })
       }
     }
