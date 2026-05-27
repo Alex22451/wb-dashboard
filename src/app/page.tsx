@@ -2388,20 +2388,24 @@ function MonthlyTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
 
 // --- Production Load Tab ---
 function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) {
-  const getDefaultRange = () => {
+  type ProductionRange = 'week' | 'twoWeeks' | 'month' | 'custom'
+  const getPresetRange = (days: number) => {
     const mskOffset = 3 * 60 * 60 * 1000
     const nowMsk = new Date(Date.now() + mskOffset)
-    const to = new Date(nowMsk.getTime() - 86400000).toISOString().split('T')[0]
-    const from = new Date(nowMsk.getTime() - 30 * 86400000).toISOString().split('T')[0]
-    return { from, to }
+    const end = new Date(nowMsk.getTime() - 86400000)
+    const start = new Date(end.getTime() - (days - 1) * 86400000)
+    return {
+      from: start.toISOString().split('T')[0],
+      to: end.toISOString().split('T')[0],
+    }
   }
-  const defaults = getDefaultRange()
+  const defaults = getPresetRange(30)
   const [fetchedData, setFetchedData] = useState<ProductionLoadData | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day')
-  const [initialLoadDone, setInitialLoadDone] = useState(false)
+  const [productionRange, setProductionRange] = useState<ProductionRange>('month')
   const [capacityInput, setCapacityInput] = useState('2500')
   const [dateFrom, setDateFrom] = useState(defaults.from)
   const [dateTo, setDateTo] = useState(defaults.to)
@@ -2452,14 +2456,6 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     if (savedCapacity) setCapacityInput(savedCapacity)
   }, [])
 
-  // Auto-load on first mount with "Все ИП"
-  useEffect(() => {
-    if (!initialLoadDone) {
-      setInitialLoadDone(true)
-      fetchData([ALL_ENTREPRENEURS])
-    }
-  }, [initialLoadDone, fetchData])
-
   // Helper: get load color
   const getLoadColor = (pct: number) => {
     if (pct >= 90) return 'red'
@@ -2495,21 +2491,14 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
     const normalized = String(nextCapacity)
     setCapacityInput(normalized)
     window.localStorage.setItem('productionCapacity', normalized)
-    fetchData(undefined, undefined, normalized)
   }
 
-  const setQuickRange = (days: number, shiftDays = 0) => {
-    const mskOffset = 3 * 60 * 60 * 1000
-    const nowMsk = new Date(Date.now() + mskOffset)
-    const end = new Date(nowMsk.getTime() - (1 + shiftDays) * 86400000)
-    const start = new Date(end.getTime() - (days - 1) * 86400000)
-    const range = {
-      from: start.toISOString().split('T')[0],
-      to: end.toISOString().split('T')[0],
-    }
+  const setQuickRange = (rangeKey: ProductionRange) => {
+    const days = rangeKey === 'week' ? 7 : rangeKey === 'twoWeeks' ? 14 : 30
+    const range = getPresetRange(days)
+    setProductionRange(rangeKey)
     setDateFrom(range.from)
     setDateTo(range.to)
-    fetchData(undefined, range)
   }
 
   const productionChartData = useMemo(() => {
@@ -2604,7 +2593,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
         <MultiEntrepreneurSelect
           entrepreneurs={entrepreneurs}
           selectedIds={selectedEnt}
-          onChange={(ids) => { setSelectedEnt(ids); fetchData(ids) }}
+          onChange={(ids) => { setSelectedEnt(ids); setFetchedData(null); setRateLimitErrors([]) }}
           className="w-full sm:w-64"
         />
 
@@ -2635,16 +2624,16 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
             Период
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 w-full sm:w-40" />
+            <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setProductionRange('custom') }} className="h-9 w-full sm:w-40" />
             <span className="text-sm text-muted-foreground">—</span>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 w-full sm:w-40" />
+            <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setProductionRange('custom') }} className="h-9 w-full sm:w-40" />
           </div>
-          <ToggleGroup type="single" onValueChange={(value) => {
-            if (value === '30') setQuickRange(30)
-            if (value === '60') setQuickRange(60)
+          <ToggleGroup type="single" value={productionRange === 'custom' ? '' : productionRange} onValueChange={(value) => {
+            if (value === 'week' || value === 'twoWeeks' || value === 'month') setQuickRange(value)
           }} className="justify-start overflow-x-auto rounded-md border bg-background">
-            <ToggleGroupItem value="30" className="text-xs px-2">30 дн</ToggleGroupItem>
-            <ToggleGroupItem value="60" className="text-xs px-2">60 дн</ToggleGroupItem>
+            <ToggleGroupItem value="week" className="text-xs px-2">Неделя</ToggleGroupItem>
+            <ToggleGroupItem value="twoWeeks" className="text-xs px-2">2 недели</ToggleGroupItem>
+            <ToggleGroupItem value="month" className="text-xs px-2">Месяц</ToggleGroupItem>
           </ToggleGroup>
         </div>
 
@@ -2657,7 +2646,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
           ) : (
             <>
               <RefreshCw className="h-4 w-4" />
-              Обновить
+              Загрузить
             </>
           )}
         </Button>
@@ -2667,7 +2656,7 @@ function ProductionLoadTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[
 
       {!loading && !fetchedData && (
         <EmptyState
-          message="Загрузка данных о нагрузке..."
+          message="Выберите период и нажмите «Загрузить»"
           icon={<Thermometer className="h-12 w-12" />}
         />
       )}

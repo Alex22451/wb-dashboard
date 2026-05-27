@@ -1051,7 +1051,13 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const reportCacheSection = section === 'monthly' ? 'monthly' : null
+    const capacityParam = Number(searchParams.get('capacity'))
+    const productionCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
+    const reportCacheSection = section === 'monthly'
+      ? 'monthly'
+      : section === 'production'
+        ? `production:${productionCapacity}`
+        : null
     const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
     if (reportCacheSection && !shouldRefreshReportCache) {
       const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo)
@@ -1089,15 +1095,13 @@ export async function GET(request: NextRequest) {
     )
 
     if (section === 'production') {
-      const capacityParam = Number(searchParams.get('capacity'))
-      const dailyCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readMergedRedisDailyPayload(targets, currentDates)
       if (cachedDaily) {
         return NextResponse.json({
           rateLimitErrors: [],
           cacheSource: 'redis',
-          production: buildProductionLoadPayload(cachedDaily, dailyCapacity, requestedDateFrom, requestedDateTo),
+          production: buildProductionLoadPayload(cachedDaily, productionCapacity, requestedDateFrom, requestedDateTo),
         })
       }
     }
@@ -1140,9 +1144,11 @@ export async function GET(request: NextRequest) {
         let returnError: string | undefined
 
         if (shouldUseFunnelOrders) {
-          const funnel = needDaily || needProduction
-            ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
-            : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
+          const funnel = needProduction
+            ? await fetchFunnelHistoryOrders(ent.wbApiKey, dateFrom, dateTo)
+            : needDaily
+              ? await fetchFunnelDailyOrders(ent.wbApiKey, dateFrom, dateTo)
+              : await fetchFunnelProductOrders(ent.wbApiKey, requestedDateFrom, requestedDateTo)
 
           if (needDaily || needProduction) {
             try {
@@ -1956,9 +1962,7 @@ export async function GET(request: NextRequest) {
 
     // ─── Build Production Load ───
     if (needProduction) {
-      const capacityParam = Number(searchParams.get('capacity'))
-      const dailyCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
-      response.production = buildProductionLoadPayload(dailyPayload, dailyCapacity, requestedDateFrom, requestedDateTo)
+      response.production = buildProductionLoadPayload(dailyPayload, productionCapacity, requestedDateFrom, requestedDateTo)
     }
 
     // ─── Build Supply Calculation ───

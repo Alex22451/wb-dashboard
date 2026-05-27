@@ -110,6 +110,7 @@ export async function GET(request: NextRequest) {
   const rateLimitErrors: any[] = []
   const adWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; totalSpend: number; errors: any[] }> = []
   const monthlyWarmups: Array<{ ok: boolean; status: number; cacheSource: string | null; months: number; errors: any[] }> = []
+  const productionWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; cacheSource: string | null; dates: number; errors: any[] }> = []
   let entrepreneurs = 0
   let ok = true
   let status = 200
@@ -225,6 +226,43 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const requestProductionPeriod = async (days: number) => {
+    const range = getMoscowDashboardWarmRange(days)
+    const url = new URL('/api/wb-data', baseUrl)
+    url.searchParams.set('entrepreneurId', 'all')
+    url.searchParams.set('section', 'production')
+    url.searchParams.set('dateFrom', range.from)
+    url.searchParams.set('dateTo', range.to)
+    url.searchParams.set('capacity', '2500')
+    url.searchParams.set('refresh', '1')
+
+    const response = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        'x-wb-internal-warm': internalToken,
+      },
+      signal: AbortSignal.timeout(240000),
+    })
+    const json = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      ok = false
+      status = response.status
+    }
+    if (Array.isArray(json?.rateLimitErrors) && json.rateLimitErrors.length) {
+      rateLimitErrors.push(...json.rateLimitErrors)
+    }
+    return {
+      days,
+      from: range.from,
+      to: range.to,
+      ok: response.ok,
+      status: response.status,
+      cacheSource: json?.cacheSource || null,
+      dates: Array.isArray(json?.production?.dates) ? json.production.dates.length : 0,
+      errors: Array.isArray(json?.rateLimitErrors) ? json.rateLimitErrors : [],
+    }
+  }
+
   const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null }>> = []
   const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
   for (let offset = 0; offset < warmDates.length; offset += batchSize) {
@@ -242,6 +280,9 @@ export async function GET(request: NextRequest) {
   if (!explicitDate) {
     monthlyWarmups.push(await requestMonthly())
     for (const days of [7, 14, 30]) {
+      productionWarmups.push(await requestProductionPeriod(days))
+    }
+    for (const days of [7, 14, 30]) {
       adWarmups.push(await requestAdPeriod(days))
     }
   }
@@ -252,7 +293,7 @@ export async function GET(request: NextRequest) {
     scope,
     period: { from, to },
     section: 'daily',
-    warmedSections: explicitDate ? ['daily'] : ['daily', 'monthly', 'ads'],
+    warmedSections: explicitDate ? ['daily'] : ['daily', 'monthly', 'production', 'ads'],
     ok,
     status,
     durationMs: Date.now() - startedAt,
@@ -263,6 +304,7 @@ export async function GET(request: NextRequest) {
     rateLimitErrors,
     batches,
     monthlyWarmups,
+    productionWarmups,
     adWarmups,
     redisPrune,
     redisProbe,
