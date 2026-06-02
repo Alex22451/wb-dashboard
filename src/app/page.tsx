@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment, useMemo } from 'react'
+import { useState, useEffect, useCallback, Fragment, useMemo, useRef } from 'react'
 import {
   LayoutDashboard,
   Table2,
@@ -1934,6 +1934,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
   const [fulfillmentFilter, setFulfillmentFilter] = useState<'all' | 'fbs' | 'fbo'>('all')
   const [showBuyouts, setShowBuyouts] = useState(false)
   const [buyoutData, setBuyoutData] = useState<DailyOrdersData | null>(null)
+  const dailyLoadSeq = useRef(0)
   // Default to yesterday in Moscow timezone (последний день = yesterday, not today)
   const getYesterday = () => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -2080,6 +2081,9 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
   }, [])
 
   const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string, metricMode: 'all' | DataMetric = 'all') => {
+    const loadSeq = dailyLoadSeq.current + 1
+    dailyLoadSeq.current = loadSeq
+    const isActiveLoad = () => dailyLoadSeq.current === loadSeq
     setLoading(true)
     setRateLimitErrors([])
     if (metricMode !== 'sales') setFetchedData(null)
@@ -2095,9 +2099,11 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         const loadedDays: DailyOrdersData[] = []
         const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina, metric)
         const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
-        const requestDay = async (date: string) => {
+        const salesRetryIdsByDate = new Map<string, Set<number>>()
+        const salesErrorsByDate = new Map<string, RateLimitError[]>()
+        const requestDay = async (date: string, requestSelection = selection) => {
           const params = new URLSearchParams()
-          params.set('entrepreneurId', selection)
+          params.set('entrepreneurId', requestSelection)
           params.set('section', 'daily')
           params.set('dateFrom', date)
           params.set('dateTo', date)
@@ -2106,6 +2112,17 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
 
           const res = await fetch(`/api/wb-data?${params.toString()}`)
           return { date, json: await res.json() }
+        }
+        const trackSalesErrors = (date: string, dayErrors: RateLimitError[]) => {
+          if (metric !== 'sales') return
+          const ids = dayErrors.map((error) => Number(error.id)).filter((id) => Number.isFinite(id) && id > 0)
+          if (ids.length) salesRetryIdsByDate.set(date, new Set(ids))
+          else salesRetryIdsByDate.delete(date)
+          if (dayErrors.length) salesErrorsByDate.set(date, dayErrors)
+          else salesErrorsByDate.delete(date)
+        }
+        const appendNonSalesErrors = (dayErrors: RateLimitError[]) => {
+          if (metric !== 'sales' && dayErrors.length) errors.push(...dayErrors)
         }
 
         const uncachedDates: string[] = []
@@ -2123,17 +2140,20 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         const batchSize = metric === 'sales' ? 1 : DAILY_REQUEST_BATCH_SIZE
         for (let offset = 0; offset < uncachedDates.length; offset += batchSize) {
           const batch = uncachedDates.slice(offset, offset + batchSize)
-          const batchResults = await Promise.all(batch.map(requestDay))
+          const batchResults = await Promise.all(batch.map((date) => requestDay(date)))
 
           for (const { date, json } of batchResults) {
             const dayErrors = json.rateLimitErrors || []
             const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
             if (dayErrors.length) {
-              errors.push(...dayErrors)
+              appendNonSalesErrors(dayErrors)
+              trackSalesErrors(date, dayErrors)
               if (!canUseDaily) {
                 removeDailyCache(cacheScope, date)
-                failedDates.push(date)
+                if (metric !== 'sales') failedDates.push(date)
               }
+            } else {
+              trackSalesErrors(date, [])
             }
             if (canUseDaily) {
               loadedDays.push(json.daily)
@@ -2147,15 +2167,19 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
 
         for (const date of failedDates) {
           await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
+          if (!isActiveLoad()) return
           const { json } = await requestDay(date)
           const dayErrors = json.rateLimitErrors || []
           const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
           if (dayErrors.length) {
-            errors.push(...dayErrors)
+            appendNonSalesErrors(dayErrors)
+            trackSalesErrors(date, dayErrors)
             if (!canUseDaily) {
               removeDailyCache(cacheScope, date)
               continue
             }
+          } else {
+            trackSalesErrors(date, [])
           }
           if (canUseDaily) {
             loadedDays.push(json.daily)
@@ -2163,16 +2187,55 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             updateData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
+
+        if (metric === 'sales') setRateLimitErrors([...errors, ...salesErrorsByDate.values()].flat())
+
+        while (metric === 'sales' && salesRetryIdsByDate.size > 0 && isActiveLoad()) {
+          await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
+          if (!isActiveLoad()) return
+          for (const [date, ids] of [...salesRetryIdsByDate.entries()]) {
+            if (!isActiveLoad()) return
+            const retrySelection = [...ids].join(',')
+            if (!retrySelection) {
+              salesRetryIdsByDate.delete(date)
+              salesErrorsByDate.delete(date)
+              continue
+            }
+            const { json } = await requestDay(date, retrySelection)
+            const dayErrors = json.rateLimitErrors || []
+            const failedIds: Set<number> = new Set(
+              dayErrors
+                .map((error: RateLimitError) => Number(error.id))
+                .filter((id: number): id is number => Number.isFinite(id) && id > 0)
+            )
+            if (json.daily) {
+              loadedDays.push(json.daily)
+              updateData(mergeDailyResponses(loadedDays, loadedDates()))
+            }
+            if (failedIds.size > 0) {
+              salesRetryIdsByDate.set(date, failedIds)
+              salesErrorsByDate.set(date, dayErrors)
+            } else {
+              salesRetryIdsByDate.delete(date)
+              salesErrorsByDate.delete(date)
+            }
+            setRateLimitErrors([...errors, ...salesErrorsByDate.values()].flat())
+          }
+        }
+
+        if (metric === 'sales') errors.push(...[...salesErrorsByDate.values()].flat())
       }
 
       if (metricMode !== 'sales') await loadMetric('orders', setFetchedData)
+      if (!isActiveLoad()) return
       if (showBuyouts && metricMode !== 'orders') await loadMetric('sales', setBuyoutData)
+      if (!isActiveLoad()) return
 
       setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
-      setLoading(false)
+      if (isActiveLoad()) setLoading(false)
     }
   }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, showBuyouts, mergeDailyResponses])
 
@@ -2191,22 +2254,43 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         <MultiEntrepreneurSelect
           entrepreneurs={entrepreneurs}
           selectedIds={selectedEnt}
-          onChange={setSelectedEnt}
+          onChange={(ids) => {
+            dailyLoadSeq.current += 1
+            setLoading(false)
+            setSelectedEnt(ids)
+          }}
           className="w-full sm:w-64"
         />
 
-        <ToggleGroup type="single" value={dateMode} onValueChange={(v) => { if (v) setDateMode(v as 'single' | 'range') }} className="justify-start rounded-md border">
+        <ToggleGroup type="single" value={dateMode} onValueChange={(v) => {
+          if (!v) return
+          dailyLoadSeq.current += 1
+          setLoading(false)
+          setDateMode(v as 'single' | 'range')
+        }} className="justify-start rounded-md border">
           <ToggleGroupItem value="single" className="text-xs px-3">Один день</ToggleGroupItem>
           <ToggleGroupItem value="range" className="text-xs px-3">Диапазон</ToggleGroupItem>
         </ToggleGroup>
 
         {dateMode === 'single' ? (
-          <Input type="date" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
+          <Input type="date" value={singleDate} onChange={(e) => {
+            dailyLoadSeq.current += 1
+            setLoading(false)
+            setSingleDate(e.target.value)
+          }} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
+            <Input type="date" value={dateFrom} onChange={(e) => {
+              dailyLoadSeq.current += 1
+              setLoading(false)
+              setDateFrom(e.target.value)
+            }} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
             <span className="text-sm text-muted-foreground">—</span>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
+            <Input type="date" value={dateTo} onChange={(e) => {
+              dailyLoadSeq.current += 1
+              setLoading(false)
+              setDateTo(e.target.value)
+            }} className="w-full sm:w-40" min="2026-01-01" max="2026-12-31" />
             {/* Quick period buttons — auto-fetch on click */}
             <ToggleGroup type="single" onValueChange={(v) => {
               if (!v) return
@@ -2229,6 +2313,10 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
           <span className="whitespace-nowrap font-medium">Выкупы</span>
           <Switch checked={showBuyouts} onCheckedChange={(checked) => {
+            if (!checked) {
+              dailyLoadSeq.current += 1
+              setLoading(false)
+            }
             setShowBuyouts(checked)
             if (!checked) setBuyoutData(null)
             setRateLimitErrors([])
