@@ -111,7 +111,11 @@ export async function GET(request: NextRequest) {
   const { from, to } = getMoscowDashboardWarmRange(periodDays)
   const warmDates = explicitDate ? [explicitDate] : getDateRange(from, to)
   const forceRefreshDates = new Set(explicitDate ? [explicitDate] : getRecentDates(to, FORCE_REFRESH_RECENT_DAYS))
-  const allTargets = scope === 'all' ? await getAllVercelWbTargets() : []
+  const availableTargets = scope === 'all' || metricMode !== 'orders' ? await getAllVercelWbTargets() : []
+  const allTargets = scope === 'all' ? availableTargets : []
+  const salesTargets = scope === 'all'
+    ? allTargets
+    : availableTargets.filter((target) => target.id < 100000)
   const redisPrune = await pruneOldDailyRedisKeys()
   const redisProbe = await probeRedis()
 
@@ -313,9 +317,14 @@ export async function GET(request: NextRequest) {
     if (!lastDailyBatchFromRedis) await sleep(WARM_BATCH_PAUSE_MS)
     for (let index = 0; index < salesWarmDates.length; index++) {
       const date = salesWarmDates[index]
-      const batch = scope === 'all'
-        ? (await Promise.all(allTargets.map((target) => requestDate(date, target, 'sales'))))
-        : [await requestDate(date, undefined, 'sales')]
+      const batch: Array<{ date: string; metric: 'orders' | 'sales'; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }> = []
+      if (salesTargets.length > 0) {
+        for (const target of salesTargets) {
+          batch.push(await requestDate(date, target, 'sales'))
+        }
+      } else {
+        batch.push(await requestDate(date, undefined, 'sales'))
+      }
       batches.push(batch)
       const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
       if (!batchFromRedis && index < salesWarmDates.length - 1) {
@@ -353,6 +362,7 @@ export async function GET(request: NextRequest) {
     salesWarmDates,
     entrepreneurs,
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
+    salesTargets: salesTargets.map((target) => ({ id: target.id, name: target.name })),
     rateLimitErrors,
     batches,
     monthlyWarmups,
