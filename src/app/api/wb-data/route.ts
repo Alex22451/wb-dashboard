@@ -1929,9 +1929,13 @@ export async function GET(request: NextRequest) {
         response.daily = dailyPayload
         response.dailyByEntrepreneur = dailyByEntrepreneurPayload
       }
-      if (section === 'daily' && (shouldUseFunnelOrders || dataMetric === 'sales') && rateLimitErrors.length === 0) {
+      if (section === 'daily' && (shouldUseFunnelOrders || dataMetric === 'sales')) {
+        const failedEntrepreneurIds = new Set(rateLimitErrors.map((error) => error.id))
+        const cacheableTargets = dataMetric === 'sales'
+          ? targets.filter((ent) => !failedEntrepreneurIds.has(ent.id))
+          : rateLimitErrors.length === 0 ? targets : []
         const datesToCache = dailyPayload?.dates || []
-        await Promise.all(targets.flatMap((ent) => datesToCache.map((date: string) => {
+        await Promise.all(cacheableTargets.flatMap((ent) => datesToCache.map((date: string) => {
           const dayPayload = sliceDailyPayloadByDate(dailyByEntrepreneurPayload[ent.id], date)
           return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload, dailyCacheVariant(ent), dataMetric) : Promise.resolve()
         })))
