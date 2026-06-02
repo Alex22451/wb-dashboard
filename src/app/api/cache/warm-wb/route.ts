@@ -115,7 +115,9 @@ export async function GET(request: NextRequest) {
 
   const startedAt = Date.now()
   const warmedDates: string[] = []
+  const warmedSalesDates: string[] = []
   const cacheHitDates: string[] = []
+  const salesCacheHitDates: string[] = []
   const rateLimitErrors: any[] = []
   const adWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; totalSpend: number; errors: any[] }> = []
   const monthlyWarmups: Array<{ ok: boolean; status: number; cacheSource: string | null; months: number; errors: any[] }> = []
@@ -124,12 +126,13 @@ export async function GET(request: NextRequest) {
   let ok = true
   let status = 200
 
-  const requestDate = async (date: string, target?: WbTarget) => {
+  const requestDate = async (date: string, target?: WbTarget, metric: 'orders' | 'sales' = 'orders') => {
     const url = new URL('/api/wb-data', baseUrl)
     url.searchParams.set('entrepreneurId', target ? String(target.id) : 'all')
     url.searchParams.set('section', 'daily')
     url.searchParams.set('dateFrom', date)
     url.searchParams.set('dateTo', date)
+    if (metric === 'sales') url.searchParams.set('metric', 'sales')
     const forceRefresh = forceRefreshDates.has(date)
     if (forceRefresh) url.searchParams.set('refresh', '1')
     if (target) {
@@ -156,10 +159,12 @@ export async function GET(request: NextRequest) {
     }
     const dates = Array.isArray(json?.daily?.dates) ? json.daily.dates : []
     if (dates.includes(date) && (!json?.rateLimitErrors || json.rateLimitErrors.length === 0)) {
-      warmedDates.push(date)
+      if (metric === 'sales') warmedSalesDates.push(date)
+      else warmedDates.push(date)
     }
     if (json?.cacheSource === 'redis') {
-      cacheHitDates.push(date)
+      if (metric === 'sales') salesCacheHitDates.push(date)
+      else cacheHitDates.push(date)
     }
     const dailyByEntrepreneur = json?.dailyByEntrepreneur && typeof json.dailyByEntrepreneur === 'object'
       ? Object.keys(json.dailyByEntrepreneur).length
@@ -167,6 +172,7 @@ export async function GET(request: NextRequest) {
     entrepreneurs = Math.max(entrepreneurs, dailyByEntrepreneur)
     return {
       date,
+      metric,
       target: target ? { id: target.id, name: target.name } : { id: 0, name: 'admin' },
       ok: response.ok,
       status: response.status,
@@ -276,17 +282,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const batches: Array<Array<{ date: string; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }>> = []
+  const batches: Array<Array<{ date: string; metric: 'orders' | 'sales'; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }>> = []
   const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
-  for (let offset = 0; offset < warmDates.length; offset += batchSize) {
-    const batchDates = warmDates.slice(offset, offset + batchSize)
-    const batch = scope === 'all'
-      ? (await Promise.all(batchDates.flatMap((date) => allTargets.map((target) => requestDate(date, target)))))
-      : await Promise.all(batchDates.map((date) => requestDate(date)))
-    batches.push(batch)
-    const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
-    if (!batchFromRedis && offset + batchSize < warmDates.length) {
-      await sleep(WARM_BATCH_PAUSE_MS)
+  for (const metric of ['orders', 'sales'] as const) {
+    for (let offset = 0; offset < warmDates.length; offset += batchSize) {
+      const batchDates = warmDates.slice(offset, offset + batchSize)
+      const batch = scope === 'all'
+        ? (await Promise.all(batchDates.flatMap((date) => allTargets.map((target) => requestDate(date, target, metric)))))
+        : await Promise.all(batchDates.map((date) => requestDate(date, undefined, metric)))
+      batches.push(batch)
+      const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
+      if (!batchFromRedis && offset + batchSize < warmDates.length) {
+        await sleep(WARM_BATCH_PAUSE_MS)
+      }
     }
   }
 
@@ -306,12 +314,14 @@ export async function GET(request: NextRequest) {
     scope,
     period: { from, to },
     section: 'daily',
-    warmedSections: explicitDate ? ['daily'] : ['daily', 'monthly', 'production', 'ads'],
+    warmedSections: explicitDate ? ['daily', 'daily-sales'] : ['daily', 'daily-sales', 'monthly', 'production', 'ads'],
     ok,
     status,
     durationMs: Date.now() - startedAt,
     dates: warmedDates,
+    salesDates: warmedSalesDates,
     cacheHitDates,
+    salesCacheHitDates,
     forceRefreshDates: [...forceRefreshDates],
     entrepreneurs,
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',

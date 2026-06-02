@@ -28,8 +28,10 @@ function apiKeyFingerprint(apiKey: string): string {
   return createHash('sha256').update(normalizeApiKey(apiKey)).digest('hex').slice(0, 16)
 }
 
-function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:orders-v12:${dateFrom}:${dateTo}`
+type DataMetric = 'orders' | 'sales'
+
+function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string, metric: DataMetric): string {
+  return `${entId}:${apiKeyFingerprint(apiKey)}:${metric}-v13:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -78,9 +80,10 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
   return promise
 }
 
-function redisDailyKey(apiKey: string, date: string, variant = 'default') {
+function redisDailyKey(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
   const variantSuffix = variant === 'default' ? '' : `:${variant}`
-  return `wb:daily:v6:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  if (metric === 'orders') return `wb:daily:v6:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  return `wb:daily:sales:v1:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
 }
 
 function dailyCacheVariant(target: { useCategoryMapping?: boolean }) {
@@ -96,8 +99,8 @@ function redisDailyTtlSeconds(date: string) {
   return 180 * 24 * 60 * 60
 }
 
-async function readRedisDailyPayload(apiKey: string, date: string, variant = 'default'): Promise<any | null> {
-  const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date, variant)])
+async function readRedisDailyPayload(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders'): Promise<any | null> {
+  const raw = await redisCommand<string>(['GET', redisDailyKey(apiKey, date, variant, metric)])
   if (!raw || typeof raw !== 'string') return null
   try {
     const parsed = JSON.parse(raw)
@@ -108,14 +111,15 @@ async function readRedisDailyPayload(apiKey: string, date: string, variant = 'de
   }
 }
 
-async function writeRedisDailyPayload(apiKey: string, date: string, daily: any, variant = 'default') {
+async function writeRedisDailyPayload(apiKey: string, date: string, daily: any, variant = 'default', metric: DataMetric = 'orders') {
   await redisCommand([
     'SET',
-    redisDailyKey(apiKey, date, variant),
+    redisDailyKey(apiKey, date, variant, metric),
     JSON.stringify({
       date,
       fetchedAt: new Date().toISOString(),
-      source: 'wb-daily-payload-v3',
+      source: metric === 'orders' ? 'wb-daily-payload-v3' : 'wb-daily-sales-payload-v1',
+      metric,
       complete: true,
       daily,
     }),
@@ -136,23 +140,25 @@ function redisReportKey(
   section: string,
   targets: Array<{ id: number; wbApiKey: string }>,
   from: string,
-  to: string
+  to: string,
+  metric: DataMetric = 'orders',
 ) {
   const scope = targets
     .map((target) => `${target.id}:${apiKeyFingerprint(target.wbApiKey)}`)
     .sort()
     .join('|')
   const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
-  return `wb:report:${section}:v1:${scopeHash}:${from}:${to}`
+  return `wb:report:${section}:${metric}:v1:${scopeHash}:${from}:${to}`
 }
 
 async function readRedisReportResponse(
   section: string,
   targets: Array<{ id: number; wbApiKey: string }>,
   from: string,
-  to: string
+  to: string,
+  metric: DataMetric = 'orders',
 ): Promise<Record<string, any> | null> {
-  const raw = await redisCommand<string>(['GET', redisReportKey(section, targets, from, to)])
+  const raw = await redisCommand<string>(['GET', redisReportKey(section, targets, from, to, metric)])
   if (!raw || typeof raw !== 'string') return null
   try {
     const parsed = JSON.parse(raw)
@@ -168,17 +174,19 @@ async function writeRedisReportResponse(
   targets: Array<{ id: number; wbApiKey: string }>,
   from: string,
   to: string,
-  response: Record<string, any>
+  response: Record<string, any>,
+  metric: DataMetric = 'orders',
 ) {
   await redisCommand([
     'SET',
-    redisReportKey(section, targets, from, to),
+    redisReportKey(section, targets, from, to, metric),
     JSON.stringify({
       section,
       from,
       to,
       fetchedAt: new Date().toISOString(),
       source: 'wb-report-response-v1',
+      metric,
       response,
     }),
     'EX',
@@ -390,12 +398,13 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
 
 async function readMergedRedisDailyPayload(
   targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
-  dates: string[]
+  dates: string[],
+  metric: DataMetric = 'orders',
 ): Promise<any | null> {
   if (dates.length === 0 || targets.length === 0) return null
 
   const rows = await Promise.all(targets.flatMap((target) =>
-    dates.map((date) => readRedisDailyPayload(target.wbApiKey, date, dailyCacheVariant(target)))
+    dates.map((date) => readRedisDailyPayload(target.wbApiKey, date, dailyCacheVariant(target), metric))
   ))
   if (rows.some((row) => !row)) return null
   return mergeDailyPayloads(rows, dates)
@@ -403,12 +412,13 @@ async function readMergedRedisDailyPayload(
 
 async function readAvailableMergedRedisDailyPayload(
   targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
-  dates: string[]
+  dates: string[],
+  metric: DataMetric = 'orders',
 ): Promise<{ daily: any | null; present: number; missing: number; total: number }> {
   const total = targets.length * dates.length
   if (dates.length === 0 || targets.length === 0) return { daily: null, present: 0, missing: total, total }
 
-  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target))))
+  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)))
   let rawRows: unknown[] | null = null
 
   try {
@@ -420,7 +430,7 @@ async function readAvailableMergedRedisDailyPayload(
 
   if (!rawRows) {
     rawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target))]))
+      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)]))
     ))
   }
 
@@ -772,6 +782,15 @@ function saleReturnToOrder(record: any): any {
   }
 }
 
+function saleToOrder(record: any): any {
+  return {
+    ...record,
+    isSale: true,
+    isCancel: false,
+    odid: `sale:${record.saleID || record.srid || record.gNumber || `${record.supplierArticle || ''}:${record.nmId || ''}:${record.date || ''}`}`,
+  }
+}
+
 async function fetchFunnelProducts(apiKey: string, from: string, to: string): Promise<{ products: any[]; error?: string }> {
   const cacheKey = `funnel-products-positive-v2:${apiKeyFingerprint(apiKey)}:${from}:${to}`
   return cachedRequest(cacheKey, CACHE_TTL_DAILY, async () => {
@@ -992,6 +1011,8 @@ export async function GET(request: NextRequest) {
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
     const includeAdminAngelina = user.role === 'admin' && searchParams.get('includeAngelina') === '1'
+    const requestedMetric: DataMetric = searchParams.get('metric') === 'sales' ? 'sales' : 'orders'
+    const dataMetric: DataMetric = section === 'production' || section === 'supply' ? 'orders' : requestedMetric
 
     // Calculate date range based on section
     const mskOffset = 3 * 60 * 60 * 1000
@@ -1110,7 +1131,7 @@ export async function GET(request: NextRequest) {
     const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
     const shouldRefreshDailyCache = section === 'daily' && shouldRefreshReportCache
     if (reportCacheSection && !shouldRefreshReportCache) {
-      const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo)
+      const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo, dataMetric)
       if (cachedReport) {
         return NextResponse.json({
           ...cachedReport,
@@ -1140,13 +1161,13 @@ export async function GET(request: NextRequest) {
     const needMonthly = !section || section === 'monthly'
     const needProduction = !section || section === 'production'
     const needSupply = !section || section === 'supply'
-    const shouldUseFunnelOrders = !needSupply && (
+    const shouldUseFunnelOrders = dataMetric === 'orders' && !needSupply && (
       needDaily || needProduction || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
 
     if (section === 'production') {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
-      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates)
+      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, 'orders')
       if (cachedDaily.daily) {
         return NextResponse.json({
           rateLimitErrors: [],
@@ -1163,7 +1184,7 @@ export async function GET(request: NextRequest) {
 
     if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
-      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates)
+      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, dataMetric)
       if (cachedDaily.daily && cachedDaily.missing === 0) {
         return NextResponse.json({
           rateLimitErrors: [],
@@ -1181,7 +1202,7 @@ export async function GET(request: NextRequest) {
     if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
         ent,
-        daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent)),
+        daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent), dataMetric),
       })))
       if (cachedDailyRows.every((row) => row.daily)) {
         const dailyByEntrepreneur = Object.fromEntries(cachedDailyRows.map((row) => [row.ent.id, row.daily]))
@@ -1205,7 +1226,7 @@ export async function GET(request: NextRequest) {
       error?: string
       returnError?: string
     }> = await Promise.all(targets.map(async (ent) => {
-      const cacheKey = getCacheKey(ent.id, ent.wbApiKey, apiDateFrom, dateTo)
+      const cacheKey = getCacheKey(ent.id, ent.wbApiKey, apiDateFrom, dateTo, dataMetric)
 
       return cachedRequest(cacheKey, cacheTtl, async () => {
         const apiHeaders = { 'Authorization': wbAuthHeader(ent.wbApiKey), 'Content-Type': 'application/json' }
@@ -1248,6 +1269,45 @@ export async function GET(request: NextRequest) {
             fulfillmentOrders,
             returns: [],
             error: funnel.error,
+            returnError,
+          }
+        }
+
+        if (dataMetric === 'sales') {
+          try {
+            const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
+            const salesResponse = await fetch(salesUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+
+            if (salesResponse.status === 429 || salesResponse.status === 461) {
+              console.log(`WB Sales API rate limited for ${ent.name}, buyouts skipped`)
+              error = 'WB API разрешает только 1 запрос в минуту к выкупам. Подождите минуту и повторите.'
+            } else if (salesResponse.status === 401) {
+              console.log(`WB Sales API unauthorized for ${ent.name} (401)`)
+              error = 'Неверный API ключ для загрузки выкупов (401)'
+            } else if (salesResponse.ok) {
+              const allSales = await salesResponse.json()
+              if (Array.isArray(allSales)) {
+                orders = filterToDateRange(allSales, dateFrom, dateTo)
+                  .filter((sale) => !isReturnSale(sale))
+                  .map(saleToOrder)
+                fulfillmentOrders = orders
+              }
+            } else {
+              console.log(`WB Sales API error for ${ent.name}: ${salesResponse.status}`)
+              error = `Ошибка API выкупов (${salesResponse.status})`
+            }
+          } catch (_e) {
+            console.log(`WB Sales API network error for ${ent.name}`)
+            error = 'Ошибка сети при загрузке выкупов'
+          }
+
+          return {
+            entrepreneurId: ent.id,
+            entrepreneurName: ent.name,
+            orders,
+            fulfillmentOrders,
+            returns: [],
+            error,
             returnError,
           }
         }
@@ -1869,11 +1929,11 @@ export async function GET(request: NextRequest) {
         response.daily = dailyPayload
         response.dailyByEntrepreneur = dailyByEntrepreneurPayload
       }
-      if (section === 'daily' && shouldUseFunnelOrders && rateLimitErrors.length === 0) {
+      if (section === 'daily' && (shouldUseFunnelOrders || dataMetric === 'sales') && rateLimitErrors.length === 0) {
         const datesToCache = dailyPayload?.dates || []
         await Promise.all(targets.flatMap((ent) => datesToCache.map((date: string) => {
           const dayPayload = sliceDailyPayloadByDate(dailyByEntrepreneurPayload[ent.id], date)
-          return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload, dailyCacheVariant(ent)) : Promise.resolve()
+          return dayPayload ? writeRedisDailyPayload(ent.wbApiKey, date, dayPayload, dailyCacheVariant(ent), dataMetric) : Promise.resolve()
         })))
       }
     }
@@ -2204,7 +2264,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (reportCacheSection && rateLimitErrors.length === 0) {
-      await writeRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo, response)
+      await writeRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo, response, dataMetric)
     }
 
     return NextResponse.json(response)

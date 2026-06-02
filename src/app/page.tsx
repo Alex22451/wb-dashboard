@@ -140,6 +140,7 @@ type DailyResponse = {
 }
 
 type DashboardPeriod = 'yesterday' | 'week' | 'twoWeeks' | 'month'
+type DataMetric = 'orders' | 'sales'
 
 interface EntrepreneurInfo {
   id: number
@@ -249,7 +250,19 @@ function appendAngelinaParam(params: URLSearchParams, includeAngelina: boolean) 
   if (includeAngelina) params.set('includeAngelina', '1')
 }
 
-function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null, includeAngelina = false) {
+function appendMetricParam(params: URLSearchParams, dataMetric: DataMetric) {
+  if (dataMetric === 'sales') params.set('metric', 'sales')
+}
+
+function getMetricLabel(dataMetric: DataMetric) {
+  return dataMetric === 'sales' ? 'Выкупы' : 'Заказы'
+}
+
+function getMetricRevenueLabel(dataMetric: DataMetric) {
+  return dataMetric === 'sales' ? 'Выручка выкупов' : 'Выручка заказов'
+}
+
+function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[], user: AuthUser | null, includeAngelina = false, dataMetric: DataMetric = 'orders') {
   const selectedIds = selection === ALL_ENTREPRENEURS
     ? entrepreneurs.filter((ent) => ent.hasApiKey).map((ent) => String(ent.id))
     : selection.split(',').map((id) => id.trim()).filter(Boolean)
@@ -262,7 +275,7 @@ function getDailyCacheScope(selection: string, entrepreneurs: EntrepreneurInfo[]
       return `${id}:${ent?.name || ''}:${ent?.wbApiKey || ''}`
     })
     .join('|')
-    .concat(`::${userScope}${includeAngelina ? '::with-angelina' : ''}`)
+    .concat(`::${userScope}${includeAngelina ? '::with-angelina' : ''}::${dataMetric}`)
 }
 
 function dailyCacheKey(scope: string, date: string) {
@@ -351,6 +364,7 @@ function writeDailyResponseCache(
   date: string,
   response: DailyResponse,
   includeAngelina = false,
+  dataMetric: DataMetric = 'orders',
 ) {
   if (response.daily) writeDailyCache(cacheScope, date, response.daily)
   if (!response.dailyByEntrepreneur) return
@@ -358,7 +372,7 @@ function writeDailyResponseCache(
   for (const [entId, daily] of Object.entries(response.dailyByEntrepreneur)) {
     const ent = entrepreneurs.find((item) => String(item.id) === String(entId))
     if (!ent) continue
-    const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user, includeAngelina)
+    const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user, includeAngelina, dataMetric)
     writeDailyCache(singleScope, date, daily)
   }
 
@@ -367,7 +381,7 @@ function writeDailyResponseCache(
     for (const entId of selectedIds) {
       const daily = response.dailyByEntrepreneur[String(entId)]
       if (!daily) continue
-      const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user, includeAngelina)
+      const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user, includeAngelina, dataMetric)
       writeDailyCache(singleScope, date, daily)
     }
   }
@@ -910,13 +924,15 @@ function MultiEntrepreneurSelect({
 }
 
 // --- Dashboard Tab ---
-function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboardPeriod, onDashboardPeriodChange, dataSource, onLoad, loading, rateLimitErrors }: {
+function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboardPeriod, onDashboardPeriodChange, dataMetric, onDataMetricChange, dataSource, onLoad, loading, rateLimitErrors }: {
   data: DashboardData | null
   entrepreneurs: EntrepreneurInfo[]
   selectedEnt: string[]
   onSelectEnt: (ids: string[]) => void
   dashboardPeriod: DashboardPeriod
   onDashboardPeriodChange: (period: DashboardPeriod) => void
+  dataMetric: DataMetric
+  onDataMetricChange: (metric: DataMetric) => void
   dataSource?: 'excel' | 'wbapi'
   onLoad: () => void
   loading: boolean
@@ -1002,6 +1018,10 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
           <ToggleGroupItem value="twoWeeks" className="text-xs px-2 py-1">2 нед</ToggleGroupItem>
           <ToggleGroupItem value="month" className="text-xs px-2 py-1">Месяц</ToggleGroupItem>
         </ToggleGroup>
+        <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
+          <span className="whitespace-nowrap font-medium">Выкупы</span>
+          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => onDataMetricChange(checked ? 'sales' : 'orders')} />
+        </label>
         <Button onClick={onLoad} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
@@ -1079,7 +1099,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
                   {currentAd?.drr === null || currentAd?.drr === undefined ? '—' : `${currentAd.drr}%`}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  реклама {formatNumber(currentAd?.totalSpend || 0)} ₽ / заказы {formatNumber(currentPeriod?.revenue || 0)} ₽
+                  реклама {formatNumber(currentAd?.totalSpend || 0)} ₽ / {getMetricLabel(dataMetric).toLowerCase()} {formatNumber(currentPeriod?.revenue || 0)} ₽
                 </p>
               </CardContent>
             </Card>
@@ -1108,7 +1128,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Динамика заказов: {periodLabel[dashboardPeriod]} vs {prevPeriodLabel[dashboardPeriod]}</CardTitle>
+              <CardTitle className="text-base">Динамика: {getMetricLabel(dataMetric).toLowerCase()} — {periodLabel[dashboardPeriod]} vs {prevPeriodLabel[dashboardPeriod]}</CardTitle>
             </CardHeader>
             <CardContent>
               {comparisonChartData.length > 0 ? (
@@ -1136,7 +1156,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <CardTitle className="text-base">Заказы FBS / FBO</CardTitle>
+                  <CardTitle className="text-base">{getMetricLabel(dataMetric)} FBS / FBO</CardTitle>
                   <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="justify-start overflow-x-auto rounded-md border">
                     <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
                     <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
@@ -1212,7 +1232,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                Заказы по ИП за неделю
+                {getMetricLabel(dataMetric)} по ИП за неделю
                 <Badge variant="secondary" className="text-xs">WB API</Badge>
                 {data.weekDateFrom && data.weekDateTo && (
                   <span className="text-xs text-muted-foreground font-normal">
@@ -1424,7 +1444,7 @@ function getFulfillmentLabel(filter: 'all' | 'fbs' | 'fbo') {
 }
 
 // --- Data Table Component (shared) ---
-function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo' }) {
+function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo'; dataMetric?: DataMetric }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [sortDateIdx, setSortDateIdx] = useState<number | null>(null)
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
@@ -1530,13 +1550,14 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
     try {
       const XLSX = await import('xlsx')
       const filterName = getFulfillmentLabel(fulfillmentFilter)
+      const metricName = getMetricLabel(dataMetric)
       const headers = ['Категория', 'Товар', 'Тип строки', 'Итого', ...dates.map(formatDateShort)]
       const rows: Array<Record<string, string | number>> = []
 
       rows.push({
         Категория: 'ИТОГО',
         Товар: '',
-        'Тип строки': filterName,
+        'Тип строки': `${metricName} · ${filterName}`,
         Итого: grandTotal,
         ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), activeDateTotals[index] || 0])),
       })
@@ -1586,7 +1607,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 
       const from = dates[0] || 'period'
       const to = dates[dates.length - 1] || from
-      const filename = sanitizeFilenamePart(`wb-daily-${filterName}-${from}-${to}.xlsx`)
+      const filename = sanitizeFilenamePart(`wb-daily-${metricName}-${filterName}-${from}-${to}.xlsx`)
       XLSX.writeFile(workbook, filename)
     } catch (error) {
       console.error('Failed to export daily table to Excel', error)
@@ -1609,7 +1630,7 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Товары по дням{filterLabel}</h3>
+          <h3 className="text-sm font-semibold">{getMetricLabel(dataMetric)} по товарам и дням{filterLabel}</h3>
           <p className="text-xs text-muted-foreground">Таблица построена по текущему маппингу категорий WB.</p>
         </div>
         <Button
@@ -1813,6 +1834,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [fulfillmentFilter, setFulfillmentFilter] = useState<'all' | 'fbs' | 'fbo'>('all')
+  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
   // Default to yesterday in Moscow timezone (последний день = yesterday, not today)
   const getYesterday = () => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -1969,7 +1991,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
       const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina, dataMetric)
       const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
       const requestDay = async (date: string) => {
         const params = new URLSearchParams()
@@ -1978,6 +2000,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         params.set('dateFrom', date)
         params.set('dateTo', date)
         appendAngelinaParam(params, includeAngelina)
+        appendMetricParam(params, dataMetric)
 
         const res = await fetch(`/api/wb-data?${params.toString()}`)
         return { date, json: await res.json() }
@@ -2008,7 +2031,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           }
           if (json.daily && dayErrors.length === 0) {
             loadedDays.push(json.daily)
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, dataMetric)
             setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
@@ -2027,7 +2050,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         }
         if (json.daily) {
           loadedDays.push(json.daily)
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, dataMetric)
           setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
         }
       }
@@ -2038,7 +2061,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, mergeDailyResponses])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, dataMetric, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
 
@@ -2086,6 +2109,15 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           </div>
         )}
 
+        <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
+          <span className="whitespace-nowrap font-medium">Выкупы</span>
+          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
+            setDataMetric(checked ? 'sales' : 'orders')
+            setFetchedData(null)
+            setRateLimitErrors([])
+          }} />
+        </label>
+
         <Button onClick={() => fetchDailyData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
@@ -2118,7 +2150,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Card>
                 <CardContent className="pt-4 pb-4">
-                  <div className="text-xs text-muted-foreground mb-1">Всего заказов</div>
+                  <div className="text-xs text-muted-foreground mb-1">Всего: {getMetricLabel(dataMetric).toLowerCase()}</div>
                   <div className="text-xl font-bold">{formatNumber(Object.values(fetchedData.productTotals).reduce((s, v) => s + v, 0))}</div>
                 </CardContent>
               </Card>
@@ -2229,7 +2261,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
               </CardContent>
             </Card>
           )}
-          <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} />
+          <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} dataMetric={dataMetric} />
         </div>
       ) : (
         <EmptyState
@@ -2247,6 +2279,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
+  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
 
   const data = fetchedData
   const latestMonth = data?.monthStats[data.monthStats.length - 1]
@@ -2280,20 +2313,20 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
     const latest = readLatestReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope)
     if (!latest) return
     setFetchedData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt, includeAngelina])
+  }, [entrepreneurs, selectedEnt, includeAngelina, dataMetric])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     setRateLimitErrors([])
     try {
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
-      const cacheParams = 'section=monthly'
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
+      const cacheParams = `section=monthly:${dataMetric}`
       const cached = readReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope, cacheParams)
       if (cached) {
         setFetchedData(cached.data)
@@ -2305,6 +2338,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
       params.set('entrepreneurId', selection)
       params.set('section', 'monthly')
       appendAngelinaParam(params, includeAngelina)
+      appendMetricParam(params, dataMetric)
       const res = await fetch(`/api/wb-data?${params.toString()}`)
       const json = await res.json()
       const errors = json.rateLimitErrors || []
@@ -2318,7 +2352,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, entrepreneurs, includeAngelina])
+  }, [selectedEnt, entrepreneurs, includeAngelina, dataMetric])
 
   // NO auto-fetch on mount — only fetch when user clicks "Загрузить"
 
@@ -2347,6 +2381,14 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
             </>
           )}
         </Button>
+        <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
+          <span className="whitespace-nowrap font-medium">Выкупы</span>
+          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
+            setDataMetric(checked ? 'sales' : 'orders')
+            setFetchedData(null)
+            setRateLimitErrors([])
+          }} />
+        </label>
       </div>
 
       {loading && <Skeleton className="h-96 w-full" />}
@@ -2363,7 +2405,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">Заказы за период</div>
+                <div className="text-xs text-muted-foreground">{getMetricLabel(dataMetric)} за период</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(totalOrders)}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {periodLabel}; последний месяц: {latestMonth ? formatNumber(latestMonth.orders) : '—'}
@@ -2372,7 +2414,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">Выручка заказов</div>
+                <div className="text-xs text-muted-foreground">{getMetricRevenueLabel(dataMetric)}</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(totalRevenue))} ₽</div>
                 <div className="mt-1 text-xs text-muted-foreground">Период: {periodLabel}</div>
               </CardContent>
@@ -2381,12 +2423,12 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
               <CardContent className="pt-5">
                 <div className="text-xs text-muted-foreground">ДРР за период</div>
                 <div className="mt-1 text-2xl font-bold">{totalDrr === null ? '—' : `${totalDrr.toFixed(1)}%`}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Реклама / заказы; {periodLabel}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Реклама / {getMetricLabel(dataMetric).toLowerCase()}; {periodLabel}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">MoM / YoY по заказам</div>
+                <div className="text-xs text-muted-foreground">MoM / YoY: {getMetricLabel(dataMetric).toLowerCase()}</div>
                 <div className="mt-1 text-2xl font-bold">
                   {latestMonth?.momOrdersPct === null || latestMonth?.momOrdersPct === undefined ? '—' : `${latestMonth.momOrdersPct > 0 ? '+' : ''}${latestMonth.momOrdersPct.toFixed(1)}%`}
                 </div>
@@ -2400,11 +2442,11 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-md border bg-muted/20 p-3">
               <div className="font-medium">MoM</div>
-              <div className="mt-1 text-xs text-muted-foreground">Month over Month: сравнение заказов выбранного месяца с предыдущим месяцем.</div>
+              <div className="mt-1 text-xs text-muted-foreground">Month over Month: сравнение {getMetricLabel(dataMetric).toLowerCase()} выбранного месяца с предыдущим месяцем.</div>
             </div>
             <div className="rounded-md border bg-muted/20 p-3">
               <div className="font-medium">YoY</div>
-              <div className="mt-1 text-xs text-muted-foreground">Year over Year: сравнение заказов выбранного месяца с тем же месяцем прошлого года.</div>
+              <div className="mt-1 text-xs text-muted-foreground">Year over Year: сравнение {getMetricLabel(dataMetric).toLowerCase()} выбранного месяца с тем же месяцем прошлого года.</div>
             </div>
           </div>
 
@@ -2429,7 +2471,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                       contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
                     />
                     <Legend wrapperStyle={{ fontSize: '12px' }} />
-                    <Line yAxisId="orders" type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line yAxisId="orders" type="monotone" dataKey="orders" name={getMetricLabel(dataMetric)} stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
                     <Line yAxisId="drr" type="monotone" dataKey="drr" name="ДРР" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -2449,7 +2491,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                     <div key={row.id} className="rounded-md border p-3">
                       <div className="truncate text-sm font-medium">{row.name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        Пик: {formatMonthLabel(row.peakMonth)}, {formatNumber(row.peakOrders)} заказов
+                        Пик: {formatMonthLabel(row.peakMonth)}, {formatNumber(row.peakOrders)} {getMetricLabel(dataMetric).toLowerCase()}
                       </div>
                       <Badge variant="secondary" className="mt-2">x{row.uplift.toFixed(1)} к среднему</Badge>
                     </div>
@@ -2468,7 +2510,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
-                        <th className="px-3 py-2 text-right font-medium">Заказы</th>
+                        <th className="px-3 py-2 text-right font-medium">{getMetricLabel(dataMetric)}</th>
                         <th className="px-3 py-2 text-right font-medium">Выручка</th>
                         <th className="px-3 py-2 text-right font-medium">Реклама</th>
                         <th className="px-3 py-2 text-right font-medium">ДРР</th>
@@ -3742,6 +3784,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
+  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
 
   const getYesterday = () => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -3763,7 +3806,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
     const latest = readLatestReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope)
     if (!latest) return
     const [from, to] = latest.params.split(':')
@@ -3773,7 +3816,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     }
     setData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt, includeAngelina])
+  }, [entrepreneurs, selectedEnt, includeAngelina, dataMetric])
 
   const periodLabel = data?.period ? `${formatDateShort(data.period.from)} — ${formatDateShort(data.period.to)}` : ''
   const entRows = data?.entrepreneurs || []
@@ -3791,8 +3834,8 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     const from = overrideFrom || dateFrom
     const to = overrideTo || dateTo
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina)
-    const cacheParams = `${from}:${to}`
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
+    const cacheParams = `${from}:${to}:${dataMetric}`
     const cached = readReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope, cacheParams)
     if (cached) {
       setData(cached.data)
@@ -3817,6 +3860,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
       dailyParams.set('dateFrom', from)
       dailyParams.set('dateTo', to)
       appendAngelinaParam(dailyParams, includeAngelina)
+      appendMetricParam(dailyParams, dataMetric)
 
       const [adRes, dailyRes] = await Promise.all([
         fetch(`/api/ad-spend?${adParams.toString()}`),
@@ -3862,7 +3906,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     } finally {
       setLoading(false)
     }
-  }, [dateFrom, dateTo, selectedEnt, entrepreneurs, includeAngelina])
+  }, [dateFrom, dateTo, selectedEnt, entrepreneurs, includeAngelina, dataMetric])
 
   const applyQuickRange = (days: number) => {
     const range = getRangeFromYesterday(days)
@@ -3894,6 +3938,14 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           <ToggleGroupItem value="twoWeeks" className="text-xs px-3">2 недели</ToggleGroupItem>
           <ToggleGroupItem value="month" className="text-xs px-3">Месяц</ToggleGroupItem>
         </ToggleGroup>
+        <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
+          <span className="whitespace-nowrap font-medium">Выкупы</span>
+          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
+            setDataMetric(checked ? 'sales' : 'orders')
+            setData(null)
+            setRateLimitErrors([])
+          }} />
+        </label>
         <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
@@ -3938,7 +3990,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">Выручка заказов</div>
+                <div className="text-xs text-muted-foreground">{getMetricRevenueLabel(dataMetric)}</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(data.totalRevenue || 0))} ₽</div>
                 <div className="mt-1 text-xs text-muted-foreground">Тот же период</div>
               </CardContent>
@@ -4752,6 +4804,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [selectedDashEnt, setSelectedDashEnt] = useState<string[]>([]) // Empty = no auto-fetch
   const [dashboardPeriod, setDashboardPeriod] = useState<DashboardPeriod>('yesterday')
+  const [dashboardDataMetric, setDashboardDataMetric] = useState<DataMetric>('orders')
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
@@ -4877,7 +4930,7 @@ export default function Home() {
     try {
       const baseDashboard = createDashboardShell(selectedDashEnt, entrepreneurs)
       const selection = selectionToParam(selectedDashEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina, dashboardDataMetric)
       const dailyByDate = new Map<string, DailyOrdersData>()
       const adSpendByPeriod = new Map<DashboardPeriod, Record<number, number>>()
       const failedDates = new Set<string>()
@@ -5079,6 +5132,7 @@ export default function Home() {
         dayParams.set('dateFrom', date)
         dayParams.set('dateTo', date)
         appendAngelinaParam(dayParams, includeAngelina)
+        appendMetricParam(dayParams, dashboardDataMetric)
         const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
         return { date, json: await dayRes.json() }
       }
@@ -5096,7 +5150,7 @@ export default function Home() {
             failedDates.add(date)
           }
           if (dayJson.daily && dayErrors.length === 0) {
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, dashboardDataMetric)
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
@@ -5116,7 +5170,7 @@ export default function Home() {
           continue
         }
         if (dayJson.daily) {
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, dashboardDataMetric)
           dailyByDate.set(date, dayJson.daily)
           applyExactDashboard()
         }
@@ -5127,7 +5181,7 @@ export default function Home() {
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod, includeAngelina])
+  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod, includeAngelina, dashboardDataMetric])
 
   if (!authChecked) {
     return (
@@ -5149,7 +5203,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-base font-bold leading-tight sm:text-lg">WB Отчёты</h1>
-              <p className="hidden text-xs text-muted-foreground sm:block">Ежедневная аналитика заказов • 2026</p>
+              <p className="hidden text-xs text-muted-foreground sm:block">Ежедневная аналитика заказов и выкупов • 2026</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -5268,6 +5322,12 @@ export default function Home() {
               onSelectEnt={setSelectedDashEnt}
               dashboardPeriod={dashboardPeriod}
               onDashboardPeriodChange={setDashboardPeriod}
+              dataMetric={dashboardDataMetric}
+              onDataMetricChange={(metric) => {
+                setDashboardDataMetric(metric)
+                setDashboard(null)
+                setRateLimitErrors([])
+              }}
               dataSource={dataSource}
               onLoad={loadDashboardData}
               loading={dashboardLoading}
@@ -5318,7 +5378,7 @@ export default function Home() {
       <footer className="border-t mt-auto">
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-4">
           <p className="text-xs text-muted-foreground text-center">
-            WB Отчёты — Аналитика заказов Wildberries • 2026 • {entrepreneurs.length} ИП
+            WB Отчёты — Аналитика заказов и выкупов Wildberries • 2026 • {entrepreneurs.length} ИП
           </p>
         </div>
       </footer>
