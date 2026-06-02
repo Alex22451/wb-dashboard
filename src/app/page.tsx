@@ -1413,12 +1413,23 @@ function extractBaseName(name: string): string {
   return name.replace(/\s+\d{1,3}(х\d{1,3}| см)\s*$/, '').trim()
 }
 
+function sanitizeFilenamePart(value: string): string {
+  return value.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim()
+}
+
+function getFulfillmentLabel(filter: 'all' | 'fbs' | 'fbo') {
+  if (filter === 'fbs') return 'FBS'
+  if (filter === 'fbo') return 'FBO'
+  return 'Все'
+}
+
 // --- Data Table Component (shared) ---
 function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo' }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [sortDateIdx, setSortDateIdx] = useState<number | null>(null)
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
+  const [exportingExcel, setExportingExcel] = useState(false)
 
   // Select the appropriate pivot and totals based on filter
   const activePivot = fulfillmentFilter === 'fbs' ? data.fbsPivot
@@ -1514,6 +1525,76 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
     })
   }
 
+  const exportToExcel = async () => {
+    setExportingExcel(true)
+    try {
+      const XLSX = await import('xlsx')
+      const filterName = getFulfillmentLabel(fulfillmentFilter)
+      const headers = ['Категория', 'Товар', 'Тип строки', 'Итого', ...dates.map(formatDateShort)]
+      const rows: Array<Record<string, string | number>> = []
+
+      rows.push({
+        Категория: 'ИТОГО',
+        Товар: '',
+        'Тип строки': filterName,
+        Итого: grandTotal,
+        ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), activeDateTotals[index] || 0])),
+      })
+
+      for (const group of groupedProducts) {
+        if (group.total === 0) continue
+        const groupDateTotals = dates.map((_, index) =>
+          group.children.reduce((sum, product) => sum + (activePivot[product.id]?.[index] || 0), 0)
+        )
+
+        rows.push({
+          Категория: group.baseName,
+          Товар: '',
+          'Тип строки': group.children.length > 1 ? 'Категория' : 'Товар',
+          Итого: group.total,
+          ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), groupDateTotals[index] || 0])),
+        })
+
+        if (group.children.length > 1) {
+          const sortedChildren = group.children
+            .slice()
+            .sort((a, b) => (activeProductTotals?.[b.id] || 0) - (activeProductTotals?.[a.id] || 0))
+
+          for (const product of sortedChildren) {
+            const total = activeProductTotals?.[product.id] || 0
+            const productPivot = activePivot[product.id]
+            if (!productPivot || total === 0) continue
+            rows.push({
+              Категория: group.baseName,
+              Товар: product.name,
+              'Тип строки': 'Товар',
+              Итого: total,
+              ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), productPivot[index] || 0])),
+            })
+          }
+        }
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(rows, { header: headers })
+      worksheet['!cols'] = headers.map((header, index) => ({
+        wch: index === 0 ? 28 : index === 1 ? 42 : index === 2 ? 14 : 11,
+      }))
+      worksheet['!freeze'] = { xSplit: 4, ySplit: 1 }
+
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Ежедневные')
+
+      const from = dates[0] || 'period'
+      const to = dates[dates.length - 1] || from
+      const filename = sanitizeFilenamePart(`wb-daily-${filterName}-${from}-${to}.xlsx`)
+      XLSX.writeFile(workbook, filename)
+    } catch (error) {
+      console.error('Failed to export daily table to Excel', error)
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   if (dates.length === 0) {
     return (
       <div className="border rounded-lg p-8 text-center text-muted-foreground">
@@ -1526,6 +1607,28 @@ function DataTable({ data, fulfillmentFilter = 'all' }: { data: DailyOrdersData;
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Товары по дням{filterLabel}</h3>
+          <p className="text-xs text-muted-foreground">Таблица построена по текущему маппингу категорий WB.</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full gap-2 sm:w-auto"
+          onClick={exportToExcel}
+          disabled={exportingExcel || grandTotal === 0}
+        >
+          {exportingExcel ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          В Excel
+        </Button>
+      </div>
+
       {selectedChartTitle && (
         <Card>
           <CardHeader className="pb-2">
