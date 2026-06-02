@@ -30,6 +30,26 @@ function apiKeyFingerprint(apiKey: string): string {
 
 type DataMetric = 'orders' | 'sales'
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchWbStatistics(url: string, headers: Record<string, string>, timeoutMs = 30000, maxRetries = 3): Promise<Response> {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) })
+      if (response.status !== 429 && response.status !== 461 && response.status < 500) return response
+      if (attempt === maxRetries - 1) return response
+    } catch (error) {
+      lastError = error
+      if (attempt === maxRetries - 1) throw error
+    }
+    await sleep((attempt + 1) * 1500)
+  }
+  throw lastError || new Error('WB statistics request failed')
+}
+
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string, metric: DataMetric): string {
   return `${entId}:${apiKeyFingerprint(apiKey)}:${metric}-v13:${dateFrom}:${dateTo}`
 }
@@ -1215,9 +1235,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Fetch each entrepreneur independently. WB limits are per seller cabinet, so
-    // parallelizing different API keys avoids the admin "all IP" waterfall.
-    const results: Array<{
+    // Fetch each entrepreneur independently. Orders stay parallel because that path
+    // has been stable; sales are loaded sequentially because WB's sales endpoint is flaky.
+    const loadTarget = async (ent: WbTarget): Promise<{
       entrepreneurId: number
       entrepreneurName: string
       orders: any[]
@@ -1225,7 +1245,7 @@ export async function GET(request: NextRequest) {
       returns: any[]
       error?: string
       returnError?: string
-    }> = await Promise.all(targets.map(async (ent) => {
+    }> => {
       const cacheKey = getCacheKey(ent.id, ent.wbApiKey, apiDateFrom, dateTo, dataMetric)
 
       return cachedRequest(cacheKey, cacheTtl, async () => {
@@ -1246,7 +1266,7 @@ export async function GET(request: NextRequest) {
           if (needDaily || needProduction) {
             try {
               const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=1`
-              const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+              const response = await fetchWbStatistics(ordersUrl, apiHeaders)
               if (response.status === 429 || response.status === 461) {
                 returnError = 'WB API ограничил загрузку FBO/FBS. Подождите минуту и повторите.'
               } else if (response.status === 401) {
@@ -1276,7 +1296,7 @@ export async function GET(request: NextRequest) {
         if (dataMetric === 'sales') {
           try {
             const salesUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
-            const salesResponse = await fetch(salesUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+            const salesResponse = await fetchWbStatistics(salesUrl, apiHeaders, 45000, 4)
 
             if (salesResponse.status === 429 || salesResponse.status === 461) {
               console.log(`WB Sales API rate limited for ${ent.name}, buyouts skipped`)
@@ -1322,7 +1342,7 @@ export async function GET(request: NextRequest) {
           const ordersUrl = useExactSingleDayStats
             ? `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${requestedDateFrom}&flag=1`
             : `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${apiDateFrom}&flag=0`
-          const response = await fetch(ordersUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+          const response = await fetchWbStatistics(ordersUrl, apiHeaders)
 
           if (response.status === 429 || response.status === 461) {
             console.log(`WB API rate limited for ${ent.name}, skipping (429)`)
@@ -1350,7 +1370,7 @@ export async function GET(request: NextRequest) {
           const salesUrl = useExactSingleDayStats
             ? `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${requestedDateFrom}&flag=1`
             : `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${apiDateFrom}&flag=0`
-          const salesResponse = await fetch(salesUrl, { headers: apiHeaders, signal: AbortSignal.timeout(30000) })
+          const salesResponse = await fetchWbStatistics(salesUrl, apiHeaders, 45000, 4)
 
           if (salesResponse.status === 429 || salesResponse.status === 461) {
             console.log(`WB Sales API rate limited for ${ent.name}, returns skipped`)
@@ -1384,7 +1404,25 @@ export async function GET(request: NextRequest) {
           returnError,
         }
       }, !shouldUseFunnelOrders)
-    }))
+    }
+
+    const results: Array<{
+      entrepreneurId: number
+      entrepreneurName: string
+      orders: any[]
+      fulfillmentOrders?: any[]
+      returns: any[]
+      error?: string
+      returnError?: string
+    }> = dataMetric === 'sales'
+      ? []
+      : await Promise.all(targets.map(loadTarget))
+
+    if (dataMetric === 'sales') {
+      for (const ent of targets) {
+        results.push(await loadTarget(ent))
+      }
+    }
 
     // Collect all successful results with mapped types
     // warehouseType: "Склад продавца" = FBS, "Склад WB" = FBO

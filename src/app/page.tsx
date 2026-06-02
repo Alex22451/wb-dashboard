@@ -2127,14 +2127,17 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
 
           for (const { date, json } of batchResults) {
             const dayErrors = json.rateLimitErrors || []
+            const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
             if (dayErrors.length) {
               errors.push(...dayErrors)
-              removeDailyCache(cacheScope, date)
-              failedDates.push(date)
+              if (!canUseDaily) {
+                removeDailyCache(cacheScope, date)
+                failedDates.push(date)
+              }
             }
-            if (json.daily && dayErrors.length === 0) {
+            if (canUseDaily) {
               loadedDays.push(json.daily)
-              writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+              if (dayErrors.length === 0) writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
               updateData(mergeDailyResponses(loadedDays, loadedDates()))
             }
           }
@@ -2146,14 +2149,17 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
           const { json } = await requestDay(date)
           const dayErrors = json.rateLimitErrors || []
+          const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
           if (dayErrors.length) {
             errors.push(...dayErrors)
-            removeDailyCache(cacheScope, date)
-            continue
+            if (!canUseDaily) {
+              removeDailyCache(cacheScope, date)
+              continue
+            }
           }
-          if (json.daily) {
+          if (canUseDaily) {
             loadedDays.push(json.daily)
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+            if (dayErrors.length === 0) writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
             updateData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
