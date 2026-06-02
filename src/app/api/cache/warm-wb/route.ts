@@ -103,6 +103,8 @@ export async function GET(request: NextRequest) {
   }
 
   const scope = request.nextUrl.searchParams.get('scope') === 'admin' ? 'admin' : 'all'
+  const requestedMetric = request.nextUrl.searchParams.get('metric')
+  const metricMode: 'all' | 'orders' | 'sales' = requestedMetric === 'orders' || requestedMetric === 'sales' ? requestedMetric : 'all'
   const explicitDate = request.nextUrl.searchParams.get('date') || ''
   const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || (scope === 'all' ? 30 : 14))
   const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), 30) : (scope === 'all' ? 30 : 14)
@@ -283,8 +285,9 @@ export async function GET(request: NextRequest) {
   }
 
   const batches: Array<Array<{ date: string; metric: 'orders' | 'sales'; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }>> = []
-  const batchSize = scope === 'all' ? 1 : WARM_BATCH_SIZE
-  for (const metric of ['orders', 'sales'] as const) {
+  let lastDailyBatchFromRedis = true
+
+  const warmMetricDates = async (metric: 'orders' | 'sales', batchSize: number) => {
     for (let offset = 0; offset < warmDates.length; offset += batchSize) {
       const batchDates = warmDates.slice(offset, offset + batchSize)
       const batch = scope === 'all'
@@ -292,13 +295,36 @@ export async function GET(request: NextRequest) {
         : await Promise.all(batchDates.map((date) => requestDate(date, undefined, metric)))
       batches.push(batch)
       const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
+      lastDailyBatchFromRedis = batchFromRedis
       if (!batchFromRedis && offset + batchSize < warmDates.length) {
         await sleep(WARM_BATCH_PAUSE_MS)
       }
     }
   }
 
-  if (!explicitDate) {
+  if (metricMode !== 'sales') {
+    await warmMetricDates('orders', scope === 'all' ? 1 : WARM_BATCH_SIZE)
+  }
+
+  const salesWarmDates = metricMode === 'sales' || explicitDate
+    ? warmDates
+    : warmDates.filter((date) => forceRefreshDates.has(date))
+  if (metricMode !== 'orders' && salesWarmDates.length > 0) {
+    if (!lastDailyBatchFromRedis) await sleep(WARM_BATCH_PAUSE_MS)
+    for (let index = 0; index < salesWarmDates.length; index++) {
+      const date = salesWarmDates[index]
+      const batch = scope === 'all'
+        ? (await Promise.all(allTargets.map((target) => requestDate(date, target, 'sales'))))
+        : [await requestDate(date, undefined, 'sales')]
+      batches.push(batch)
+      const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
+      if (!batchFromRedis && index < salesWarmDates.length - 1) {
+        await sleep(WARM_BATCH_PAUSE_MS)
+      }
+    }
+  }
+
+  if (!explicitDate && metricMode !== 'sales') {
     monthlyWarmups.push(await requestMonthly())
     for (const days of [7, 14, 30]) {
       productionWarmups.push(await requestProductionPeriod(days))
@@ -312,6 +338,7 @@ export async function GET(request: NextRequest) {
     warmedAt: new Date().toISOString(),
     moscowSchedule: '07:00',
     scope,
+    metricMode,
     period: { from, to },
     section: 'daily',
     warmedSections: explicitDate ? ['daily', 'daily-sales'] : ['daily', 'daily-sales', 'monthly', 'production', 'ads'],
@@ -323,6 +350,7 @@ export async function GET(request: NextRequest) {
     cacheHitDates,
     salesCacheHitDates,
     forceRefreshDates: [...forceRefreshDates],
+    salesWarmDates,
     entrepreneurs,
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
     rateLimitErrors,

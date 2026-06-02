@@ -403,6 +403,35 @@ function sumDailyRevenue(data: DailyOrdersData | null): number {
   return data?.revenueDateTotals?.reduce((sum, value) => sum + Number(value || 0), 0) || 0
 }
 
+function getDailyProductIdByName(data: DailyOrdersData | null): Map<string, number> {
+  return new Map((data?.products || []).map((product) => [product.name, product.id]))
+}
+
+function getDailyProductTotalByName(data: DailyOrdersData | null, productName: string, fulfillmentFilter: 'all' | 'fbs' | 'fbo' = 'all'): number {
+  const productId = getDailyProductIdByName(data).get(productName)
+  if (productId === undefined) return 0
+  const totals = fulfillmentFilter === 'fbs' ? data?.fbsProductTotals
+    : fulfillmentFilter === 'fbo' ? data?.fboProductTotals
+    : data?.productTotals
+  return Number(totals?.[productId] || 0)
+}
+
+function getDailyProductDateValueByName(data: DailyOrdersData | null, productName: string, dateIdx: number, fulfillmentFilter: 'all' | 'fbs' | 'fbo' = 'all'): number {
+  const productId = getDailyProductIdByName(data).get(productName)
+  if (productId === undefined) return 0
+  const pivot = fulfillmentFilter === 'fbs' ? data?.fbsPivot
+    : fulfillmentFilter === 'fbo' ? data?.fboPivot
+    : data?.pivot
+  return Number(pivot?.[productId]?.[dateIdx] || 0)
+}
+
+function getDailyDateTotals(data: DailyOrdersData | null, fulfillmentFilter: 'all' | 'fbs' | 'fbo' = 'all'): number[] {
+  if (!data) return []
+  if (fulfillmentFilter === 'fbs') return data.fbsDateTotals || []
+  if (fulfillmentFilter === 'fbo') return data.fboDateTotals || []
+  return data.dateTotals || []
+}
+
 function cloneDashboard(data: DashboardData): DashboardData {
   return JSON.parse(JSON.stringify(data))
 }
@@ -523,6 +552,8 @@ interface AdSpendData {
   period?: { from: string; to: string }
   totalSpend?: number
   totalRevenue?: number
+  totalBuyoutRevenue?: number
+  buyoutDrr?: number | null
   drr?: number | null
   source?: string
   entrepreneurs: {
@@ -530,6 +561,8 @@ interface AdSpendData {
     name: string
     spend?: number
     revenue?: number
+    buyoutRevenue?: number
+    buyoutDrr?: number | null
     drr?: number | null
     campaigns?: { advertId: number; name: string; spend: number; revenue?: number; orders?: number; drr?: number | null }[]
   }[]
@@ -924,15 +957,16 @@ function MultiEntrepreneurSelect({
 }
 
 // --- Dashboard Tab ---
-function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboardPeriod, onDashboardPeriodChange, dataMetric, onDataMetricChange, dataSource, onLoad, loading, rateLimitErrors }: {
+function DashboardTab({ data, buyoutData, showBuyouts, entrepreneurs, selectedEnt, onSelectEnt, dashboardPeriod, onDashboardPeriodChange, onShowBuyoutsChange, dataSource, onLoad, loading, rateLimitErrors }: {
   data: DashboardData | null
+  buyoutData: DashboardData | null
+  showBuyouts: boolean
   entrepreneurs: EntrepreneurInfo[]
   selectedEnt: string[]
   onSelectEnt: (ids: string[]) => void
   dashboardPeriod: DashboardPeriod
   onDashboardPeriodChange: (period: DashboardPeriod) => void
-  dataMetric: DataMetric
-  onDataMetricChange: (metric: DataMetric) => void
+  onShowBuyoutsChange: (enabled: boolean) => void
   dataSource?: 'excel' | 'wbapi'
   onLoad: () => void
   loading: boolean
@@ -1020,9 +1054,9 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
         </ToggleGroup>
         <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
           <span className="whitespace-nowrap font-medium">Выкупы</span>
-          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => onDataMetricChange(checked ? 'sales' : 'orders')} />
+          <Switch checked={showBuyouts} onCheckedChange={onShowBuyoutsChange} />
         </label>
-        <Button onClick={onLoad} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
+        <Button onClick={() => onLoad()} disabled={loading || selectedEnt.length === 0} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -1064,9 +1098,10 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{formatNumber(currentPeriod?.total || 0)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {formatDateShort(currentPeriod?.dateFrom || '')} — {formatDateShort(currentPeriod?.dateTo || '')}
-                </p>
+	                <p className="text-xs text-muted-foreground mt-1">
+	                  {formatDateShort(currentPeriod?.dateFrom || '')} — {formatDateShort(currentPeriod?.dateTo || '')}
+	                </p>
+                  {showBuyouts && <p className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(buyoutData?.periodStats[dashboardPeriod]?.total || 0)}</p>}
               </CardContent>
             </Card>
 
@@ -1099,8 +1134,13 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
                   {currentAd?.drr === null || currentAd?.drr === undefined ? '—' : `${currentAd.drr}%`}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  реклама {formatNumber(currentAd?.totalSpend || 0)} ₽ / {getMetricLabel(dataMetric).toLowerCase()} {formatNumber(currentPeriod?.revenue || 0)} ₽
+                  реклама {formatNumber(currentAd?.totalSpend || 0)} ₽ / заказы {formatNumber(currentPeriod?.revenue || 0)} ₽
                 </p>
+                {showBuyouts && (
+                  <p className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    по выкупам: {buyoutData?.periodStats[dashboardPeriod]?.revenue ? `${Math.round(((currentAd?.totalSpend || 0) / buyoutData.periodStats[dashboardPeriod].revenue) * 1000) / 10}%` : '—'}
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1128,7 +1168,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Динамика: {getMetricLabel(dataMetric).toLowerCase()} — {periodLabel[dashboardPeriod]} vs {prevPeriodLabel[dashboardPeriod]}</CardTitle>
+              <CardTitle className="text-base">Динамика заказов{showBuyouts ? ' и выкупов' : ''}: {periodLabel[dashboardPeriod]} vs {prevPeriodLabel[dashboardPeriod]}</CardTitle>
             </CardHeader>
             <CardContent>
               {comparisonChartData.length > 0 ? (
@@ -1156,7 +1196,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <CardTitle className="text-base">{getMetricLabel(dataMetric)} FBS / FBO</CardTitle>
+                  <CardTitle className="text-base">Заказы FBS / FBO{showBuyouts ? ' + выкупы' : ''}</CardTitle>
                   <ToggleGroup type="single" value={dashboardPeriod} onValueChange={handlePeriodChange} className="justify-start overflow-x-auto rounded-md border">
                     <ToggleGroupItem value="yesterday" className="text-xs px-2 py-1">Вчера</ToggleGroupItem>
                     <ToggleGroupItem value="week" className="text-xs px-2 py-1">Неделя</ToggleGroupItem>
@@ -1176,14 +1216,16 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Card className="border-border">
                     <CardContent className="pt-3 pb-3">
-                      <div className="text-xs text-muted-foreground mb-1">Всего</div>
-                      <div className="text-xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
+	                      <div className="text-xs text-muted-foreground mb-1">Всего</div>
+	                      <div className="text-xl font-bold">{formatNumber(data.periodStats[dashboardPeriod].total)}</div>
+                        {showBuyouts && <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(buyoutData?.periodStats[dashboardPeriod]?.total || 0)}</div>}
                     </CardContent>
                   </Card>
                   <Card className="border-amber-200 dark:border-amber-800">
                     <CardContent className="pt-3 pb-3">
-                      <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS</div>
-                      <div className="text-xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.periodStats[dashboardPeriod].fbs)}</div>
+	                      <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS</div>
+	                      <div className="text-xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(data.periodStats[dashboardPeriod].fbs)}</div>
+                        {showBuyouts && <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(buyoutData?.periodStats[dashboardPeriod]?.fbs || 0)}</div>}
                       <div className="text-xs text-muted-foreground">
                         {data.periodStats[dashboardPeriod].total > 0 ? (data.periodStats[dashboardPeriod].fbs / data.periodStats[dashboardPeriod].total * 100).toFixed(1) : 0}%
                       </div>
@@ -1191,8 +1233,9 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
                   </Card>
                   <Card className="border-sky-200 dark:border-sky-800">
                     <CardContent className="pt-3 pb-3">
-                      <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO</div>
-                      <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.periodStats[dashboardPeriod].fbo)}</div>
+	                      <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO</div>
+	                      <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(data.periodStats[dashboardPeriod].fbo)}</div>
+                        {showBuyouts && <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(buyoutData?.periodStats[dashboardPeriod]?.fbo || 0)}</div>}
                       <div className="text-xs text-muted-foreground">
                         {data.periodStats[dashboardPeriod].total > 0 ? (data.periodStats[dashboardPeriod].fbo / data.periodStats[dashboardPeriod].total * 100).toFixed(1) : 0}%
                       </div>
@@ -1232,7 +1275,7 @@ function DashboardTab({ data, entrepreneurs, selectedEnt, onSelectEnt, dashboard
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                {getMetricLabel(dataMetric)} по ИП за неделю
+                Заказы по ИП за неделю{showBuyouts ? ' + выкупы' : ''}
                 <Badge variant="secondary" className="text-xs">WB API</Badge>
                 {data.weekDateFrom && data.weekDateTo && (
                   <span className="text-xs text-muted-foreground font-normal">
@@ -1444,7 +1487,7 @@ function getFulfillmentLabel(filter: 'all' | 'fbs' | 'fbo') {
 }
 
 // --- Data Table Component (shared) ---
-function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo'; dataMetric?: DataMetric }) {
+function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuyouts = false }: { data: DailyOrdersData; fulfillmentFilter?: 'all' | 'fbs' | 'fbo'; buyoutData?: DailyOrdersData | null; showBuyouts?: boolean }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [sortDateIdx, setSortDateIdx] = useState<number | null>(null)
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
@@ -1467,6 +1510,8 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
 
   const { dates, products } = data
   const grandTotal = activeProductTotals ? Object.values(activeProductTotals).reduce((s, v) => s + v, 0) : 0
+  const buyoutDateTotals = showBuyouts ? getDailyDateTotals(buyoutData, fulfillmentFilter) : []
+  const grandBuyoutTotal = buyoutDateTotals.reduce((sum, value) => sum + Number(value || 0), 0)
   const maxCellValue = Math.max(1, ...Object.values(activePivot).flatMap((row) => Object.values(row)))
   const heatStyle = (value: number | undefined) => {
     const val = value || 0
@@ -1550,16 +1595,34 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
     try {
       const XLSX = await import('xlsx')
       const filterName = getFulfillmentLabel(fulfillmentFilter)
-      const metricName = getMetricLabel(dataMetric)
-      const headers = ['Категория', 'Товар', 'Тип строки', 'Итого', ...dates.map(formatDateShort)]
+      const headers = showBuyouts
+        ? ['Категория', 'Товар', 'Тип строки', 'Итого заказы', 'Итого выкупы', ...dates.flatMap((date) => [`${formatDateShort(date)} заказы`, `${formatDateShort(date)} выкупы`])]
+        : ['Категория', 'Товар', 'Тип строки', 'Итого', ...dates.map(formatDateShort)]
       const rows: Array<Record<string, string | number>> = []
 
-      rows.push({
+      const buildDateCells = (productName: string | null, dateValues: number[], buyoutValues: number[]) => {
+        if (showBuyouts) {
+          return Object.fromEntries(dates.flatMap((date, index) => [
+            [`${formatDateShort(date)} заказы`, dateValues[index] || 0],
+            [`${formatDateShort(date)} выкупы`, buyoutValues[index] || 0],
+          ]))
+        }
+        return Object.fromEntries(dates.map((date, index) => [formatDateShort(date), dateValues[index] || 0]))
+      }
+
+      rows.push(showBuyouts ? {
         Категория: 'ИТОГО',
         Товар: '',
-        'Тип строки': `${metricName} · ${filterName}`,
+        'Тип строки': filterName,
+        'Итого заказы': grandTotal,
+        'Итого выкупы': grandBuyoutTotal,
+        ...buildDateCells(null, activeDateTotals, buyoutDateTotals),
+      } : {
+        Категория: 'ИТОГО',
+        Товар: '',
+        'Тип строки': filterName,
         Итого: grandTotal,
-        ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), activeDateTotals[index] || 0])),
+        ...buildDateCells(null, activeDateTotals, []),
       })
 
       for (const group of groupedProducts) {
@@ -1567,13 +1630,24 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
         const groupDateTotals = dates.map((_, index) =>
           group.children.reduce((sum, product) => sum + (activePivot[product.id]?.[index] || 0), 0)
         )
+        const groupBuyoutDateTotals = showBuyouts ? dates.map((_, index) =>
+          group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, index, fulfillmentFilter), 0)
+        ) : []
+        const groupBuyoutTotal = group.children.reduce((sum, product) => sum + getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter), 0)
 
-        rows.push({
+        rows.push(showBuyouts ? {
+          Категория: group.baseName,
+          Товар: '',
+          'Тип строки': group.children.length > 1 ? 'Категория' : 'Товар',
+          'Итого заказы': group.total,
+          'Итого выкупы': groupBuyoutTotal,
+          ...buildDateCells(null, groupDateTotals, groupBuyoutDateTotals),
+        } : {
           Категория: group.baseName,
           Товар: '',
           'Тип строки': group.children.length > 1 ? 'Категория' : 'Товар',
           Итого: group.total,
-          ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), groupDateTotals[index] || 0])),
+          ...buildDateCells(null, groupDateTotals, []),
         })
 
         if (group.children.length > 1) {
@@ -1585,12 +1659,21 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
             const total = activeProductTotals?.[product.id] || 0
             const productPivot = activePivot[product.id]
             if (!productPivot || total === 0) continue
-            rows.push({
+            const productBuyoutDateTotals = showBuyouts ? dates.map((_, index) => getDailyProductDateValueByName(buyoutData, product.name, index, fulfillmentFilter)) : []
+            const productBuyoutTotal = getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter)
+            rows.push(showBuyouts ? {
+              Категория: group.baseName,
+              Товар: product.name,
+              'Тип строки': 'Товар',
+              'Итого заказы': total,
+              'Итого выкупы': productBuyoutTotal,
+              ...buildDateCells(product.name, dates.map((_, index) => productPivot[index] || 0), productBuyoutDateTotals),
+            } : {
               Категория: group.baseName,
               Товар: product.name,
               'Тип строки': 'Товар',
               Итого: total,
-              ...Object.fromEntries(dates.map((date, index) => [formatDateShort(date), productPivot[index] || 0])),
+              ...buildDateCells(product.name, dates.map((_, index) => productPivot[index] || 0), []),
             })
           }
         }
@@ -1607,7 +1690,7 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
 
       const from = dates[0] || 'period'
       const to = dates[dates.length - 1] || from
-      const filename = sanitizeFilenamePart(`wb-daily-${metricName}-${filterName}-${from}-${to}.xlsx`)
+      const filename = sanitizeFilenamePart(`wb-daily-${showBuyouts ? 'Заказы-Выкупы' : 'Заказы'}-${filterName}-${from}-${to}.xlsx`)
       XLSX.writeFile(workbook, filename)
     } catch (error) {
       console.error('Failed to export daily table to Excel', error)
@@ -1625,12 +1708,22 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
   }
 
   const filterLabel = fulfillmentFilter === 'fbs' ? ' (FBS)' : fulfillmentFilter === 'fbo' ? ' (FBO)' : ''
+  const renderOrderBuyoutValue = (orders: number, buyouts: number) => (
+    <div className="leading-tight">
+      <div>{orders ? formatNumber(orders) : '—'}</div>
+      {showBuyouts && (
+        <div className="mt-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+          В {buyouts ? formatNumber(buyouts) : '—'}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">{getMetricLabel(dataMetric)} по товарам и дням{filterLabel}</h3>
+          <h3 className="text-sm font-semibold">Заказы по товарам и дням{showBuyouts ? ' + выкупы' : ''}{filterLabel}</h3>
           <p className="text-xs text-muted-foreground">Таблица построена по текущему маппингу категорий WB.</p>
         </div>
         <Button
@@ -1692,13 +1785,18 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
                   <div className="break-words text-sm font-medium">{group.baseName}</div>
                   <div className="text-xs text-muted-foreground">{group.children.length > 1 ? `${group.children.length} вариантов` : filterLabel.trim()}</div>
                 </div>
-                <div className="text-right text-lg font-bold">{formatNumber(group.total)}</div>
+                <div className="text-right text-lg font-bold">
+                  <div>{formatNumber(group.total)}</div>
+                  {showBuyouts && <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(group.children.reduce((sum, product) => sum + getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter), 0))}</div>}
+                </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {dates.map((date, index) => (
                   <div key={date} className="rounded-md border px-2 py-1.5" style={heatStyle(groupDateTotals[index])}>
                     <div className="text-[10px] text-muted-foreground">{formatDateShort(date)}</div>
-                    <div className="text-sm font-semibold">{groupDateTotals[index] || '—'}</div>
+                    <div className="text-sm font-semibold">
+                      {renderOrderBuyoutValue(groupDateTotals[index] || 0, group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, index, fulfillmentFilter), 0))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1726,9 +1824,9 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
           <tbody>
             <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold">
               <td className="sticky left-0 z-10 bg-emerald-50 px-2 py-2 dark:bg-emerald-950/20 sm:px-3">ИТОГО{filterLabel}</td>
-              <td className="bg-emerald-50 px-2 py-2 text-right font-bold dark:bg-emerald-950/20 sm:px-3">{formatNumber(grandTotal)}</td>
+              <td className="bg-emerald-50 px-2 py-2 text-right font-bold dark:bg-emerald-950/20 sm:px-3">{renderOrderBuyoutValue(grandTotal, grandBuyoutTotal)}</td>
               {dates.map((d, i) => (
-                <td key={d} className="px-2 py-2 text-right sm:px-3">{formatNumber(activeDateTotals[i] || 0)}</td>
+                <td key={d} className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(activeDateTotals[i] || 0, buyoutDateTotals[i] || 0)}</td>
               ))}
             </tr>
             {groupedProducts.map((group) => {
@@ -1751,12 +1849,12 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
                     <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">
                       <button type="button" className="text-left hover:underline" onClick={() => selectProductChart(p.id)}>{p.name}</button>
                     </td>
-                    <td className="px-2 py-2 text-right font-medium sm:px-3">{formatNumber(total)}</td>
+                    <td className="px-2 py-2 text-right font-medium sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter))}</td>
                     {dates.map((d, i) => {
                       const val = productPivot[i]
                       return (
                         <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
-                          {val || '—'}
+                          {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter))}
                         </td>
                       )
                     })}
@@ -1783,10 +1881,10 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
                         <span className="text-xs text-muted-foreground">({group.children.length})</span>
                       </div>
                     </td>
-                    <td className="px-2 py-2 text-right font-semibold sm:px-3">{formatNumber(group.total)}</td>
+                    <td className="px-2 py-2 text-right font-semibold sm:px-3">{renderOrderBuyoutValue(group.total, group.children.reduce((sum, product) => sum + getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter), 0))}</td>
                     {dates.map((d, i) => (
                       <td key={d} style={heatStyle(groupDateTotals[i])} className="px-2 py-2 text-right font-medium sm:px-3">
-                        {groupDateTotals[i] || '—'}
+                        {renderOrderBuyoutValue(groupDateTotals[i] || 0, group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, i, fulfillmentFilter), 0))}
                       </td>
                     ))}
                   </tr>
@@ -1804,12 +1902,12 @@ function DataTable({ data, fulfillmentFilter = 'all', dataMetric = 'orders' }: {
                           <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
                             <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => selectProductChart(p.id)}>{sizePart}</button>
                           </td>
-                          <td className="px-2 py-2 text-right sm:px-3">{formatNumber(total)}</td>
+                          <td className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter))}</td>
                           {dates.map((d, i) => {
                             const val = productPivot[i]
                             return (
                               <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
-                                {val || '—'}
+                                {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter))}
                               </td>
                             )
                           })}
@@ -1834,7 +1932,8 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
   const [fulfillmentFilter, setFulfillmentFilter] = useState<'all' | 'fbs' | 'fbo'>('all')
-  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
+  const [showBuyouts, setShowBuyouts] = useState(false)
+  const [buyoutData, setBuyoutData] = useState<DailyOrdersData | null>(null)
   // Default to yesterday in Moscow timezone (последний день = yesterday, not today)
   const getYesterday = () => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -1980,80 +2079,88 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
     }
   }, [])
 
-  const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
+  const fetchDailyData = useCallback(async (overrideFrom?: string, overrideTo?: string, metricMode: 'all' | DataMetric = 'all') => {
     setLoading(true)
     setRateLimitErrors([])
-    setFetchedData(null)
+    if (metricMode !== 'sales') setFetchedData(null)
+    if (metricMode !== 'orders') setBuyoutData(null)
     try {
       const df = overrideFrom ?? (dateMode === 'single' ? singleDate : dateFrom)
       const dt = overrideTo ?? (dateMode === 'single' ? singleDate : dateTo)
       const dates = dateMode === 'range' ? getClientDateRange(df, dt) : [df]
-      const loadedDays: DailyOrdersData[] = []
       const errors: RateLimitError[] = []
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina, dataMetric)
-      const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
-      const requestDay = async (date: string) => {
-        const params = new URLSearchParams()
-        params.set('entrepreneurId', selection)
-        params.set('section', 'daily')
-        params.set('dateFrom', date)
-        params.set('dateTo', date)
-        appendAngelinaParam(params, includeAngelina)
-        appendMetricParam(params, dataMetric)
 
-        const res = await fetch(`/api/wb-data?${params.toString()}`)
-        return { date, json: await res.json() }
-      }
+      const loadMetric = async (metric: DataMetric, updateData: (data: DailyOrdersData) => void) => {
+        const loadedDays: DailyOrdersData[] = []
+        const cacheScope = getDailyCacheScope(selection, entrepreneurs, user, includeAngelina, metric)
+        const loadedDates = () => dates.filter((date) => loadedDays.some((day) => day.dates.includes(date)))
+        const requestDay = async (date: string) => {
+          const params = new URLSearchParams()
+          params.set('entrepreneurId', selection)
+          params.set('section', 'daily')
+          params.set('dateFrom', date)
+          params.set('dateTo', date)
+          appendAngelinaParam(params, includeAngelina)
+          appendMetricParam(params, metric)
 
-      const uncachedDates: string[] = []
-      for (const date of dates) {
-        const cached = readDailyCache(cacheScope, date)
-        if (cached) {
-          loadedDays.push(cached)
-          setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
-          continue
+          const res = await fetch(`/api/wb-data?${params.toString()}`)
+          return { date, json: await res.json() }
         }
-        uncachedDates.push(date)
-      }
 
-      const failedDates: string[] = []
-      for (let offset = 0; offset < uncachedDates.length; offset += DAILY_REQUEST_BATCH_SIZE) {
-        const batch = uncachedDates.slice(offset, offset + DAILY_REQUEST_BATCH_SIZE)
-        const batchResults = await Promise.all(batch.map(requestDay))
+        const uncachedDates: string[] = []
+        for (const date of dates) {
+          const cached = readDailyCache(cacheScope, date)
+          if (cached) {
+            loadedDays.push(cached)
+            updateData(mergeDailyResponses(loadedDays, loadedDates()))
+            continue
+          }
+          uncachedDates.push(date)
+        }
 
-        for (const { date, json } of batchResults) {
+        const failedDates: string[] = []
+        const batchSize = metric === 'sales' ? 1 : DAILY_REQUEST_BATCH_SIZE
+        for (let offset = 0; offset < uncachedDates.length; offset += batchSize) {
+          const batch = uncachedDates.slice(offset, offset + batchSize)
+          const batchResults = await Promise.all(batch.map(requestDay))
+
+          for (const { date, json } of batchResults) {
+            const dayErrors = json.rateLimitErrors || []
+            if (dayErrors.length) {
+              errors.push(...dayErrors)
+              removeDailyCache(cacheScope, date)
+              failedDates.push(date)
+            }
+            if (json.daily && dayErrors.length === 0) {
+              loadedDays.push(json.daily)
+              writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+              updateData(mergeDailyResponses(loadedDays, loadedDates()))
+            }
+          }
+          const batchFromRedis = batchResults.every(({ json }) => json.cacheSource === 'redis')
+          if (!batchFromRedis && offset + batchSize < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
+        }
+
+        for (const date of failedDates) {
+          await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
+          const { json } = await requestDay(date)
           const dayErrors = json.rateLimitErrors || []
           if (dayErrors.length) {
             errors.push(...dayErrors)
             removeDailyCache(cacheScope, date)
-            failedDates.push(date)
+            continue
           }
-          if (json.daily && dayErrors.length === 0) {
+          if (json.daily) {
             loadedDays.push(json.daily)
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, dataMetric)
-            setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+            updateData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
-        const batchFromRedis = batchResults.every(({ json }) => json.cacheSource === 'redis')
-        if (!batchFromRedis && offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
       }
 
-      for (const date of failedDates) {
-        await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
-        const { json } = await requestDay(date)
-        const dayErrors = json.rateLimitErrors || []
-        if (dayErrors.length) {
-          errors.push(...dayErrors)
-          removeDailyCache(cacheScope, date)
-          continue
-        }
-        if (json.daily) {
-          loadedDays.push(json.daily)
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, dataMetric)
-          setFetchedData(mergeDailyResponses(loadedDays, loadedDates()))
-        }
-      }
+      if (metricMode !== 'sales') await loadMetric('orders', setFetchedData)
+      if (showBuyouts && metricMode !== 'orders') await loadMetric('sales', setBuyoutData)
 
       setRateLimitErrors(errors)
     } catch (e) {
@@ -2061,9 +2168,13 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, dataMetric, mergeDailyResponses])
+  }, [selectedEnt, dateMode, singleDate, dateFrom, dateTo, entrepreneurs, user, includeAngelina, showBuyouts, mergeDailyResponses])
 
   // NO auto-fetch on mount — only fetch when user clicks "Показать"
+  useEffect(() => {
+    if (!showBuyouts || !fetchedData || buyoutData || loading) return
+    fetchDailyData(undefined, undefined, 'sales')
+  }, [showBuyouts, fetchedData, buyoutData, loading, fetchDailyData])
 
   return (
     <div className="space-y-4">
@@ -2111,9 +2222,9 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
 
         <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
           <span className="whitespace-nowrap font-medium">Выкупы</span>
-          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
-            setDataMetric(checked ? 'sales' : 'orders')
-            setFetchedData(null)
+          <Switch checked={showBuyouts} onCheckedChange={(checked) => {
+            setShowBuyouts(checked)
+            if (!checked) setBuyoutData(null)
             setRateLimitErrors([])
           }} />
         </label>
@@ -2150,20 +2261,23 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Card>
                 <CardContent className="pt-4 pb-4">
-                  <div className="text-xs text-muted-foreground mb-1">Всего: {getMetricLabel(dataMetric).toLowerCase()}</div>
+                  <div className="text-xs text-muted-foreground mb-1">Всего</div>
                   <div className="text-xl font-bold">{formatNumber(Object.values(fetchedData.productTotals).reduce((s, v) => s + v, 0))}</div>
+                  {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.productTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
               </Card>
               <Card className="border-amber-200 dark:border-amber-800">
                 <CardContent className="pt-4 pb-4">
                   <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS (склад продавца)</div>
                   <div className="text-xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(Object.values(fetchedData.fbsProductTotals).reduce((s, v) => s + v, 0))}</div>
+                  {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.fbsProductTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
               </Card>
               <Card className="border-sky-200 dark:border-sky-800">
                 <CardContent className="pt-4 pb-4">
                   <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO (склад WB)</div>
                   <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(Object.values(fetchedData.fboProductTotals).reduce((s, v) => s + v, 0))}</div>
+                  {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.fboProductTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
               </Card>
             </div>
@@ -2179,7 +2293,10 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                     <div key={date} className="rounded-md border p-3">
                       <div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium">
                         <span>{formatDateFull(date)}</span>
-                        <span>{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                        <span className="text-right">
+                          <span className="block">{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                          {showBuyouts && <span className="block text-xs text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.dateTotals?.[fetchedData.dates.indexOf(date)] || 0)}</span>}
+                        </span>
                       </div>
                       <div className="space-y-1">
                         {fetchedData.entrepreneurs.map((ent) => {
@@ -2191,6 +2308,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                               <span className="truncate text-muted-foreground">{ent.name}</span>
                               <span className="text-right">
                                 <span className="block font-semibold">{formatNumber(total)}</span>
+                                {showBuyouts && <span className="block text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.entrepreneurDailyData?.[date]?.[ent.id] || 0)}</span>}
                                 <span className="block text-[11px] text-muted-foreground">
                                   <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
                                   <span className="mx-1">/</span>
@@ -2204,6 +2322,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                           <span className="font-medium">Итого</span>
                           <span className="text-right">
                             <span className="block font-semibold">{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
+                            {showBuyouts && <span className="block text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.dateTotals?.[fetchedData.dates.indexOf(date)] || 0)}</span>}
                             <span className="block text-[11px] text-muted-foreground">
                               <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
                               <span className="mx-1">/</span>
@@ -2237,6 +2356,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                             return (
                               <td key={ent.id} className="px-3 py-2 text-right">
                                 <div className="font-medium">{formatNumber(total)}</div>
+                                {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.entrepreneurDailyData?.[date]?.[ent.id] || 0)}</div>}
                                 <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
                                   <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
                                   <span className="mx-1">/</span>
@@ -2247,6 +2367,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                           })}
                           <td className="px-3 py-2 text-right">
                             <div className="font-semibold">{formatNumber(fetchedData.dateTotals[dateIdx] || 0)}</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.dateTotals?.[dateIdx] || 0)}</div>}
                             <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
                               <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[dateIdx] || 0)}</span>
                               <span className="mx-1">/</span>
@@ -2261,7 +2382,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
               </CardContent>
             </Card>
           )}
-          <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} dataMetric={dataMetric} />
+          <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} buyoutData={buyoutData} showBuyouts={showBuyouts} />
         </div>
       ) : (
         <EmptyState
@@ -2279,7 +2400,8 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
-  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
+  const [showBuyouts, setShowBuyouts] = useState(false)
+  const [buyoutData, setBuyoutData] = useState<MonthlyData | null>(null)
 
   const data = fetchedData
   const latestMonth = data?.monthStats[data.monthStats.length - 1]
@@ -2290,9 +2412,13 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
   const totalRevenue = data?.monthStats.reduce((sum, month) => sum + month.revenue, 0) || 0
   const totalAdSpend = data?.monthStats.reduce((sum, month) => sum + month.adSpend, 0) || 0
   const totalDrr = totalRevenue > 0 ? (totalAdSpend / totalRevenue) * 100 : null
+  const totalBuyouts = buyoutData?.monthStats.reduce((sum, month) => sum + month.orders, 0) || 0
+  const totalBuyoutRevenue = buyoutData?.monthStats.reduce((sum, month) => sum + month.revenue, 0) || 0
+  const totalBuyoutDrr = totalBuyoutRevenue > 0 ? (totalAdSpend / totalBuyoutRevenue) * 100 : null
   const trendData = data ? data.monthStats.map((month) => ({
     month: formatMonthLabel(month.month),
     orders: month.orders,
+    buyouts: buyoutData?.monthStats.find((row) => row.month === month.month)?.orders || undefined,
     adSpend: Math.round(month.adSpend),
     drr: month.drr === null ? undefined : Number(month.drr.toFixed(1)),
     mom: month.momOrdersPct === null ? undefined : Number(month.momOrdersPct.toFixed(1)),
@@ -2308,53 +2434,68 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     const total = data.months.reduce((sum, month) => sum + (data.monthlyData[month]?.[ent.id] || 0), 0)
     const revenue = data.months.reduce((sum, month) => sum + (data.monthlyRevenue[month]?.[ent.id] || 0), 0)
     const adSpend = data.months.reduce((sum, month) => sum + (data.adSpendByMonth[month]?.[ent.id] || 0), 0)
-    return { ...ent, total, revenue, adSpend, drr: revenue > 0 ? (adSpend / revenue) * 100 : null }
+    const buyoutTotal = buyoutData?.months.reduce((sum, month) => sum + (buyoutData.monthlyData[month]?.[ent.id] || 0), 0) || 0
+    const buyoutRevenue = buyoutData?.months.reduce((sum, month) => sum + (buyoutData.monthlyRevenue[month]?.[ent.id] || 0), 0) || 0
+    return { ...ent, total, revenue, adSpend, drr: revenue > 0 ? (adSpend / revenue) * 100 : null, buyoutTotal, buyoutRevenue, buyoutDrr: buyoutRevenue > 0 ? (adSpend / buyoutRevenue) * 100 : null }
   }).sort((a, b) => b.total - a.total) : []
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, 'orders')
     const latest = readLatestReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope)
     if (!latest) return
     setFetchedData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt, includeAngelina, dataMetric])
+  }, [entrepreneurs, selectedEnt, includeAngelina])
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (metricMode: 'all' | DataMetric = 'all') => {
     setLoading(true)
     setRateLimitErrors([])
+    if (metricMode !== 'orders') setBuyoutData(null)
     try {
       const selection = selectionToParam(selectedEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
-      const cacheParams = `section=monthly:${dataMetric}`
-      const cached = readReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope, cacheParams)
-      if (cached) {
-        setFetchedData(cached.data)
-        setRateLimitErrors(cached.errors || [])
-        return
+
+      const loadMetric = async (metric: DataMetric, updateData: (data: MonthlyData) => void) => {
+        const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, metric)
+        const cacheParams = `section=monthly:${metric}`
+        const cached = readReportCache<{ data: MonthlyData; errors: RateLimitError[] }>('monthly', cacheScope, cacheParams)
+        if (cached) {
+          updateData(cached.data)
+          return cached.errors || []
+        }
+
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selection)
+        params.set('section', 'monthly')
+        appendAngelinaParam(params, includeAngelina)
+        appendMetricParam(params, metric)
+        const res = await fetch(`/api/wb-data?${params.toString()}`)
+        const json = await res.json()
+        const errors = json.rateLimitErrors || []
+        if (json.monthly) {
+          updateData(json.monthly)
+          if (errors.length === 0) writeReportCache('monthly', cacheScope, cacheParams, { data: json.monthly, errors })
+        }
+        return errors
       }
 
-      const params = new URLSearchParams()
-      params.set('entrepreneurId', selection)
-      params.set('section', 'monthly')
-      appendAngelinaParam(params, includeAngelina)
-      appendMetricParam(params, dataMetric)
-      const res = await fetch(`/api/wb-data?${params.toString()}`)
-      const json = await res.json()
-      const errors = json.rateLimitErrors || []
-      if (json.monthly) {
-        setFetchedData(json.monthly)
-        if (errors.length === 0) writeReportCache('monthly', cacheScope, cacheParams, { data: json.monthly, errors })
-      }
+      const errors = [
+        ...(metricMode !== 'sales' ? await loadMetric('orders', setFetchedData) : []),
+        ...(showBuyouts && metricMode !== 'orders' ? await loadMetric('sales', setBuyoutData) : []),
+      ]
       setRateLimitErrors(errors)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [selectedEnt, entrepreneurs, includeAngelina, dataMetric])
+  }, [selectedEnt, entrepreneurs, includeAngelina, showBuyouts])
 
   // NO auto-fetch on mount — only fetch when user clicks "Загрузить"
+  useEffect(() => {
+    if (!showBuyouts || !fetchedData || buyoutData || loading) return
+    fetchData('sales')
+  }, [showBuyouts, fetchedData, buyoutData, loading, fetchData])
 
   return (
     <div className="space-y-6">
@@ -2368,7 +2509,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           className="w-full sm:w-64"
         />
 
-        <Button onClick={fetchData} disabled={loading} className="w-full gap-2 sm:w-auto">
+        <Button onClick={() => fetchData()} disabled={loading} className="w-full gap-2 sm:w-auto">
           {loading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -2383,9 +2524,9 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
         </Button>
         <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
           <span className="whitespace-nowrap font-medium">Выкупы</span>
-          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
-            setDataMetric(checked ? 'sales' : 'orders')
-            setFetchedData(null)
+          <Switch checked={showBuyouts} onCheckedChange={(checked) => {
+            setShowBuyouts(checked)
+            if (!checked) setBuyoutData(null)
             setRateLimitErrors([])
           }} />
         </label>
@@ -2405,8 +2546,9 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">{getMetricLabel(dataMetric)} за период</div>
+                <div className="text-xs text-muted-foreground">Заказы за период</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(totalOrders)}</div>
+                {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(totalBuyouts)}</div>}
                 <div className="mt-1 text-xs text-muted-foreground">
                   {periodLabel}; последний месяц: {latestMonth ? formatNumber(latestMonth.orders) : '—'}
                 </div>
@@ -2414,8 +2556,9 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">{getMetricRevenueLabel(dataMetric)}</div>
+                <div className="text-xs text-muted-foreground">Выручка заказов</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(totalRevenue))} ₽</div>
+                {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Math.round(totalBuyoutRevenue))} ₽</div>}
                 <div className="mt-1 text-xs text-muted-foreground">Период: {periodLabel}</div>
               </CardContent>
             </Card>
@@ -2423,12 +2566,12 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
               <CardContent className="pt-5">
                 <div className="text-xs text-muted-foreground">ДРР за период</div>
                 <div className="mt-1 text-2xl font-bold">{totalDrr === null ? '—' : `${totalDrr.toFixed(1)}%`}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Реклама / {getMetricLabel(dataMetric).toLowerCase()}; {periodLabel}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Реклама / заказы; {showBuyouts && totalBuyoutDrr !== null ? `выкупы: ${totalBuyoutDrr.toFixed(1)}%` : periodLabel}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">MoM / YoY: {getMetricLabel(dataMetric).toLowerCase()}</div>
+                <div className="text-xs text-muted-foreground">MoM / YoY по заказам</div>
                 <div className="mt-1 text-2xl font-bold">
                   {latestMonth?.momOrdersPct === null || latestMonth?.momOrdersPct === undefined ? '—' : `${latestMonth.momOrdersPct > 0 ? '+' : ''}${latestMonth.momOrdersPct.toFixed(1)}%`}
                 </div>
@@ -2442,11 +2585,11 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-md border bg-muted/20 p-3">
               <div className="font-medium">MoM</div>
-              <div className="mt-1 text-xs text-muted-foreground">Month over Month: сравнение {getMetricLabel(dataMetric).toLowerCase()} выбранного месяца с предыдущим месяцем.</div>
+              <div className="mt-1 text-xs text-muted-foreground">Month over Month: сравнение заказов выбранного месяца с предыдущим месяцем.</div>
             </div>
             <div className="rounded-md border bg-muted/20 p-3">
               <div className="font-medium">YoY</div>
-              <div className="mt-1 text-xs text-muted-foreground">Year over Year: сравнение {getMetricLabel(dataMetric).toLowerCase()} выбранного месяца с тем же месяцем прошлого года.</div>
+              <div className="mt-1 text-xs text-muted-foreground">Year over Year: сравнение заказов выбранного месяца с тем же месяцем прошлого года.</div>
             </div>
           </div>
 
@@ -2471,7 +2614,8 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                       contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
                     />
                     <Legend wrapperStyle={{ fontSize: '12px' }} />
-                    <Line yAxisId="orders" type="monotone" dataKey="orders" name={getMetricLabel(dataMetric)} stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line yAxisId="orders" type="monotone" dataKey="orders" name="Заказы" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
+                    {showBuyouts && <Line yAxisId="orders" type="monotone" dataKey="buyouts" name="Выкупы" stroke="#059669" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3 }} />}
                     <Line yAxisId="drr" type="monotone" dataKey="drr" name="ДРР" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -2491,7 +2635,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                     <div key={row.id} className="rounded-md border p-3">
                       <div className="truncate text-sm font-medium">{row.name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        Пик: {formatMonthLabel(row.peakMonth)}, {formatNumber(row.peakOrders)} {getMetricLabel(dataMetric).toLowerCase()}
+                        Пик: {formatMonthLabel(row.peakMonth)}, {formatNumber(row.peakOrders)} заказов
                       </div>
                       <Badge variant="secondary" className="mt-2">x{row.uplift.toFixed(1)} к среднему</Badge>
                     </div>
@@ -2510,7 +2654,7 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-medium">ИП</th>
-                        <th className="px-3 py-2 text-right font-medium">{getMetricLabel(dataMetric)}</th>
+                        <th className="px-3 py-2 text-right font-medium">Заказы</th>
                         <th className="px-3 py-2 text-right font-medium">Выручка</th>
                         <th className="px-3 py-2 text-right font-medium">Реклама</th>
                         <th className="px-3 py-2 text-right font-medium">ДРР</th>
@@ -2520,10 +2664,19 @@ function MonthlyTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                       {entTableData.map((ent) => (
                         <tr key={ent.id} className="border-b">
                           <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">{ent.name}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(ent.total)}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(ent.revenue))} ₽</td>
+                          <td className="px-3 py-2 text-right">
+                            <div>{formatNumber(ent.total)}</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(ent.buyoutTotal)}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <div>{formatNumber(Math.round(ent.revenue))} ₽</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(Math.round(ent.buyoutRevenue))} ₽</div>}
+                          </td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(ent.adSpend))} ₽</td>
-                          <td className="px-3 py-2 text-right">{ent.drr === null ? '—' : `${ent.drr.toFixed(1)}%`}</td>
+                          <td className="px-3 py-2 text-right">
+                            <div>{ent.drr === null ? '—' : `${ent.drr.toFixed(1)}%`}</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {ent.buyoutDrr === null ? '—' : `${ent.buyoutDrr.toFixed(1)}%`}</div>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -3784,7 +3937,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
   const [loading, setLoading] = useState(false)
   const [selectedEnt, setSelectedEnt] = useState<string[]>([ALL_ENTREPRENEURS])
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
-  const [dataMetric, setDataMetric] = useState<DataMetric>('orders')
+  const [showBuyouts, setShowBuyouts] = useState(false)
 
   const getYesterday = () => {
     const mskOffset = 3 * 60 * 60 * 1000
@@ -3806,7 +3959,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
 
   useEffect(() => {
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, 'orders')
     const latest = readLatestReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope)
     if (!latest) return
     const [from, to] = latest.params.split(':')
@@ -3816,7 +3969,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     }
     setData(latest.data.data)
     setRateLimitErrors(latest.data.errors || [])
-  }, [entrepreneurs, selectedEnt, includeAngelina, dataMetric])
+  }, [entrepreneurs, selectedEnt, includeAngelina])
 
   const periodLabel = data?.period ? `${formatDateShort(data.period.from)} — ${formatDateShort(data.period.to)}` : ''
   const entRows = data?.entrepreneurs || []
@@ -3828,14 +3981,15 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     name: ent.name,
     spend: Math.round(ent.spend || 0),
     revenue: Math.round(ent.revenue || 0),
+    buyoutRevenue: Math.round(ent.buyoutRevenue || 0),
   }))
 
   const fetchData = useCallback(async (overrideFrom?: string, overrideTo?: string) => {
     const from = overrideFrom || dateFrom
     const to = overrideTo || dateTo
     const selection = selectionToParam(selectedEnt)
-    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, dataMetric)
-    const cacheParams = `${from}:${to}:${dataMetric}`
+    const cacheScope = getDailyCacheScope(selection, entrepreneurs, null, includeAngelina, showBuyouts ? 'sales' : 'orders')
+    const cacheParams = `${from}:${to}:${showBuyouts ? 'with-buyouts' : 'orders'}`
     const cached = readReportCache<{ data: AdSpendData; errors: RateLimitError[] }>('ads', cacheScope, cacheParams)
     if (cached) {
       setData(cached.data)
@@ -3860,14 +4014,21 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
       dailyParams.set('dateFrom', from)
       dailyParams.set('dateTo', to)
       appendAngelinaParam(dailyParams, includeAngelina)
-      appendMetricParam(dailyParams, dataMetric)
+      const buyoutParams = new URLSearchParams(dailyParams)
+      appendMetricParam(buyoutParams, 'sales')
 
-      const [adRes, dailyRes] = await Promise.all([
+      const [adRes, dailyRes, buyoutRes] = await Promise.all([
         fetch(`/api/ad-spend?${adParams.toString()}`),
         fetch(`/api/wb-data?${dailyParams.toString()}`),
+        showBuyouts ? fetch(`/api/wb-data?${buyoutParams.toString()}`) : Promise.resolve(null),
       ])
-      const [adJson, dailyJson] = await Promise.all([adRes.json(), dailyRes.json()])
+      const [adJson, dailyJson, buyoutJson] = await Promise.all([
+        adRes.json(),
+        dailyRes.json(),
+        buyoutRes ? buyoutRes.json() : Promise.resolve(null),
+      ])
       const dailyRevenueByEntrepreneur: Record<number, number> = {}
+      const buyoutRevenueByEntrepreneur: Record<number, number> = {}
 
       for (const [date, rows] of Object.entries(dailyJson.daily?.entrepreneurDailyRevenue || {})) {
         if (date < from || date > to) continue
@@ -3875,18 +4036,28 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
           dailyRevenueByEntrepreneur[Number(entId)] = (dailyRevenueByEntrepreneur[Number(entId)] || 0) + Number(revenue || 0)
         }
       }
+      for (const [date, rows] of Object.entries(buyoutJson?.daily?.entrepreneurDailyRevenue || {})) {
+        if (date < from || date > to) continue
+        for (const [entId, revenue] of Object.entries(rows as Record<string, number>)) {
+          buyoutRevenueByEntrepreneur[Number(entId)] = (buyoutRevenueByEntrepreneur[Number(entId)] || 0) + Number(revenue || 0)
+        }
+      }
 
       const enrichedEntrepreneurs = (adJson.entrepreneurs || []).map((ent: AdSpendData['entrepreneurs'][number]) => {
         const revenue = dailyRevenueByEntrepreneur[ent.id] || 0
+        const buyoutRevenue = buyoutRevenueByEntrepreneur[ent.id] || 0
         const spend = Number(ent.spend || 0)
         return {
           ...ent,
           revenue,
+          buyoutRevenue,
           drr: revenue > 0 ? Math.round((spend / revenue) * 1000) / 10 : null,
+          buyoutDrr: buyoutRevenue > 0 ? Math.round((spend / buyoutRevenue) * 1000) / 10 : null,
         }
       })
       const totalSpend = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.spend || 0), 0)
       const totalRevenue = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.revenue || 0), 0)
+      const totalBuyoutRevenue = enrichedEntrepreneurs.reduce((sum: number, ent: AdSpendData['entrepreneurs'][number]) => sum + Number(ent.buyoutRevenue || 0), 0)
 
       const nextData = {
         ...adJson,
@@ -3895,9 +4066,11 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
         grouped: adJson.grouped || {},
         totalSpend,
         totalRevenue,
+        totalBuyoutRevenue,
         drr: totalRevenue > 0 ? Math.round((totalSpend / totalRevenue) * 1000) / 10 : null,
+        buyoutDrr: totalBuyoutRevenue > 0 ? Math.round((totalSpend / totalBuyoutRevenue) * 1000) / 10 : null,
       }
-      const errors = [...(adJson.errors || []), ...(dailyJson.rateLimitErrors || [])]
+      const errors = [...(adJson.errors || []), ...(dailyJson.rateLimitErrors || []), ...(buyoutJson?.rateLimitErrors || [])]
       setData(nextData)
       setRateLimitErrors(errors)
       if (errors.length === 0) writeReportCache('ads', cacheScope, cacheParams, { data: nextData, errors })
@@ -3906,7 +4079,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
     } finally {
       setLoading(false)
     }
-  }, [dateFrom, dateTo, selectedEnt, entrepreneurs, includeAngelina, dataMetric])
+  }, [dateFrom, dateTo, selectedEnt, entrepreneurs, includeAngelina, showBuyouts])
 
   const applyQuickRange = (days: number) => {
     const range = getRangeFromYesterday(days)
@@ -3940,8 +4113,8 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
         </ToggleGroup>
         <label className="flex w-full items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-xs sm:w-auto">
           <span className="whitespace-nowrap font-medium">Выкупы</span>
-          <Switch checked={dataMetric === 'sales'} onCheckedChange={(checked) => {
-            setDataMetric(checked ? 'sales' : 'orders')
+          <Switch checked={showBuyouts} onCheckedChange={(checked) => {
+            setShowBuyouts(checked)
             setData(null)
             setRateLimitErrors([])
           }} />
@@ -3990,9 +4163,10 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
             </Card>
             <Card>
               <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">{getMetricRevenueLabel(dataMetric)}</div>
+                <div className="text-xs text-muted-foreground">Выручка заказов</div>
                 <div className="mt-1 text-2xl font-bold">{formatNumber(Math.round(data.totalRevenue || 0))} ₽</div>
                 <div className="mt-1 text-xs text-muted-foreground">Тот же период</div>
+                {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Math.round(data.totalBuyoutRevenue || 0))} ₽</div>}
               </CardContent>
             </Card>
             <Card>
@@ -4000,6 +4174,7 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                 <div className="text-xs text-muted-foreground">ДРР</div>
                 <div className="mt-1 text-2xl font-bold">{data.drr === null || data.drr === undefined ? '—' : `${data.drr}%`}</div>
                 <div className="mt-1 text-xs text-muted-foreground">Реклама / выручка</div>
+                {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">По выкупам: {data.buyoutDrr === null || data.buyoutDrr === undefined ? '—' : `${data.buyoutDrr}%`}</div>}
               </CardContent>
             </Card>
           </div>
@@ -4022,10 +4197,11 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}к`} />
                   <Tooltip formatter={(value: number) => `${formatNumber(value)} ₽`} contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Bar dataKey="spend" name="Реклама" fill="#f59e0b" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="revenue" name="Выручка" fill="#10b981" radius={[2, 2, 0, 0]} />
-                </BarChart>
+	                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+	                  <Bar dataKey="spend" name="Реклама" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+	                  <Bar dataKey="revenue" name="Выручка" fill="#10b981" radius={[2, 2, 0, 0]} />
+	                  {showBuyouts && <Bar dataKey="buyoutRevenue" name="Выручка выкупов" fill="#059669" radius={[2, 2, 0, 0]} />}
+	                </BarChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -4050,15 +4226,27 @@ function AdSpendTab({ entrepreneurs, includeAngelina }: { entrepreneurs: Entrepr
                     <tr key={ent.id} className="border-b hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2 sticky left-0 bg-background z-10 font-medium">{ent.name}</td>
                       <td className="text-right px-3 py-2">{formatNumber(Math.round(ent.spend || 0))} ₽</td>
-                      <td className="text-right px-3 py-2">{formatNumber(Math.round(ent.revenue || 0))} ₽</td>
-                      <td className="text-right px-3 py-2 font-medium">{ent.drr === null || ent.drr === undefined ? '—' : `${ent.drr}%`}</td>
+	                      <td className="text-right px-3 py-2">
+                            <div>{formatNumber(Math.round(ent.revenue || 0))} ₽</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(Math.round(ent.buyoutRevenue || 0))} ₽</div>}
+                          </td>
+	                      <td className="text-right px-3 py-2 font-medium">
+                            <div>{ent.drr === null || ent.drr === undefined ? '—' : `${ent.drr}%`}</div>
+                            {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {ent.buyoutDrr === null || ent.buyoutDrr === undefined ? '—' : `${ent.buyoutDrr}%`}</div>}
+                          </td>
                     </tr>
                   ))}
                   <tr className="bg-emerald-50 dark:bg-emerald-950/20 font-semibold">
                     <td className="px-3 py-2 sticky left-0 bg-emerald-50 dark:bg-emerald-950/20 z-10">ИТОГО</td>
                     <td className="text-right px-3 py-2">{formatNumber(Math.round(data.totalSpend || 0))} ₽</td>
-                    <td className="text-right px-3 py-2">{formatNumber(Math.round(data.totalRevenue || 0))} ₽</td>
-                    <td className="text-right px-3 py-2 font-bold">{data.drr === null || data.drr === undefined ? '—' : `${data.drr}%`}</td>
+	                    <td className="text-right px-3 py-2">
+                        <div>{formatNumber(Math.round(data.totalRevenue || 0))} ₽</div>
+                        {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(Math.round(data.totalBuyoutRevenue || 0))} ₽</div>}
+                      </td>
+	                    <td className="text-right px-3 py-2 font-bold">
+                        <div>{data.drr === null || data.drr === undefined ? '—' : `${data.drr}%`}</div>
+                        {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {data.buyoutDrr === null || data.buyoutDrr === undefined ? '—' : `${data.buyoutDrr}%`}</div>}
+                      </td>
                   </tr>
                 </tbody>
               </table>
@@ -4804,7 +4992,8 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [selectedDashEnt, setSelectedDashEnt] = useState<string[]>([]) // Empty = no auto-fetch
   const [dashboardPeriod, setDashboardPeriod] = useState<DashboardPeriod>('yesterday')
-  const [dashboardDataMetric, setDashboardDataMetric] = useState<DataMetric>('orders')
+  const [showDashboardBuyouts, setShowDashboardBuyouts] = useState(false)
+  const [dashboardBuyouts, setDashboardBuyouts] = useState<DashboardData | null>(null)
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dataSource, setDataSource] = useState<'excel' | 'wbapi'>('excel')
   const [rateLimitErrors, setRateLimitErrors] = useState<RateLimitError[]>([])
@@ -4909,6 +5098,7 @@ export default function Home() {
     setAuthUser(null)
     setEntrepreneurs([])
     setDashboard(null)
+    setDashboardBuyouts(null)
     setSelectedDashEnt([])
     setIncludeAngelina(false)
     setVisibleOptionalTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
@@ -4919,18 +5109,33 @@ export default function Home() {
     if (!authUser || !isAdmin) return
     loadEntrepreneurs(includeAngelina)
     setDashboard(null)
+    setDashboardBuyouts(null)
     setSelectedDashEnt([])
   }, [includeAngelina, authUser, isAdmin, loadEntrepreneurs])
 
   // Explicit dashboard data load — only triggered by user clicking "Загрузить"
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (buyoutsOnly = false) => {
     if (selectedDashEnt.length === 0) return
     setDashboardLoading(true)
     setRateLimitErrors([])
+    if (!buyoutsOnly) setDashboardBuyouts(null)
     try {
-      const baseDashboard = createDashboardShell(selectedDashEnt, entrepreneurs)
       const selection = selectionToParam(selectedDashEnt)
-      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina, dashboardDataMetric)
+      if (buyoutsOnly) {
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selection)
+        params.set('section', 'dashboard')
+        params.set('metric', 'sales')
+        appendAngelinaParam(params, includeAngelina)
+        const res = await fetch(`/api/wb-data?${params.toString()}`)
+        const json = await res.json()
+        if (json.dashboard) setDashboardBuyouts(json.dashboard)
+        if (json.rateLimitErrors?.length) setRateLimitErrors((current) => [...current, ...json.rateLimitErrors])
+        return
+      }
+
+      const baseDashboard = createDashboardShell(selectedDashEnt, entrepreneurs)
+      const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina, 'orders')
       const dailyByDate = new Map<string, DailyOrdersData>()
       const adSpendByPeriod = new Map<DashboardPeriod, Record<number, number>>()
       const failedDates = new Set<string>()
@@ -5123,7 +5328,25 @@ export default function Home() {
       const adSpendPromise = loadAdSpend(dashboardPeriod).catch((error) => {
         console.error('Failed to load dashboard ad spend:', error)
       })
-      if (requiredDates.every((date) => dailyByDate.has(date))) return
+      const buyoutPromise = (async () => {
+        if (!showDashboardBuyouts) return
+        const params = new URLSearchParams()
+        params.set('entrepreneurId', selection)
+        params.set('section', 'dashboard')
+        params.set('metric', 'sales')
+        appendAngelinaParam(params, includeAngelina)
+        const res = await fetch(`/api/wb-data?${params.toString()}`)
+        const json = await res.json()
+        if (json.dashboard) setDashboardBuyouts(json.dashboard)
+        if (json.rateLimitErrors?.length) setRateLimitErrors((current) => [...current, ...json.rateLimitErrors])
+      })().catch((error) => {
+        console.error('Failed to load dashboard buyouts:', error)
+      })
+      if (requiredDates.every((date) => dailyByDate.has(date))) {
+        void adSpendPromise
+        await buyoutPromise
+        return
+      }
 
       const requestDay = async (date: string) => {
         const dayParams = new URLSearchParams()
@@ -5132,7 +5355,6 @@ export default function Home() {
         dayParams.set('dateFrom', date)
         dayParams.set('dateTo', date)
         appendAngelinaParam(dayParams, includeAngelina)
-        appendMetricParam(dayParams, dashboardDataMetric)
         const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
         return { date, json: await dayRes.json() }
       }
@@ -5150,7 +5372,7 @@ export default function Home() {
             failedDates.add(date)
           }
           if (dayJson.daily && dayErrors.length === 0) {
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, dashboardDataMetric)
+            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, 'orders')
             dailyByDate.set(date, dayJson.daily)
             applyExactDashboard()
           }
@@ -5170,18 +5392,24 @@ export default function Home() {
           continue
         }
         if (dayJson.daily) {
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, dashboardDataMetric)
+          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, 'orders')
           dailyByDate.set(date, dayJson.daily)
           applyExactDashboard()
         }
       }
       void adSpendPromise
+      await buyoutPromise
     } catch (e) {
       console.error(e)
     } finally {
       setDashboardLoading(false)
     }
-  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod, includeAngelina, dashboardDataMetric])
+  }, [selectedDashEnt, entrepreneurs, authUser, dashboardPeriod, includeAngelina, showDashboardBuyouts])
+
+  useEffect(() => {
+    if (!showDashboardBuyouts || !dashboard || dashboardBuyouts || dashboardLoading || selectedDashEnt.length === 0) return
+    loadDashboardData(true)
+  }, [showDashboardBuyouts, dashboard, dashboardBuyouts, dashboardLoading, selectedDashEnt.length, loadDashboardData])
 
   if (!authChecked) {
     return (
@@ -5317,15 +5545,16 @@ export default function Home() {
           <TabsContent value="dashboard">
             <DashboardTab
               data={dashboard}
+              buyoutData={dashboardBuyouts}
+              showBuyouts={showDashboardBuyouts}
               entrepreneurs={entrepreneurs}
               selectedEnt={selectedDashEnt}
               onSelectEnt={setSelectedDashEnt}
               dashboardPeriod={dashboardPeriod}
               onDashboardPeriodChange={setDashboardPeriod}
-              dataMetric={dashboardDataMetric}
-              onDataMetricChange={(metric) => {
-                setDashboardDataMetric(metric)
-                setDashboard(null)
+              onShowBuyoutsChange={(enabled) => {
+                setShowDashboardBuyouts(enabled)
+                if (!enabled) setDashboardBuyouts(null)
                 setRateLimitErrors([])
               }}
               dataSource={dataSource}
