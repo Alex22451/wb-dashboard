@@ -168,7 +168,7 @@ function redisReportKey(
     .sort()
     .join('|')
   const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
-  return `wb:report:${section}:${metric}:v1:${scopeHash}:${from}:${to}`
+  return `wb:report:${section}:${metric}:v2:${scopeHash}:${from}:${to}`
 }
 
 async function readRedisReportResponse(
@@ -205,7 +205,7 @@ async function writeRedisReportResponse(
       from,
       to,
       fetchedAt: new Date().toISOString(),
-      source: 'wb-report-response-v1',
+      source: 'wb-report-response-v2',
       metric,
       response,
     }),
@@ -1184,23 +1184,6 @@ export async function GET(request: NextRequest) {
     const shouldUseFunnelOrders = dataMetric === 'orders' && !needSupply && (
       needDaily || needProduction || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
-
-    if (section === 'production') {
-      const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
-      const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, 'orders')
-      if (cachedDaily.daily) {
-        return NextResponse.json({
-          rateLimitErrors: [],
-          cacheSource: cachedDaily.missing === 0 ? 'redis' : 'redis-partial',
-          cacheStats: {
-            present: cachedDaily.present,
-            missing: cachedDaily.missing,
-            total: cachedDaily.total,
-          },
-          production: buildProductionLoadPayload(cachedDaily.daily, productionCapacity, requestedDateFrom, requestedDateTo),
-        })
-      }
-    }
 
     if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
