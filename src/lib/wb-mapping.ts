@@ -30,6 +30,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
+  { subject: 'Снуды', types: ['снуды'] },
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
   { subject: 'Мягкие игрушки', types: ['мягкие игрушки', 'игрушки антистресс'] },
   { subject: 'Игрушки антистресс', types: ['игрушки антистресс', 'мягкие игрушки'] },

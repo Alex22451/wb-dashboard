@@ -139,6 +139,7 @@ const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
   { subject: 'Скатерти', types: ['скатерти', 'дорожки'] },
   { subject: 'Салфетки', types: ['салфетки', 'салфетки с вышивкой'] },
   { subject: 'Дорожки кухонные', types: ['дорожки'] },
+  { subject: 'Снуды', types: ['снуды'] },
   // Исключены: Наборы для создания слепков, Наборы для рисования, Стаканы — нет в Excel
   // Эти категории перенесены в EXCLUDED_WB_SUBJECTS ниже
   { subject: 'Пледы', types: ['плед', 'плед флисовый'] },
