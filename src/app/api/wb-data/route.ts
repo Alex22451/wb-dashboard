@@ -1758,7 +1758,7 @@ export async function GET(request: NextRequest) {
         fulfillmentRows: typeof allFulfillmentMappedOrders,
         dailyTargets: Array<{ id: number; name: string; wbApiKey: string }>
       ) => {
-        const visibleDailyDates = [...new Set(mappedRows.map(o => o.dateStr).filter((d): d is string => Boolean(d) && d >= requestedDateFrom && d <= requestedDateTo))].sort()
+        const visibleDailyDates = getDateRange(requestedDateFrom, requestedDateTo)
         const allDailyDates = [...new Set(mappedRows.map(o => o.dateStr).filter(Boolean))].sort()
         const localProductTypes = [...new Set(mappedRows.map(o => o.mappedType))]
         const dailyProducts = localProductTypes.map((name, i) => ({ id: i, name }))

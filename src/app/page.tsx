@@ -365,11 +365,13 @@ function writeDailyResponseCache(
   response: DailyResponse,
   includeAngelina = false,
   dataMetric: DataMetric = 'orders',
+  options: { skipAggregate?: boolean; excludeEntrepreneurIds?: Set<number> } = {},
 ) {
-  if (response.daily) writeDailyCache(cacheScope, date, response.daily)
+  if (response.daily && !options.skipAggregate) writeDailyCache(cacheScope, date, response.daily)
   if (!response.dailyByEntrepreneur) return
 
   for (const [entId, daily] of Object.entries(response.dailyByEntrepreneur)) {
+    if (options.excludeEntrepreneurIds?.has(Number(entId))) continue
     const ent = entrepreneurs.find((item) => String(item.id) === String(entId))
     if (!ent) continue
     const singleScope = getDailyCacheScope(String(ent.id), entrepreneurs, user, includeAngelina, dataMetric)
@@ -379,6 +381,7 @@ function writeDailyResponseCache(
   if (selection !== ALL_ENTREPRENEURS && selection.includes(',')) {
     const selectedIds = selection.split(',').map((id) => id.trim()).filter(Boolean)
     for (const entId of selectedIds) {
+      if (options.excludeEntrepreneurIds?.has(Number(entId))) continue
       const daily = response.dailyByEntrepreneur[String(entId)]
       if (!daily) continue
       const singleScope = getDailyCacheScope(String(entId), entrepreneurs, user, includeAngelina, dataMetric)
@@ -1512,6 +1515,7 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
   const grandTotal = activeProductTotals ? Object.values(activeProductTotals).reduce((s, v) => s + v, 0) : 0
   const buyoutDateTotals = showBuyouts ? getDailyDateTotals(buyoutData, fulfillmentFilter) : []
   const grandBuyoutTotal = buyoutDateTotals.reduce((sum, value) => sum + Number(value || 0), 0)
+  const showFulfillmentBreakdown = fulfillmentFilter === 'all'
   const maxCellValue = Math.max(1, ...Object.values(activePivot).flatMap((row) => Object.values(row)))
   const heatStyle = (value: number | undefined) => {
     const val = value || 0
@@ -1708,9 +1712,38 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
   }
 
   const filterLabel = fulfillmentFilter === 'fbs' ? ' (FBS)' : fulfillmentFilter === 'fbo' ? ' (FBO)' : ''
-  const renderOrderBuyoutValue = (orders: number, buyouts: number) => (
+  const getProductFulfillmentTotal = (productId: number, type: 'fbs' | 'fbo') => {
+    const totals = type === 'fbs' ? data.fbsProductTotals : data.fboProductTotals
+    return Number(totals?.[productId] || 0)
+  }
+  const getProductFulfillmentDateValue = (productId: number, dateIdx: number, type: 'fbs' | 'fbo') => {
+    const pivot = type === 'fbs' ? data.fbsPivot : data.fboPivot
+    return Number(pivot?.[productId]?.[dateIdx] || 0)
+  }
+  const getGroupFulfillmentBreakdown = (productIds: number[], dateIdx?: number) => {
+    if (!showFulfillmentBreakdown) return null
+    const fbo = productIds.reduce((sum, productId) => sum + (
+      dateIdx === undefined
+        ? getProductFulfillmentTotal(productId, 'fbo')
+        : getProductFulfillmentDateValue(productId, dateIdx, 'fbo')
+    ), 0)
+    const fbs = productIds.reduce((sum, productId) => sum + (
+      dateIdx === undefined
+        ? getProductFulfillmentTotal(productId, 'fbs')
+        : getProductFulfillmentDateValue(productId, dateIdx, 'fbs')
+    ), 0)
+    return { fbo, fbs }
+  }
+  const renderOrderBuyoutValue = (orders: number, buyouts: number, fulfillment?: { fbo: number; fbs: number } | null) => (
     <div className="leading-tight">
       <div>{orders ? formatNumber(orders) : '—'}</div>
+      {showFulfillmentBreakdown && fulfillment && orders > 0 && (
+        <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fulfillment.fbo)}</span>
+          <span className="mx-1 text-muted-foreground/60">·</span>
+          <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fulfillment.fbs)}</span>
+        </div>
+      )}
       {showBuyouts && (
         <div className="mt-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
           В {buyouts ? formatNumber(buyouts) : '—'}
@@ -1795,7 +1828,11 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
                   <div key={date} className="rounded-md border px-2 py-1.5" style={heatStyle(groupDateTotals[index])}>
                     <div className="text-[10px] text-muted-foreground">{formatDateShort(date)}</div>
                     <div className="text-sm font-semibold">
-                      {renderOrderBuyoutValue(groupDateTotals[index] || 0, group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, index, fulfillmentFilter), 0))}
+                      {renderOrderBuyoutValue(
+                        groupDateTotals[index] || 0,
+                        group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, index, fulfillmentFilter), 0),
+                        getGroupFulfillmentBreakdown(group.children.map((product) => product.id), index)
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1824,9 +1861,9 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
           <tbody>
             <tr className="bg-emerald-50 dark:bg-emerald-950/20 border-b font-semibold">
               <td className="sticky left-0 z-10 bg-emerald-50 px-2 py-2 dark:bg-emerald-950/20 sm:px-3">ИТОГО{filterLabel}</td>
-              <td className="bg-emerald-50 px-2 py-2 text-right font-bold dark:bg-emerald-950/20 sm:px-3">{renderOrderBuyoutValue(grandTotal, grandBuyoutTotal)}</td>
+              <td className="bg-emerald-50 px-2 py-2 text-right font-bold dark:bg-emerald-950/20 sm:px-3">{renderOrderBuyoutValue(grandTotal, grandBuyoutTotal, getGroupFulfillmentBreakdown(products.map((product) => product.id)))}</td>
               {dates.map((d, i) => (
-                <td key={d} className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(activeDateTotals[i] || 0, buyoutDateTotals[i] || 0)}</td>
+                <td key={d} className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(activeDateTotals[i] || 0, buyoutDateTotals[i] || 0, getGroupFulfillmentBreakdown(products.map((product) => product.id), i))}</td>
               ))}
             </tr>
             {groupedProducts.map((group) => {
@@ -1849,12 +1886,12 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
                     <td className="sticky left-0 z-10 bg-background px-2 py-2 sm:px-3">
                       <button type="button" className="text-left hover:underline" onClick={() => selectProductChart(p.id)}>{p.name}</button>
                     </td>
-                    <td className="px-2 py-2 text-right font-medium sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter))}</td>
+                    <td className="px-2 py-2 text-right font-medium sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter), getGroupFulfillmentBreakdown([p.id]))}</td>
                     {dates.map((d, i) => {
                       const val = productPivot[i]
                       return (
                         <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
-                          {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter))}
+                          {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter), getGroupFulfillmentBreakdown([p.id], i))}
                         </td>
                       )
                     })}
@@ -1881,10 +1918,18 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
                         <span className="text-xs text-muted-foreground">({group.children.length})</span>
                       </div>
                     </td>
-                    <td className="px-2 py-2 text-right font-semibold sm:px-3">{renderOrderBuyoutValue(group.total, group.children.reduce((sum, product) => sum + getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter), 0))}</td>
+                    <td className="px-2 py-2 text-right font-semibold sm:px-3">{renderOrderBuyoutValue(
+                      group.total,
+                      group.children.reduce((sum, product) => sum + getDailyProductTotalByName(buyoutData, product.name, fulfillmentFilter), 0),
+                      getGroupFulfillmentBreakdown(group.children.map((product) => product.id))
+                    )}</td>
                     {dates.map((d, i) => (
                       <td key={d} style={heatStyle(groupDateTotals[i])} className="px-2 py-2 text-right font-medium sm:px-3">
-                        {renderOrderBuyoutValue(groupDateTotals[i] || 0, group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, i, fulfillmentFilter), 0))}
+                        {renderOrderBuyoutValue(
+                          groupDateTotals[i] || 0,
+                          group.children.reduce((sum, product) => sum + getDailyProductDateValueByName(buyoutData, product.name, i, fulfillmentFilter), 0),
+                          getGroupFulfillmentBreakdown(group.children.map((product) => product.id), i)
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -1902,12 +1947,12 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
                           <td className="sticky left-0 z-10 bg-muted/10 px-2 py-2 pl-7 sm:px-3 sm:pl-8">
                             <button type="button" className="text-left text-muted-foreground hover:underline" onClick={() => selectProductChart(p.id)}>{sizePart}</button>
                           </td>
-                          <td className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter))}</td>
+                          <td className="px-2 py-2 text-right sm:px-3">{renderOrderBuyoutValue(total, getDailyProductTotalByName(buyoutData, p.name, fulfillmentFilter), getGroupFulfillmentBreakdown([p.id]))}</td>
                           {dates.map((d, i) => {
                             const val = productPivot[i]
                             return (
                               <td key={d} style={heatStyle(val)} className={`px-2 py-2 text-right sm:px-3 ${val ? '' : 'text-muted-foreground'}`}>
-                                {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter))}
+                                {renderOrderBuyoutValue(val || 0, getDailyProductDateValueByName(buyoutData, p.name, i, fulfillmentFilter), getGroupFulfillmentBreakdown([p.id], i))}
                               </td>
                             )
                           })}
@@ -2144,6 +2189,13 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
 
           for (const { date, json } of batchResults) {
             const dayErrors = json.rateLimitErrors || []
+            const failedSalesIds = new Set<number>(
+              metric === 'sales'
+                ? dayErrors
+                  .map((error: RateLimitError) => Number(error.id))
+                  .filter((id: number): id is number => Number.isFinite(id) && id > 0)
+                : []
+            )
             const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
             if (dayErrors.length) {
               appendNonSalesErrors(dayErrors)
@@ -2157,7 +2209,14 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             }
             if (canUseDaily) {
               loadedDays.push(json.daily)
-              if (dayErrors.length === 0) writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+              if (dayErrors.length === 0) {
+                writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+              } else if (metric === 'sales') {
+                writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric, {
+                  skipAggregate: true,
+                  excludeEntrepreneurIds: failedSalesIds,
+                })
+              }
               updateData(mergeDailyResponses(loadedDays, loadedDates()))
             }
           }
@@ -2170,6 +2229,13 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           if (!isActiveLoad()) return
           const { json } = await requestDay(date)
           const dayErrors = json.rateLimitErrors || []
+          const failedSalesIds = new Set<number>(
+            metric === 'sales'
+              ? dayErrors
+                .map((error: RateLimitError) => Number(error.id))
+                .filter((id: number): id is number => Number.isFinite(id) && id > 0)
+              : []
+          )
           const canUseDaily = !!json.daily && (dayErrors.length === 0 || metric === 'sales')
           if (dayErrors.length) {
             appendNonSalesErrors(dayErrors)
@@ -2183,7 +2249,14 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           }
           if (canUseDaily) {
             loadedDays.push(json.daily)
-            if (dayErrors.length === 0) writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+            if (dayErrors.length === 0) {
+              writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric)
+            } else if (metric === 'sales') {
+              writeDailyResponseCache(cacheScope, selection, entrepreneurs, user, date, json, includeAngelina, metric, {
+                skipAggregate: true,
+                excludeEntrepreneurIds: failedSalesIds,
+              })
+            }
             updateData(mergeDailyResponses(loadedDays, loadedDates()))
           }
         }
@@ -2210,6 +2283,10 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             )
             if (json.daily) {
               loadedDays.push(json.daily)
+              writeDailyResponseCache(cacheScope, retrySelection, entrepreneurs, user, date, json, includeAngelina, metric, {
+                skipAggregate: failedIds.size > 0,
+                excludeEntrepreneurIds: failedIds,
+              })
               updateData(mergeDailyResponses(loadedDays, loadedDates()))
             }
             if (failedIds.size > 0) {
