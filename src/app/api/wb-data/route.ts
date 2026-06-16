@@ -473,6 +473,41 @@ async function readAvailableMergedRedisDailyPayload(
   }
 }
 
+async function readCompleteDateMergedRedisDailyPayload(
+  targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
+  dates: string[],
+  metric: DataMetric = 'orders',
+): Promise<{ daily: any | null; completeDates: string[]; present: number; missing: number; total: number }> {
+  const total = targets.length * dates.length
+  if (dates.length === 0 || targets.length === 0) {
+    return { daily: null, completeDates: [], present: 0, missing: total, total }
+  }
+
+  const rowsByDate = await Promise.all(dates.map(async (date) => {
+    const rows = await Promise.all(targets.map((target) =>
+      readRedisDailyPayload(target.wbApiKey, date, dailyCacheVariant(target), metric)
+    ))
+    const complete = rows.every(Boolean)
+    return {
+      date,
+      rows: complete ? rows.filter(Boolean) : [],
+      present: rows.filter(Boolean).length,
+    }
+  }))
+
+  const completeDates = rowsByDate.filter((row) => row.rows.length === targets.length).map((row) => row.date)
+  const completeRows = rowsByDate.flatMap((row) => row.rows)
+  const present = rowsByDate.reduce((sum, row) => sum + row.present, 0)
+
+  return {
+    daily: completeRows.length ? mergeDailyPayloads(completeRows, completeDates) : null,
+    completeDates,
+    present,
+    missing: Math.max(total - present, 0),
+    total,
+  }
+}
+
 function buildProductionLoadPayload(daily: any, capacity: number, requestedDateFrom: string, requestedDateTo: string) {
   const DAILY_CAPACITY = capacity
   const visibleProdDates: string[] = Array.isArray(daily?.dates) ? daily.dates : []
@@ -1184,6 +1219,29 @@ export async function GET(request: NextRequest) {
     const shouldUseFunnelOrders = dataMetric === 'orders' && !needSupply && (
       needDaily || needProduction || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
+
+    if (section === 'production') {
+      const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
+      const cachedDaily = await readCompleteDateMergedRedisDailyPayload(targets, currentDates, 'orders')
+      if (cachedDaily.daily) {
+        return NextResponse.json({
+          rateLimitErrors: [],
+          cacheSource: cachedDaily.missing === 0 ? 'redis' : 'redis-complete-dates',
+          cacheStats: {
+            present: cachedDaily.present,
+            missing: cachedDaily.missing,
+            total: cachedDaily.total,
+            completeDates: cachedDaily.completeDates.length,
+          },
+          production: buildProductionLoadPayload(
+            cachedDaily.daily,
+            productionCapacity,
+            cachedDaily.completeDates[0] || requestedDateFrom,
+            cachedDaily.completeDates[cachedDaily.completeDates.length - 1] || requestedDateTo
+          ),
+        })
+      }
+    }
 
     if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
