@@ -1178,10 +1178,11 @@ export async function GET(request: NextRequest) {
 
     const capacityParam = Number(searchParams.get('capacity'))
     const productionCapacity = Number.isFinite(capacityParam) && capacityParam > 0 ? Math.round(capacityParam) : 2500
+    const productionLoadCacheVersion = 'pillowcase-size-multiplier-v2'
     const reportCacheSection = section === 'monthly'
       ? 'monthly'
       : section === 'production'
-        ? `production:${productionCapacity}`
+        ? `production:${productionCapacity}:${productionLoadCacheVersion}`
         : null
     const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
     const shouldRefreshDailyCache = section === 'daily' && shouldRefreshReportCache

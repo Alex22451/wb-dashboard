@@ -247,6 +247,9 @@ export function extractItemsMultiplier(productName: string): number {
     const n = parseInt(match[1])
     if (n >= 1 && n <= 100) return n
   }
+  const isPillowcase = /наволочк/i.test(lower)
+  const hasDoublePillowcaseSize = /\b(?:35\s*[хx*]\s*35|40\s*[хx*]\s*40|45\s*[хx*]\s*45|50\s*[хx*]\s*50|30\s*[хx*]\s*40)\b/i.test(lower)
+  if (isPillowcase && hasDoublePillowcaseSize) return 2
   // Default: 1 item per order
   return 1
 }
