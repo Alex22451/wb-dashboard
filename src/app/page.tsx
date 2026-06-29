@@ -3013,12 +3013,11 @@ function ProductionLoadTab({ entrepreneurs, includeAngelina }: { entrepreneurs: 
   }, [fetchedData])
 
   const totalProductionItems = fetchedData ? Object.values(fetchedData.productItems).reduce((s, v) => s + v, 0) : 0
-  const topProductionProducts = useMemo(() => {
+  const productionProductsByItems = useMemo(() => {
     if (!fetchedData) return []
     return fetchedData.products
       .slice()
       .sort((a, b) => (fetchedData.productItems[b.id] || 0) - (fetchedData.productItems[a.id] || 0))
-      .slice(0, 15)
   }, [fetchedData])
 
   // Thermometer component
@@ -3424,18 +3423,18 @@ function ProductionLoadTab({ entrepreneurs, includeAngelina }: { entrepreneurs: 
             </Card>
           )}
 
-          {/* Product breakdown - top products by items */}
-          {topProductionProducts.length > 0 && (
+          {/* Product breakdown - all products by items */}
+          {productionProductsByItems.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  Разбивка по продуктам (Топ-15)
+                  Разбивка по продуктам (все товары)
                   <Badge variant="secondary" className="text-xs">FBS изделия</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="space-y-2 p-3 md:hidden">
-                  {topProductionProducts.map((p) => {
+                  {productionProductsByItems.map((p) => {
                     const items = fetchedData.productItems[p.id] || 0
                     const orders = fetchedData.productOrders[p.id] || 0
                     const share = totalProductionItems > 0 ? (items / totalProductionItems * 100).toFixed(1) : '0'
@@ -3472,7 +3471,7 @@ function ProductionLoadTab({ entrepreneurs, includeAngelina }: { entrepreneurs: 
                       </tr>
                     </thead>
                     <tbody>
-                      {topProductionProducts.map((p) => {
+                      {productionProductsByItems.map((p) => {
                           const items = fetchedData.productItems[p.id] || 0
                           const orders = fetchedData.productOrders[p.id] || 0
                           const share = totalProductionItems > 0 ? (items / totalProductionItems * 100).toFixed(1) : '0'
