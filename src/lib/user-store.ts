@@ -306,18 +306,36 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
   } catch {
     maxUserId = Number(await edgeGet<string | number>('wb_user_id')) || 0
   }
-  for (let id = 1; id <= maxUserId; id += 1) {
-    let user: StoredUser | null = null
-    let keys: UserApiKeys | null = null
+
+  const userIds = new Set<number>()
+  const scanLimit = Math.max(50, Math.min(Number(process.env.WB_USER_SCAN_LIMIT || 100), 500))
+  const rawMaxUserId = Math.max(maxUserId, scanLimit)
+  for (let rawId = 1; rawId <= rawMaxUserId; rawId += 1) {
+    userIds.add(rawId)
+    userIds.add(rawId + REDIS_USER_ID_OFFSET)
+  }
+
+  const userRows = await Promise.all([...userIds].map(async (id) => {
     try {
-      user = await getStoredUserById(id)
-      keys = await getUserApiKeys(id)
+      return {
+        user: await getStoredUserById(id),
+        keys: await getUserApiKeys(id),
+      }
     } catch {
-      const edgeUser = await edgeGet<string | StoredUser>(userKey(id))
-      const edgeKeys = await edgeGet<string | UserApiKeys>(apiKeysKey(id))
-      user = typeof edgeUser === 'string' ? JSON.parse(edgeUser) : edgeUser
-      keys = typeof edgeKeys === 'string' ? JSON.parse(edgeKeys) : edgeKeys
+      try {
+        const edgeUser = await edgeGet<string | StoredUser>(userKey(id))
+        const edgeKeys = await edgeGet<string | UserApiKeys>(apiKeysKey(id))
+        return {
+          user: typeof edgeUser === 'string' ? JSON.parse(edgeUser) : edgeUser,
+          keys: typeof edgeKeys === 'string' ? JSON.parse(edgeKeys) : edgeKeys,
+        }
+      } catch {
+        return { user: null, keys: null }
+      }
     }
+  }))
+
+  for (const { user, keys } of userRows) {
     if (!user) continue
     if (!keys?.apiKey) continue
     const normalized = normalizeApiKey(keys.apiKey)
