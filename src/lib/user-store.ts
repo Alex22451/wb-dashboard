@@ -330,6 +330,7 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
     }))
 
   const seen = new Set(targets.map((target) => normalizeApiKey(target.wbApiKey)))
+  const seenTargetIds = new Set(targets.map((target) => target.id))
   let maxUserId = 0
   try {
     maxUserId = Number(await kvGet<string | number>('wb_user_id')) || 0
@@ -407,10 +408,13 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
     if (!keys?.apiKey) continue
     const normalized = normalizeApiKey(keys.apiKey)
     if (!normalized || seen.has(normalized)) continue
+    const targetId = REDIS_USER_ID_OFFSET + user.id
+    if (seenTargetIds.has(targetId)) continue
     seen.add(normalized)
+    seenTargetIds.add(targetId)
     const isAngelina = user.username.toLowerCase() === 'angelina'
     targets.push({
-      id: 100000 + user.id,
+      id: targetId,
       name: keys.sellerName || user.username,
       wbApiKey: keys.apiKey,
       wbPromotionApiKey: keys.promotionApiKey || keys.apiKey,
