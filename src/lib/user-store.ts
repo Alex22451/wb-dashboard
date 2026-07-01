@@ -73,6 +73,13 @@ async function edgeGet<T = unknown>(key: string): Promise<T | null> {
   return item ? item.value : null
 }
 
+async function edgeListItems(): Promise<Array<{ key: string; value: unknown }>> {
+  const config = getEdgeConfig()
+  if (!config) return []
+  const items = await edgeRequest<Array<{ key: string; value: unknown }>>(`/v1/edge-config/${config.edgeConfigId}/items`)
+  return Array.isArray(items) ? items : []
+}
+
 async function kvGet<T = string>(key: string): Promise<T | null> {
   if (hasRedisConfig()) {
     try {
@@ -237,6 +244,29 @@ function normalizeApiKey(apiKey: string) {
   return apiKey.trim().replace(/^bearer\s+/i, '').trim()
 }
 
+function parseStoredUser(raw: unknown): StoredUser | null {
+  if (!raw) return null
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : raw as StoredUser
+  } catch {
+    return null
+  }
+}
+
+function parseUserApiKeys(raw: unknown): UserApiKeys | null {
+  if (!raw) return null
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw as UserApiKeys
+    return {
+      apiKey: parsed.apiKey || null,
+      promotionApiKey: parsed.promotionApiKey || null,
+      sellerName: parsed.sellerName || null,
+    }
+  } catch {
+    return null
+  }
+}
+
 async function getAdminAngelinaTarget(): Promise<WbTarget | null> {
   let angelinaUser: StoredUser | null = null
   for (const username of ['Angelina', 'angelina']) {
@@ -316,6 +346,36 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
   }
 
   const userRows: Array<{ user: StoredUser | null; keys: UserApiKeys | null }> = []
+  try {
+    const edgeItems = await edgeListItems()
+    const edgeUsers = new Map<number, StoredUser>()
+    const edgeKeys = new Map<number, UserApiKeys>()
+    for (const item of edgeItems) {
+      const userMatch = item.key.match(/^wb_user_(\d+)$/)
+      if (userMatch) {
+        const user = parseStoredUser(item.value)
+        if (user) edgeUsers.set(Number(userMatch[1]), user)
+        continue
+      }
+
+      const keysMatch = item.key.match(/^wb_user_(\d+)_api_keys$/)
+      if (keysMatch) {
+        const keys = parseUserApiKeys(item.value)
+        if (keys) edgeKeys.set(Number(keysMatch[1]), keys)
+      }
+    }
+    const edgeIds = new Set([...edgeUsers.keys(), ...edgeKeys.keys()])
+    for (const id of edgeIds) {
+      userRows.push({
+        user: edgeUsers.get(id) || null,
+        keys: edgeKeys.get(id) || null,
+      })
+      userIds.add(id)
+    }
+  } catch {
+    // Fall back to id probing below.
+  }
+
   const idsToScan = [...userIds].sort((a, b) => a - b)
   const batchSize = 10
   for (let offset = 0; offset < idsToScan.length; offset += batchSize) {
@@ -331,8 +391,8 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
           const edgeUser = await edgeGet<string | StoredUser>(userKey(id))
           const edgeKeys = await edgeGet<string | UserApiKeys>(apiKeysKey(id))
           return {
-            user: typeof edgeUser === 'string' ? JSON.parse(edgeUser) : edgeUser,
-            keys: typeof edgeKeys === 'string' ? JSON.parse(edgeKeys) : edgeKeys,
+            user: parseStoredUser(edgeUser),
+            keys: parseUserApiKeys(edgeKeys),
           }
         } catch {
           return { user: null, keys: null }
