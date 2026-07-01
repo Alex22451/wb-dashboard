@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { redisCommand } from '@/lib/redis-cache'
@@ -18,6 +18,7 @@ import {
 const STORE_KEY = 'wb:unit-economics:v1'
 const CONTENT_CARDS_URL = 'https://content-api.wildberries.ru/content/v2/get/cards/list'
 const PRICES_URL = 'https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter'
+const COMMON_API_BASE = 'https://common-api.wildberries.ru'
 const seedRows = seedRowsRaw as UnitEconomicsRow[]
 
 interface WbCard {
@@ -31,6 +32,14 @@ interface WbCard {
 interface WbPrice {
   priceBeforeDiscountRub: number
   discountPct: number
+}
+
+interface WbTariffsPayload {
+  fetchedAt: string
+  date: string
+  commissionReport: Record<string, unknown>[]
+  boxWarehouses: Record<string, unknown>[]
+  returnWarehouses: Record<string, unknown>[]
 }
 
 function seedStore(): UnitEconomicsStore {
@@ -196,12 +205,94 @@ function normalizeApiKey(apiKey: string) {
   return apiKey.trim().replace(/^bearer\s+/i, '').trim()
 }
 
+function apiKeyFingerprint(apiKey: string) {
+  return createHash('sha256').update(normalizeApiKey(apiKey)).digest('hex').slice(0, 16)
+}
+
 function numberFromRecord(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = toNumber(record[key])
     if (value > 0) return value
   }
   return 0
+}
+
+function tariffCacheKey(apiKey: string, date: string) {
+  return `wb:unit-economics:tariffs:v1:${apiKeyFingerprint(apiKey)}:${date}`
+}
+
+function tariffCacheTtlSeconds() {
+  return 14 * 24 * 60 * 60
+}
+
+function todayMoscowDate() {
+  return new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10)
+}
+
+async function readTariffCache(apiKey: string, date: string): Promise<WbTariffsPayload | null> {
+  const raw = await redisCommand<string>(['GET', tariffCacheKey(apiKey, date)])
+  if (!raw || typeof raw !== 'string') return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed?.commissionReport) || !Array.isArray(parsed?.boxWarehouses)) return null
+    return parsed as WbTariffsPayload
+  } catch {
+    return null
+  }
+}
+
+async function writeTariffCache(apiKey: string, date: string, payload: WbTariffsPayload) {
+  await redisCommand([
+    'SET',
+    tariffCacheKey(apiKey, date),
+    JSON.stringify(payload),
+    'EX',
+    tariffCacheTtlSeconds(),
+  ])
+}
+
+function parseWbNumber(value: unknown, fallback = 0) {
+  if (typeof value === 'string') {
+    return toNumber(value.replace(/\u00a0/g, ' '), fallback)
+  }
+  return toNumber(value, fallback)
+}
+
+function normalizeTariffName(value: unknown) {
+  return normalizeUnitProductKey(value).replace(/^категория\s+/i, '').trim()
+}
+
+async function fetchWbTariffs(target: WbTarget, date: string, force = false): Promise<{ payload: WbTariffsPayload; cacheHit: boolean }> {
+  if (!force) {
+    const cached = await readTariffCache(target.wbApiKey, date)
+    if (cached) return { payload: cached, cacheHit: true }
+  }
+
+  const headers = { Authorization: normalizeApiKey(target.wbApiKey) }
+  const fetchJson = async (url: string) => {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(30000) })
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new Error(`${target.name}: WB Tariffs ${response.status} ${body.slice(0, 140)}`)
+    }
+    return response.json()
+  }
+
+  const [commission, box, returns] = await Promise.all([
+    fetchJson(`${COMMON_API_BASE}/api/v1/tariffs/commission?locale=ru`),
+    fetchJson(`${COMMON_API_BASE}/api/v1/tariffs/box?date=${date}`),
+    fetchJson(`${COMMON_API_BASE}/api/v1/tariffs/return?date=${date}`),
+  ])
+
+  const payload: WbTariffsPayload = {
+    fetchedAt: new Date().toISOString(),
+    date,
+    commissionReport: Array.isArray(commission?.report) ? commission.report : [],
+    boxWarehouses: Array.isArray(box?.response?.data?.warehouseList) ? box.response.data.warehouseList : [],
+    returnWarehouses: Array.isArray(returns?.response?.data?.warehouseList) ? returns.response.data.warehouseList : [],
+  }
+  await writeTariffCache(target.wbApiKey, date, payload)
+  return { payload, cacheHit: false }
 }
 
 async function fetchWbCards(target: WbTarget): Promise<WbCard[]> {
@@ -290,6 +381,103 @@ function sameEntrepreneur(rowName: string, targetName: string) {
   const row = rowName.toLowerCase().replace(/\s+/g, '')
   const target = targetName.toLowerCase().replace(/\s+/g, '')
   return row && target && (row.includes(target) || target.includes(row))
+}
+
+function findCommission(row: UnitEconomicsRow, report: Record<string, unknown>[]) {
+  const candidates = [
+    row.wbSubject,
+    row.category,
+    row.excelProductKey,
+    row.productName,
+  ].map(normalizeTariffName).filter(Boolean)
+
+  const exact = report.find((item) => {
+    const subject = normalizeTariffName(item.subjectName)
+    return candidates.some((candidate) => subject === candidate)
+  })
+  const partial = exact || report.find((item) => {
+    const subject = normalizeTariffName(item.subjectName)
+    return candidates.some((candidate) => subject.includes(candidate) || candidate.includes(subject))
+  })
+  if (!partial) return null
+
+  const pct = row.fulfillment === 'fbs'
+    ? parseWbNumber(partial.kgvpMarketplace)
+    : parseWbNumber(partial.kgvpSupplier) || parseWbNumber(partial.paidStorageKgvp)
+  return pct > 0 ? pct / 100 : null
+}
+
+function pickWarehouse(row: UnitEconomicsRow, warehouses: Record<string, unknown>[]) {
+  if (warehouses.length === 0) return null
+  const rowWarehouse = normalizeTariffName(row.warehouse)
+  if (rowWarehouse && rowWarehouse !== 'маркетплеис' && rowWarehouse !== 'маркетплейс') {
+    const exact = warehouses.find((item) => normalizeTariffName(item.warehouseName) === rowWarehouse)
+    if (exact) return exact
+    const partial = warehouses.find((item) => {
+      const name = normalizeTariffName(item.warehouseName)
+      return name.includes(rowWarehouse) || rowWarehouse.includes(name)
+    })
+    if (partial) return partial
+  }
+  return null
+}
+
+function averageWarehouseTariff(warehouses: Record<string, unknown>[], keys: string[]) {
+  const values = warehouses
+    .map((warehouse) => {
+      const next: Record<string, number> = {}
+      for (const key of keys) next[key] = parseWbNumber(warehouse[key])
+      return next
+    })
+    .filter((item) => keys.every((key) => item[key] > 0))
+  if (values.length === 0) return null
+  return keys.reduce<Record<string, number>>((acc, key) => {
+    acc[key] = values.reduce((sum, item) => sum + item[key], 0) / values.length
+    return acc
+  }, {})
+}
+
+function calculateDeliveryFromBoxTariff(row: UnitEconomicsRow, boxWarehouses: Record<string, unknown>[]) {
+  const keys = row.fulfillment === 'fbs'
+    ? ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr']
+    : ['boxDeliveryBase', 'boxDeliveryLiter', 'boxDeliveryCoefExpr']
+  const warehouse = pickWarehouse(row, boxWarehouses)
+  const values = warehouse
+    ? {
+      [keys[0]]: parseWbNumber(warehouse[keys[0]]),
+      [keys[1]]: parseWbNumber(warehouse[keys[1]]),
+      [keys[2]]: parseWbNumber(warehouse[keys[2]], 100),
+    }
+    : averageWarehouseTariff(boxWarehouses, keys)
+  if (!values) return null
+
+  const base = values[keys[0]]
+  const liter = values[keys[1]]
+  const coef = values[keys[2]] || 100
+  if (base <= 0) return null
+  const volume = Math.max(1, (row.lengthCm * row.widthCm * row.heightCm) / 1000)
+  return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
+}
+
+function calculateReturnFromTariff(row: UnitEconomicsRow, returnWarehouses: Record<string, unknown>[]) {
+  const warehouse = pickWarehouse(row, returnWarehouses)
+  const source = warehouse || null
+  const values = source
+    ? ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr', 'deliveryDumpKgtReturnExpr']
+      .map((key) => parseWbNumber(source[key]))
+      .filter((value) => value > 0)
+    : returnWarehouses
+      .flatMap((item) => ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
+        .map((key) => parseWbNumber(item[key]))
+        .filter((value) => value > 0))
+  if (values.length === 0) return null
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+}
+
+function calculateLogisticsTotal(row: UnitEconomicsRow) {
+  const buyout = row.buyoutPct > 0 ? row.buyoutPct : 1
+  const returnPart = row.returnLogisticsRub * Math.max(0, (1 - buyout) / buyout)
+  return Math.round((row.deliveryLogisticsRub + returnPart) * Math.max(1, row.localizationIndex || 1) * 100) / 100
 }
 
 async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
@@ -407,6 +595,95 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   }
 }
 
+async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], force = false) {
+  const now = new Date().toISOString()
+  const date = todayMoscowDate()
+  const rows = store.rows.map((row) => normalizeRow(row))
+  const stats = {
+    type: 'tariffs',
+    date,
+    targets: targets.length,
+    cacheHits: 0,
+    commissionRows: 0,
+    boxWarehouses: 0,
+    returnWarehouses: 0,
+    updatedRows: 0,
+    targetReports: [] as Array<{
+      name: string
+      cacheHit: boolean
+      commissionRows: number
+      boxWarehouses: number
+      returnWarehouses: number
+      updatedRows: number
+      status: 'ok' | 'error'
+      warnings: string[]
+    }>,
+    errors: [] as string[],
+  }
+
+  for (const target of targets) {
+    const report = {
+      name: target.name,
+      cacheHit: false,
+      commissionRows: 0,
+      boxWarehouses: 0,
+      returnWarehouses: 0,
+      updatedRows: 0,
+      status: 'ok' as 'ok' | 'error',
+      warnings: [] as string[],
+    }
+
+    let payload: WbTariffsPayload
+    try {
+      const result = await fetchWbTariffs(target, date, force)
+      payload = result.payload
+      report.cacheHit = result.cacheHit
+      if (result.cacheHit) stats.cacheHits += 1
+      report.commissionRows = payload.commissionReport.length
+      report.boxWarehouses = payload.boxWarehouses.length
+      report.returnWarehouses = payload.returnWarehouses.length
+      stats.commissionRows += payload.commissionReport.length
+      stats.boxWarehouses += payload.boxWarehouses.length
+      stats.returnWarehouses += payload.returnWarehouses.length
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${target.name}: ошибка WB Tariffs API`
+      report.status = 'error'
+      report.warnings.push(message)
+      stats.errors.push(message)
+      stats.targetReports.push(report)
+      continue
+    }
+
+    for (const row of rows) {
+      if (!sameEntrepreneur(row.entrepreneurName, target.name)) continue
+      const before = JSON.stringify(row)
+      const commission = findCommission(row, payload.commissionReport)
+      if (commission !== null) row.commissionPct = commission
+
+      const delivery = calculateDeliveryFromBoxTariff(row, payload.boxWarehouses)
+      if (delivery !== null) row.deliveryLogisticsRub = delivery
+
+      const returnLogistics = calculateReturnFromTariff(row, payload.returnWarehouses)
+      if (returnLogistics !== null) row.returnLogisticsRub = returnLogistics
+
+      if (delivery !== null || returnLogistics !== null) row.logisticsTotalRub = calculateLogisticsTotal(row)
+
+      if (JSON.stringify(row) !== before) {
+        row.source = 'wb'
+        row.updatedAt = now
+        report.updatedRows += 1
+        stats.updatedRows += 1
+      }
+    }
+    stats.targetReports.push(report)
+  }
+
+  return {
+    store: await writeStore(rows),
+    stats,
+  }
+}
+
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return unauthorized()
@@ -453,6 +730,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'WB API ключи не найдены' }, { status: 400 })
     }
     const { store: nextStore, stats } = await syncWithWb(store, targets)
+    const rows = nextStore.rows.map(calculateUnitEconomics)
+    return NextResponse.json({
+      store: {
+        version: nextStore.version,
+        updatedAt: nextStore.updatedAt,
+        rows,
+        summary: summarizeUnitEconomics(rows),
+      },
+      sync: stats,
+    })
+  }
+
+  if (body.action === 'sync-wb-tariffs') {
+    const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
+    if (targets.length === 0) {
+      return NextResponse.json({ error: 'WB API ключи не найдены' }, { status: 400 })
+    }
+    const { store: nextStore, stats } = await syncWbTariffs(store, targets, body.force === true)
     const rows = nextStore.rows.map(calculateUnitEconomics)
     return NextResponse.json({
       store: {

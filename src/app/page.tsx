@@ -5429,6 +5429,27 @@ function UnitEconomicsTab() {
     }
   }, [applyStore])
 
+  const syncWbTariffs = useCallback(async () => {
+    setSaving(true)
+    setError('')
+    setSyncInfo(null)
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync-wb-tariffs' }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось синхронизировать тарифы WB')
+      applyStore(json)
+      setSyncInfo(json.sync || null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось синхронизировать тарифы WB')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore])
+
   const visibleRows = useMemo(() => {
     const text = query.trim().toLowerCase()
     return rows
@@ -5536,6 +5557,10 @@ function UnitEconomicsTab() {
             <Download className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
             WB API
           </Button>
+          <Button variant="outline" onClick={syncWbTariffs} disabled={loading || saving} className="gap-2">
+            <Calculator className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
+            Тарифы WB
+          </Button>
           <label>
             <input
               type="file"
@@ -5575,12 +5600,18 @@ function UnitEconomicsTab() {
       {syncInfo && (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
-          <AlertTitle>WB API синхронизация завершена</AlertTitle>
+          <AlertTitle>{syncInfo.type === 'tariffs' ? 'Тарифы WB обновлены' : 'WB API синхронизация завершена'}</AlertTitle>
           <AlertDescription className="space-y-3">
-            <div>
-              Карточек: {formatNumber(syncInfo.cards || 0)}, цен: {formatNumber(syncInfo.prices || 0)}, совпадений строк: {formatNumber(syncInfo.matchedRows || 0)}, обновлено: {formatNumber(syncInfo.updatedRows || 0)}
-            </div>
-            {targetReports.length > 0 && (
+            {syncInfo.type === 'tariffs' ? (
+              <div>
+                Дата тарифов: {syncInfo.date || 'сегодня'}, комиссии: {formatNumber(syncInfo.commissionRows || 0)}, складов логистики: {formatNumber(syncInfo.boxWarehouses || 0)}, возвратов: {formatNumber(syncInfo.returnWarehouses || 0)}, обновлено строк: {formatNumber(syncInfo.updatedRows || 0)}, из кеша: {formatNumber(syncInfo.cacheHits || 0)}
+              </div>
+            ) : (
+              <div>
+                Карточек: {formatNumber(syncInfo.cards || 0)}, цен: {formatNumber(syncInfo.prices || 0)}, совпадений строк: {formatNumber(syncInfo.matchedRows || 0)}, обновлено: {formatNumber(syncInfo.updatedRows || 0)}
+              </div>
+            )}
+            {targetReports.length > 0 && syncInfo.type !== 'tariffs' && (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {targetReports.map((report) => (
                   <div key={report.name} className="rounded-md border bg-background p-3 text-xs">
@@ -5595,6 +5626,27 @@ function UnitEconomicsTab() {
                       <Badge variant="outline">match: {formatNumber(report.matchedRows)}</Badge>
                     </div>
                     {report.warnings.length > 0 && (
+                      <div className="mt-2 line-clamp-2 text-muted-foreground">{report.warnings[0]}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(syncInfo.targetReports) && syncInfo.type === 'tariffs' && (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {syncInfo.targetReports.map((report: any) => (
+                  <div key={report.name} className="rounded-md border bg-background p-3 text-xs">
+                    <div className="mb-2 font-medium">{report.name}</div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant={report.status === 'ok' ? 'secondary' : 'destructive'}>
+                        {report.status === 'ok' ? 'доступ есть' : 'ошибка'}
+                      </Badge>
+                      <Badge variant="outline">комиссии {formatNumber(report.commissionRows || 0)}</Badge>
+                      <Badge variant="outline">склады {formatNumber(report.boxWarehouses || 0)}</Badge>
+                      <Badge variant="outline">обновлено {formatNumber(report.updatedRows || 0)}</Badge>
+                      {report.cacheHit && <Badge variant="secondary">кеш</Badge>}
+                    </div>
+                    {Array.isArray(report.warnings) && report.warnings.length > 0 && (
                       <div className="mt-2 line-clamp-2 text-muted-foreground">{report.warnings[0]}</div>
                     )}
                   </div>
