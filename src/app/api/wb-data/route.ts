@@ -1269,10 +1269,16 @@ export async function GET(request: NextRequest) {
     if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, dataMetric)
-      if (cachedDaily.daily && cachedDaily.missing === 0) {
+      if (cachedDaily.daily) {
         return NextResponse.json({
-          rateLimitErrors: [],
-          cacheSource: 'redis',
+          rateLimitErrors: cachedDaily.missing === 0
+            ? []
+            : [{
+              id: 0,
+              name: 'Redis cache',
+              error: `Часть дней еще не прогрета в кэше: ${cachedDaily.missing} из ${cachedDaily.total}.`,
+            }],
+          cacheSource: cachedDaily.missing === 0 ? 'redis' : 'redis-partial',
           cacheStats: {
             present: cachedDaily.present,
             missing: cachedDaily.missing,
@@ -1288,12 +1294,25 @@ export async function GET(request: NextRequest) {
         ent,
         daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent), dataMetric),
       })))
-      if (cachedDailyRows.every((row) => row.daily)) {
-        const dailyByEntrepreneur = Object.fromEntries(cachedDailyRows.map((row) => [row.ent.id, row.daily]))
+      const availableDailyRows = cachedDailyRows.filter((row) => row.daily)
+      if (availableDailyRows.length > 0) {
+        const missing = cachedDailyRows.length - availableDailyRows.length
+        const dailyByEntrepreneur = Object.fromEntries(availableDailyRows.map((row) => [row.ent.id, row.daily]))
         return NextResponse.json({
-          rateLimitErrors: [],
-          cacheSource: 'redis',
-          daily: mergeDailyPayloads(cachedDailyRows.map((row) => row.daily), [requestedDateFrom]),
+          rateLimitErrors: missing === 0
+            ? []
+            : [{
+              id: 0,
+              name: 'Redis cache',
+              error: `Часть продавцов еще не прогрета в кэше: ${missing} из ${cachedDailyRows.length}.`,
+            }],
+          cacheSource: missing === 0 ? 'redis' : 'redis-partial',
+          cacheStats: {
+            present: availableDailyRows.length,
+            missing,
+            total: cachedDailyRows.length,
+          },
+          daily: mergeDailyPayloads(availableDailyRows.map((row) => row.daily), [requestedDateFrom]),
           dailyByEntrepreneur,
         })
       }
