@@ -223,6 +223,40 @@ interface UnitEconomicsSummary {
   updatedAt: string | null
 }
 
+interface UnitCostComponent {
+  key: string
+  name: string
+  unit?: string
+  unitCostRub: number
+  quantity: number
+  costRub: number
+}
+
+interface UnitProductCost {
+  id: string
+  productName: string
+  productKey: string
+  totalCostRub: number
+  components: UnitCostComponent[]
+  lengthCm: number
+  widthCm: number
+  heightCm: number
+  volumeLiters: number
+  weightKg: number
+  fbsCommissionPct: number
+  fboCommissionPct: number
+  extraCommissionPct: number
+  boxQty: number
+  updatedAt?: string
+}
+
+interface UnitCostSummary {
+  totalRows: number
+  avgCostRub: number
+  components: number
+  updatedAt: string | null
+}
+
 interface UnitApiTargetReport {
   name: string
   cards: number
@@ -5314,21 +5348,28 @@ function summarizeUnitRows(rows: UnitEconomicsRow[]) {
 
 function UnitEconomicsTab() {
   const [rows, setRows] = useState<UnitEconomicsRow[]>([])
+  const [costs, setCosts] = useState<UnitProductCost[]>([])
   const [summary, setSummary] = useState<UnitEconomicsSummary | null>(null)
+  const [costSummary, setCostSummary] = useState<UnitCostSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [query, setQuery] = useState('')
   const [fulfillment, setFulfillment] = useState<'all' | UnitFulfillment>('all')
   const [editingRow, setEditingRow] = useState<Partial<UnitEconomicsRow> | null>(null)
+  const [editingCost, setEditingCost] = useState<Partial<UnitProductCost> | null>(null)
+  const [bulkPatch, setBulkPatch] = useState<Partial<UnitEconomicsRow> | null>(null)
   const [error, setError] = useState('')
   const [syncInfo, setSyncInfo] = useState<any>(null)
   const [selectedEntrepreneur, setSelectedEntrepreneur] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
+  const [unitMode, setUnitMode] = useState<'products' | 'costs'>('products')
 
   const applyStore = useCallback((json: any) => {
     const store = json?.store
     setRows(Array.isArray(store?.rows) ? store.rows : [])
+    setCosts(Array.isArray(store?.costs) ? store.costs : [])
     setSummary(store?.summary || null)
+    setCostSummary(store?.costSummary || null)
   }, [])
 
   const loadRows = useCallback(async () => {
@@ -5403,6 +5444,48 @@ function UnitEconomicsTab() {
       applyStore(json)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось удалить строку')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore])
+
+  const saveCost = useCallback(async () => {
+    if (!editingCost) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save-cost', cost: editingCost }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось сохранить себестоимость')
+      applyStore(json)
+      setEditingCost(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить себестоимость')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore, editingCost])
+
+  const bulkUpdateRows = useCallback(async (ids: string[], patch: Partial<UnitEconomicsRow>) => {
+    if (ids.length === 0) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk-update', ids, patch }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось массово обновить строки')
+      applyStore(json)
+      setBulkPatch(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось массово обновить строки')
     } finally {
       setSaving(false)
     }
@@ -5521,6 +5604,16 @@ function UnitEconomicsTab() {
   const selectedRows = selectedCategory?.rows || []
   const selectedSummary = summarizeUnitRows(selectedRows)
   const targetReports = Array.isArray(syncInfo?.targetReports) ? syncInfo.targetReports as UnitApiTargetReport[] : []
+  const visibleCosts = useMemo(() => {
+    const text = query.trim().toLowerCase()
+    return costs
+      .filter((cost) => !text || [
+        cost.productName,
+        cost.productKey,
+        ...cost.components.map((component) => component.name),
+      ].join(' ').toLowerCase().includes(text))
+      .sort((a, b) => a.productName.localeCompare(b.productName, 'ru'))
+  }, [costs, query])
 
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     const number = Number(value)
@@ -5532,6 +5625,38 @@ function UnitEconomicsTab() {
 
   const setEditText = (key: keyof UnitEconomicsRow, value: string) => {
     setEditingRow((current) => ({ ...(current || emptyUnitRow()), [key]: value }))
+  }
+
+  const setCostNumber = (key: keyof UnitProductCost, value: string, pct = false) => {
+    const number = Number(value)
+    setEditingCost((current) => ({
+      ...(current || { productName: '', components: [] }),
+      [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
+    }))
+  }
+
+  const setCostText = (key: keyof UnitProductCost, value: string) => {
+    setEditingCost((current) => ({ ...(current || { productName: '', components: [] }), [key]: value }))
+  }
+
+  const setBulkNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
+    if (value === '') {
+      setBulkPatch((current) => {
+        const next = { ...(current || {}) }
+        delete next[key]
+        return next
+      })
+      return
+    }
+    const number = Number(value)
+    setBulkPatch((current) => ({
+      ...(current || {}),
+      [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
+    }))
+  }
+
+  const setBulkText = (key: keyof UnitEconomicsRow, value: string) => {
+    setBulkPatch((current) => ({ ...(current || {}), [key]: value }))
   }
 
   const unitStatus = (row: UnitEconomicsRow) => {
@@ -5546,7 +5671,17 @@ function UnitEconomicsTab() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">Юнит экономика</h2>
-          <p className="text-sm text-muted-foreground">Эталонные расчеты FBS/FBO с импортом из Excel и редактируемыми ручными полями.</p>
+          <p className="text-sm text-muted-foreground">Расчет как в Excel: себестоимость отдельно, WB данные отдельно, ручные параметры массово.</p>
+          <ToggleGroup type="single" value={unitMode} onValueChange={(value) => value && setUnitMode(value as 'products' | 'costs')} className="mt-3 justify-start">
+            <ToggleGroupItem value="products" className="gap-2">
+              <Calculator className="h-4 w-4" />
+              Товары
+            </ToggleGroupItem>
+            <ToggleGroupItem value="costs" className="gap-2">
+              <Package className="h-4 w-4" />
+              Себестоимость
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={loadRows} disabled={loading || saving} className="gap-2">
@@ -5582,9 +5717,13 @@ function UnitEconomicsTab() {
             entrepreneurName: selectedEntrepreneur,
             category: selectedSubcategory,
             excelProductKey: selectedSubcategory,
-          })} className="gap-2">
+          })} className="gap-2" disabled={unitMode !== 'products'}>
             <Plus className="h-4 w-4" />
             Товар
+          </Button>
+          <Button onClick={() => setEditingCost({ productName: query.trim(), productKey: normalizeClientUnitKey(query.trim()), components: [] })} className="gap-2" disabled={unitMode !== 'costs'}>
+            <Plus className="h-4 w-4" />
+            Себестоимость
           </Button>
         </div>
       </div>
@@ -5662,9 +5801,10 @@ function UnitEconomicsTab() {
         <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle="после рекламы" />
         <UnitMetricCard title="Рентабельность" value={`${(summary?.avgProfitabilityPct || 0).toFixed(1)}%`} subtitle="средняя по строкам" />
         <UnitMetricCard title="В минусе" value={formatNumber(summary?.lossRows || 0)} subtitle="требуют внимания" />
-        <UnitMetricCard title="Ниже минимума" value={formatNumber(summary?.belowMinRows || 0)} subtitle="по целевой прибыли" />
+        <UnitMetricCard title="Себестоимость" value={formatNumber(costSummary?.totalRows || 0)} subtitle={`ср. ${formatNumber(Math.round(costSummary?.avgCostRub || 0))} ₽`} />
       </div>
 
+      {unitMode === 'products' ? (
       <Card>
         <CardHeader className="gap-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -5762,6 +5902,14 @@ function UnitEconomicsTab() {
                   <div className="flex flex-wrap gap-2 text-xs">
                     <Badge variant="outline">ср. прибыль {formatNumber(Math.round(selectedSummary.avgProfit))} ₽</Badge>
                     {selectedSummary.losses > 0 && <Badge variant="destructive">минус {formatNumber(selectedSummary.losses)}</Badge>}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setBulkPatch({})}
+                      disabled={selectedRows.length === 0 || saving}
+                    >
+                      Массово
+                    </Button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -5823,6 +5971,84 @@ function UnitEconomicsTab() {
           )}
         </CardContent>
       </Card>
+      ) : (
+      <Card>
+        <CardHeader className="gap-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle className="text-base">Себестоимость</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">Источник для себестоимости, габаритов, веса и коробки в строках юнитки.</p>
+            </div>
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по товару или материалу" className="lg:w-80" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : visibleCosts.length === 0 ? (
+            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+              Себестоимость не найдена. Импортируйте Excel или добавьте товар вручную.
+            </div>
+          ) : (
+            <Accordion type="single" collapsible className="rounded-md border">
+              {visibleCosts.map((cost) => (
+                <AccordionItem key={cost.id} value={cost.id}>
+                  <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_120px_160px_80px] items-center gap-3 pr-4 text-left text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{cost.productName}</div>
+                        <div className="truncate text-xs text-muted-foreground">{cost.components.length} компонентов · {cost.lengthCm}×{cost.widthCm}×{cost.heightCm} см · {cost.weightKg} кг</div>
+                      </div>
+                      <div className="text-right font-semibold">{formatNumber(Math.round(cost.totalCostRub))} ₽</div>
+                      <div className="text-right text-xs text-muted-foreground">FBS {(cost.fbsCommissionPct * 100).toFixed(1)}% · FBO {(cost.fboCommissionPct * 100).toFixed(1)}%</div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setEditingCost(cost)
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 pb-4">
+                    <div className="overflow-x-auto rounded-md border">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/30">
+                            <th className="px-3 py-2 text-left font-medium">Компонент</th>
+                            <th className="px-3 py-2 text-right font-medium">Кол-во</th>
+                            <th className="px-3 py-2 text-left font-medium">Ед.</th>
+                            <th className="px-3 py-2 text-right font-medium">Цена ед.</th>
+                            <th className="px-3 py-2 text-right font-medium">Сумма</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cost.components.map((component) => (
+                            <tr key={`${cost.id}-${component.key}`} className="border-b">
+                              <td className="px-3 py-2">{component.name}</td>
+                              <td className="px-3 py-2 text-right">{formatNumber(component.quantity)}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{component.unit || '-'}</td>
+                              <td className="px-3 py-2 text-right">{formatNumber(component.unitCostRub)} ₽</td>
+                              <td className="px-3 py-2 text-right font-medium">{formatNumber(Math.round(component.costRub))} ₽</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
       <Dialog open={!!editingRow} onOpenChange={(open) => !open && setEditingRow(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
@@ -5894,6 +6120,120 @@ function UnitEconomicsTab() {
             <Button onClick={saveRow} disabled={saving} className="gap-2">
               <Save className="h-4 w-4" />
               Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingCost} onOpenChange={(open) => !open && setEditingCost(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{editingCost?.id ? 'Редактировать себестоимость' : 'Новая себестоимость'}</DialogTitle>
+            <DialogDescription>Эти данные подтягиваются в товары юнитки по названию товара и сохраняются для всех админов.</DialogDescription>
+          </DialogHeader>
+          {editingCost && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Товар</Label>
+                <Input value={editingCost.productName || ''} onChange={(e) => {
+                  setCostText('productName', e.target.value)
+                  setCostText('productKey', normalizeClientUnitKey(e.target.value))
+                }} />
+              </div>
+              {[
+                ['totalCostRub', 'Себестоимость изделия, ₽'],
+                ['lengthCm', 'Длина, см'],
+                ['widthCm', 'Ширина, см'],
+                ['heightCm', 'Высота, см'],
+                ['weightKg', 'Вес, кг'],
+                ['boxQty', 'Кол-во в коробке ФБО'],
+                ['fbsCommissionPct', 'Базовая комиссия FBS, %', true],
+                ['fboCommissionPct', 'Базовая комиссия FBO, %', true],
+              ].map(([key, label, pct]) => (
+                <div key={String(key)} className="space-y-1">
+                  <Label>{String(label)}</Label>
+                  <Input
+                    type="number"
+                    value={pct ? Number(editingCost[key as keyof UnitProductCost] || 0) * 100 : Number(editingCost[key as keyof UnitProductCost] || 0)}
+                    onChange={(e) => setCostNumber(key as keyof UnitProductCost, e.target.value, !!pct)}
+                  />
+                </div>
+              ))}
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Состав из Excel</Label>
+                <div className="max-h-56 overflow-auto rounded-md border">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {(editingCost.components || []).map((component) => (
+                        <tr key={component.key} className="border-b">
+                          <td className="px-2 py-1">{component.name}</td>
+                          <td className="px-2 py-1 text-right">{formatNumber(component.quantity)}</td>
+                          <td className="px-2 py-1 text-muted-foreground">{component.unit || ''}</td>
+                          <td className="px-2 py-1 text-right">{formatNumber(Math.round(component.costRub))} ₽</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCost(null)}>Отмена</Button>
+            <Button onClick={saveCost} disabled={saving} className="gap-2">
+              <Save className="h-4 w-4" />
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!bulkPatch} onOpenChange={(open) => !open && setBulkPatch(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Массовое обновление</DialogTitle>
+            <DialogDescription>
+              Будет обновлено строк: {formatNumber(selectedRows.length)}. Пустые поля не изменяются.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>Склад</Label>
+              <Input value={String(bulkPatch?.warehouse || '')} onChange={(e) => setBulkText('warehouse', e.target.value)} />
+            </div>
+            {[
+              ['avgDeliveryDays', 'Среднее время доставки'],
+              ['fixedWarehouseCoeff', 'Коэффициент склада'],
+              ['buyoutPct', '% выкупа', true],
+              ['localizationIndex', 'Индекс локализации'],
+              ['taxAcquiringPct', 'Налог + эквайринг, %', true],
+              ['drrPct', 'ДРР, %', true],
+              ['sppPct', 'СПП, %', true],
+              ['walletPct', 'Кошелек WB, %', true],
+              ['minProfitRub', 'Минимальная прибыль, ₽'],
+            ].map(([key, label, pct]) => (
+              <div key={String(key)} className="space-y-1">
+                <Label>{String(label)}</Label>
+                <Input
+                  type="number"
+                  value={bulkPatch && bulkPatch[key as keyof UnitEconomicsRow] !== undefined
+                    ? (pct ? Number(bulkPatch[key as keyof UnitEconomicsRow] || 0) * 100 : Number(bulkPatch[key as keyof UnitEconomicsRow] || 0))
+                    : ''}
+                  onChange={(e) => setBulkNumber(key as keyof UnitEconomicsRow, e.target.value, !!pct)}
+                  placeholder="не менять"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkPatch(null)}>Отмена</Button>
+            <Button
+              onClick={() => bulkUpdateRows(selectedRows.map((row) => row.id), bulkPatch || {})}
+              disabled={saving || selectedRows.length === 0 || Object.keys(bulkPatch || {}).length === 0}
+              className="gap-2"
+            >
+              <Save className="h-4 w-4" />
+              Применить
             </Button>
           </DialogFooter>
         </DialogContent>

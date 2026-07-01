@@ -38,10 +38,38 @@ export interface UnitEconomicsRow {
   updatedAt?: string
 }
 
+export interface UnitCostComponent {
+  key: string
+  name: string
+  unit?: string
+  unitCostRub: number
+  quantity: number
+  costRub: number
+}
+
+export interface UnitProductCost {
+  id: string
+  productName: string
+  productKey: string
+  totalCostRub: number
+  components: UnitCostComponent[]
+  lengthCm: number
+  widthCm: number
+  heightCm: number
+  volumeLiters: number
+  weightKg: number
+  fbsCommissionPct: number
+  fboCommissionPct: number
+  extraCommissionPct: number
+  boxQty: number
+  updatedAt?: string
+}
+
 export interface UnitEconomicsStore {
   version: 1
   updatedAt: string
   rows: UnitEconomicsRow[]
+  costs?: UnitProductCost[]
 }
 
 export interface UnitEconomicsCalculatedRow extends UnitEconomicsRow {
@@ -177,6 +205,24 @@ export function summarizeUnitEconomics(rows: UnitEconomicsCalculatedRow[]) {
     updatedAt: rows.reduce<string | null>((latest, row) => {
       if (!row.updatedAt) return latest
       if (!latest || row.updatedAt > latest) return row.updatedAt
+      return latest
+    }, null),
+  }
+}
+
+export function summarizeUnitCosts(costs: UnitProductCost[]) {
+  const withCost = costs.filter((cost) => cost.totalCostRub > 0)
+  const avgCost = withCost.length
+    ? withCost.reduce((sum, cost) => sum + cost.totalCostRub, 0) / withCost.length
+    : 0
+
+  return {
+    totalRows: costs.length,
+    avgCostRub: roundMoney(avgCost),
+    components: costs.reduce((sum, cost) => sum + cost.components.length, 0),
+    updatedAt: costs.reduce<string | null>((latest, cost) => {
+      if (!cost.updatedAt) return latest
+      if (!latest || cost.updatedAt > latest) return cost.updatedAt
       return latest
     }, null),
   }

@@ -3,16 +3,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { redisCommand } from '@/lib/redis-cache'
 import seedRowsRaw from '@/data/unit-economics-seed.json'
+import seedCostsRaw from '@/data/unit-economics-cost-seed.json'
 import { getVercelWbTargets, type WbTarget } from '@/lib/user-store'
 import { mapWbOrderToProductKey } from '@/lib/wb-mapping'
 import {
   calculateUnitEconomics,
   normalizeUnitProductKey,
+  summarizeUnitCosts,
   summarizeUnitEconomics,
   toNumber,
+  type UnitCostComponent,
   type UnitEconomicsRow,
   type UnitEconomicsStore,
   type UnitFulfillment,
+  type UnitProductCost,
 } from '@/lib/unit-economics'
 
 const STORE_KEY = 'wb:unit-economics:v1'
@@ -20,6 +24,7 @@ const CONTENT_CARDS_URL = 'https://content-api.wildberries.ru/content/v2/get/car
 const PRICES_URL = 'https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter'
 const COMMON_API_BASE = 'https://common-api.wildberries.ru'
 const seedRows = seedRowsRaw as UnitEconomicsRow[]
+const seedCosts = seedCostsRaw as UnitProductCost[]
 
 interface WbCard {
   nmId: number
@@ -32,6 +37,7 @@ interface WbCard {
 interface WbPrice {
   priceBeforeDiscountRub: number
   discountPct: number
+  clubDiscountPct: number
 }
 
 interface WbTariffsPayload {
@@ -43,10 +49,12 @@ interface WbTariffsPayload {
 }
 
 function seedStore(): UnitEconomicsStore {
+  const costs = seedCosts.map((cost) => normalizeCost(cost))
   return {
     version: 1,
-    updatedAt: seedRows[0]?.updatedAt || new Date(0).toISOString(),
-    rows: seedRows.map((row) => normalizeRow(row)),
+    updatedAt: seedRows[0]?.updatedAt || costs[0]?.updatedAt || new Date(0).toISOString(),
+    rows: applyCostCatalog(seedRows.map((row) => normalizeRow(row)), costs),
+    costs,
   }
 }
 
@@ -59,18 +67,21 @@ async function readStore(): Promise<UnitEconomicsStore> {
     return {
       version: 1,
       updatedAt: parsed.updatedAt || new Date(0).toISOString(),
-      rows: parsed.rows,
+      rows: applyCostCatalog(parsed.rows.map((row) => normalizeRow(row)), (parsed.costs || seedCosts).map((cost) => normalizeCost(cost))),
+      costs: (parsed.costs || seedCosts).map((cost) => normalizeCost(cost)),
     }
   } catch {
     return seedStore()
   }
 }
 
-async function writeStore(rows: UnitEconomicsRow[]): Promise<UnitEconomicsStore> {
+async function writeStore(rows: UnitEconomicsRow[], costsInput?: UnitProductCost[]): Promise<UnitEconomicsStore> {
+  const costs = (costsInput || seedCosts).map((cost) => normalizeCost(cost))
   const store: UnitEconomicsStore = {
     version: 1,
     updatedAt: new Date().toISOString(),
-    rows,
+    rows: applyCostCatalog(rows.map((row) => normalizeRow(row)), costs),
+    costs,
   }
   const result = await redisCommand<string>(['SET', STORE_KEY, JSON.stringify(store)])
   if (!result) throw new Error('Redis store is not available')
@@ -78,13 +89,16 @@ async function writeStore(rows: UnitEconomicsRow[]): Promise<UnitEconomicsStore>
 }
 
 function jsonResponse(store: UnitEconomicsStore) {
-  const rows = store.rows.map(calculateUnitEconomics)
+  const costs = (store.costs || seedCosts).map((cost) => normalizeCost(cost))
+  const rows = applyCostCatalog(store.rows.map((row) => normalizeRow(row)), costs).map(calculateUnitEconomics)
   return NextResponse.json({
     store: {
       version: store.version,
       updatedAt: store.updatedAt,
       rows,
+      costs,
       summary: summarizeUnitEconomics(rows),
+      costSummary: summarizeUnitCosts(costs),
     },
   })
 }
@@ -146,7 +160,120 @@ function normalizeRow(input: Partial<UnitEconomicsRow>, existing?: UnitEconomics
   }
 }
 
-async function parseWorkbookRows(file: File): Promise<UnitEconomicsRow[]> {
+function normalizeCost(input: Partial<UnitProductCost>, existing?: UnitProductCost): UnitProductCost {
+  const now = new Date().toISOString()
+  const productName = String(input.productName ?? existing?.productName ?? '').trim()
+  const components = Array.isArray(input.components) ? input.components : existing?.components || []
+  const normalizedComponents: UnitCostComponent[] = components.map((component) => ({
+    key: String(component.key || '').trim(),
+    name: String(component.name || '').trim(),
+    unit: component.unit ? String(component.unit).trim() : '',
+    unitCostRub: toNumber(component.unitCostRub),
+    quantity: toNumber(component.quantity),
+    costRub: toNumber(component.costRub),
+  })).filter((component) => component.name)
+
+  return {
+    id: String(input.id || existing?.id || randomUUID()),
+    productName,
+    productKey: normalizeUnitProductKey(input.productKey || existing?.productKey || productName),
+    totalCostRub: toNumber(input.totalCostRub, existing?.totalCostRub || 0),
+    components: normalizedComponents,
+    lengthCm: toNumber(input.lengthCm, existing?.lengthCm || 0),
+    widthCm: toNumber(input.widthCm, existing?.widthCm || 0),
+    heightCm: toNumber(input.heightCm, existing?.heightCm || 0),
+    volumeLiters: toNumber(input.volumeLiters, existing?.volumeLiters || 0),
+    weightKg: toNumber(input.weightKg, existing?.weightKg || 0),
+    fbsCommissionPct: normalizePct(input.fbsCommissionPct ?? existing?.fbsCommissionPct ?? 0),
+    fboCommissionPct: normalizePct(input.fboCommissionPct ?? existing?.fboCommissionPct ?? 0),
+    extraCommissionPct: normalizePct(input.extraCommissionPct ?? existing?.extraCommissionPct ?? 0),
+    boxQty: toNumber(input.boxQty, existing?.boxQty || 0),
+    updatedAt: input.updatedAt || existing?.updatedAt || now,
+  }
+}
+
+function applyCostCatalog(rows: UnitEconomicsRow[], costs: UnitProductCost[]): UnitEconomicsRow[] {
+  const byKey = new Map(costs.map((cost) => [normalizeUnitProductKey(cost.productKey || cost.productName), cost]))
+  return rows.map((row) => {
+    const key = normalizeUnitProductKey(row.excelProductKey || row.productName)
+    const cost = byKey.get(key)
+    if (!cost) return row
+    return {
+      ...row,
+      costRub: cost.totalCostRub || row.costRub,
+      lengthCm: cost.lengthCm || row.lengthCm,
+      widthCm: cost.widthCm || row.widthCm,
+      heightCm: cost.heightCm || row.heightCm,
+      weightKg: cost.weightKg || row.weightKg,
+      boxQty: cost.boxQty || row.boxQty,
+    }
+  })
+}
+
+function readWorkbookCosts(workbook: import('xlsx').WorkBook, XLSX: typeof import('xlsx')): UnitProductCost[] {
+  const sheet = workbook.Sheets['Себестоимость 2.0']
+  if (!sheet?.['!ref']) return []
+  const range = XLSX.utils.decode_range(sheet['!ref'])
+  const cell = (row: number, col: number) => sheet[XLSX.utils.encode_cell({ r: row, c: col })]?.v
+  const components: Array<{ col: number; key: string; name: string; unit: string; unitCostRub: number }> = []
+
+  for (let col = 2; col <= 49; col += 1) {
+    const name = String(cell(0, col) || '').trim()
+    if (!name) continue
+    components.push({
+      col,
+      key: XLSX.utils.encode_col(col),
+      name,
+      unit: String(cell(4, col) || '').trim(),
+      unitCostRub: toNumber(cell(2, col)),
+    })
+  }
+
+  const costs: UnitProductCost[] = []
+  for (let row = 6; row <= range.e.r; row += 1) {
+    const productName = String(cell(row, 0) || '').trim()
+    if (!productName || /КОЛ-ВО МАТЕРИАЛОВ/i.test(productName) || productName === 'СЕБЕСТОИМОСТЬ ПО ИЗДЕЛИЯМ') continue
+    const totalCostRub = toNumber(cell(row, 1))
+    if (totalCostRub <= 0) continue
+    const previousName = String(cell(row - 1, 0) || '')
+    const quantityRow = /КОЛ-ВО МАТЕРИАЛОВ/i.test(previousName) ? row - 1 : -1
+    const costComponents = components
+      .map((component) => {
+        const quantity = quantityRow >= 0 ? toNumber(cell(quantityRow, component.col)) : 0
+        const costRub = toNumber(cell(row, component.col))
+        return {
+          key: component.key,
+          name: component.name,
+          unit: component.unit,
+          unitCostRub: component.unitCostRub,
+          quantity,
+          costRub,
+        }
+      })
+      .filter((component) => component.quantity || component.costRub)
+
+    costs.push(normalizeCost({
+      id: `cost-${row + 1}`,
+      productName,
+      productKey: normalizeUnitProductKey(productName),
+      totalCostRub,
+      components: costComponents,
+      lengthCm: toNumber(cell(row, 51)),
+      widthCm: toNumber(cell(row, 52)),
+      heightCm: toNumber(cell(row, 53)),
+      volumeLiters: toNumber(cell(row, 54)),
+      weightKg: toNumber(cell(row, 55)),
+      fbsCommissionPct: toNumber(cell(row, 56)),
+      fboCommissionPct: toNumber(cell(row, 57)),
+      extraCommissionPct: toNumber(cell(row, 58)),
+      boxQty: toNumber(cell(row, 59)),
+      updatedAt: new Date().toISOString(),
+    }))
+  }
+  return costs
+}
+
+async function parseWorkbook(file: File): Promise<{ rows: UnitEconomicsRow[]; costs: UnitProductCost[] }> {
   const XLSX = await import('xlsx')
   const buffer = Buffer.from(await file.arrayBuffer())
   const workbook = XLSX.read(buffer, { type: 'buffer', cellFormula: true, cellDates: false })
@@ -206,10 +333,13 @@ async function parseWorkbookRows(file: File): Promise<UnitEconomicsRow[]> {
     return rows
   }
 
-  return [
+  return {
+    rows: [
     ...readSheet('Юнитка 2.0 ФБС', 'fbs'),
     ...readSheet('Юнитка 2.0 ФБО', 'fbo'),
-  ]
+    ],
+    costs: readWorkbookCosts(workbook, XLSX),
+  }
 }
 
 function normalizeApiKey(apiKey: string) {
@@ -377,9 +507,11 @@ async function fetchWbPrices(target: WbTarget): Promise<Map<number, WbPrice>> {
       if (!nmId) continue
       const price = numberFromRecord(record, ['price', 'priceBeforeDiscount', 'basicPrice'])
       const discount = toNumber(record.discount)
+      const clubDiscount = toNumber(record.clubDiscount)
       prices.set(nmId, {
         priceBeforeDiscountRub: price,
         discountPct: Math.abs(discount) > 1 ? discount / 100 : discount,
+        clubDiscountPct: Math.abs(clubDiscount) > 1 ? clubDiscount / 100 : clubDiscount,
       })
     }
 
@@ -589,6 +721,7 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
           if (!row.category && card.subject) row.category = card.subject
           if (price?.priceBeforeDiscountRub) row.priceBeforeDiscountRub = price.priceBeforeDiscountRub
           if (price && Number.isFinite(price.discountPct)) row.discountPct = price.discountPct
+          if (price && Number.isFinite(price.clubDiscountPct)) row.walletPct = price.clubDiscountPct
         }
         if (JSON.stringify(row) !== before) {
           row.updatedAt = now
@@ -601,7 +734,7 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   }
 
   return {
-    store: await writeStore(rows),
+    store: await writeStore(rows, store.costs),
     stats,
   }
 }
@@ -690,7 +823,7 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
   }
 
   return {
-    store: await writeStore(rows),
+    store: await writeStore(rows, store.costs),
     stats,
   }
 }
@@ -718,8 +851,8 @@ export async function POST(request: NextRequest) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'XLSX файл не найден' }, { status: 400 })
     }
-    const rows = await parseWorkbookRows(file)
-    const nextStore = await writeStore(rows)
+    const { rows, costs } = await parseWorkbook(file)
+    const nextStore = await writeStore(rows, costs.length ? costs : store.costs)
     return jsonResponse(nextStore)
   }
 
@@ -731,7 +864,51 @@ export async function POST(request: NextRequest) {
   }
 
   if (body.action === 'replace' && Array.isArray(body.rows)) {
-    const nextStore = await writeStore(body.rows.map((row: Partial<UnitEconomicsRow>) => normalizeRow(row)))
+    const nextStore = await writeStore(body.rows.map((row: Partial<UnitEconomicsRow>) => normalizeRow(row)), store.costs)
+    return jsonResponse(nextStore)
+  }
+
+  if (body.action === 'save-cost') {
+    const existingCosts = store.costs || seedCosts
+    const existing = existingCosts.find((cost) => cost.id === body.cost?.id)
+    const nextCost = normalizeCost({ ...(body.cost || {}), updatedAt: new Date().toISOString() }, existing)
+    const costs = existing
+      ? existingCosts.map((cost) => cost.id === existing.id ? nextCost : cost)
+      : [nextCost, ...existingCosts]
+    const nextStore = await writeStore(store.rows, costs)
+    return jsonResponse(nextStore)
+  }
+
+  if (body.action === 'delete-cost') {
+    const ids = new Set(Array.isArray(body.ids) ? body.ids.map(String) : [String(body.id || '')])
+    const nextStore = await writeStore(store.rows, (store.costs || seedCosts).filter((cost) => !ids.has(cost.id)))
+    return jsonResponse(nextStore)
+  }
+
+  if (body.action === 'bulk-update' && Array.isArray(body.ids) && body.patch && typeof body.patch === 'object') {
+    const ids = new Set(body.ids.map(String))
+    const allowedKeys = new Set<keyof UnitEconomicsRow>([
+      'avgDeliveryDays',
+      'warehouse',
+      'fixedWarehouseCoeff',
+      'buyoutPct',
+      'localizationIndex',
+      'taxAcquiringPct',
+      'drrPct',
+      'minProfitRub',
+      'sppPct',
+      'walletPct',
+    ])
+    const rows = store.rows.map((row) => {
+      if (!ids.has(row.id)) return row
+      const patch = Object.entries(body.patch).reduce<Partial<UnitEconomicsRow>>((acc, [key, value]) => {
+        if (!allowedKeys.has(key as keyof UnitEconomicsRow)) return acc
+        ;(acc as Record<string, unknown>)[key] = value
+        return acc
+      }, {})
+      return normalizeRow({ ...row, ...patch, updatedAt: new Date().toISOString() }, row)
+    })
+    const nextStore = await writeStore(rows, store.costs)
     return jsonResponse(nextStore)
   }
 
@@ -776,6 +953,6 @@ export async function POST(request: NextRequest) {
   const rows = existing
     ? store.rows.map((row) => row.id === existing.id ? nextRow : row)
     : [nextRow, ...store.rows]
-  const nextStore = await writeStore(rows)
+  const nextStore = await writeStore(rows, store.costs)
   return jsonResponse(nextStore)
 }
