@@ -89,6 +89,17 @@ function jsonResponse(store: UnitEconomicsStore) {
   })
 }
 
+async function getAuthorizedUser(request: NextRequest) {
+  const internalWarmRequest = !!(
+    process.env.WB_VERCEL_API_TOKEN
+    && request.headers.get('x-wb-internal-warm') === process.env.WB_VERCEL_API_TOKEN
+  )
+  return await getCurrentUser()
+    || (internalWarmRequest
+      ? { id: 0, username: 'cron', role: 'admin' as const }
+      : null)
+}
+
 function normalizePct(value: unknown) {
   const number = toNumber(value)
   return Math.abs(number) > 1 ? number / 100 : number
@@ -684,8 +695,8 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
   }
 }
 
-export async function GET() {
-  const user = await getCurrentUser()
+export async function GET(request: NextRequest) {
+  const user = await getAuthorizedUser(request)
   if (!user) return unauthorized()
   if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -694,7 +705,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser()
+  const user = await getAuthorizedUser(request)
   if (!user) return unauthorized()
   if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
