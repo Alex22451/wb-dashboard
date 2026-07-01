@@ -697,6 +697,7 @@ const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/ana
 const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
 const FUNNEL_REQUEST_INTERVAL_MS = 21000
 const FUNNEL_PRODUCTS_PAGE_LIMIT = 1000
+const FUNNEL_HISTORY_MAX_DAYS = 7
 
 // Derived from upload/Отчет ВБ ежедневный (1) (1).xlsx, sheet "ОБЩИЙ ОТЧЕТ":
 // 7-day rolling product peaks across the available 2024-2026 history.
@@ -959,6 +960,27 @@ async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): 
 }
 
 async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
+  const rangeDates = getDateRange(from, to)
+  if (rangeDates.length > FUNNEL_HISTORY_MAX_DAYS) {
+    const orders: any[] = []
+    const errors: string[] = []
+
+    for (let offset = 0; offset < rangeDates.length; offset += FUNNEL_HISTORY_MAX_DAYS) {
+      const chunkDates = rangeDates.slice(offset, offset + FUNNEL_HISTORY_MAX_DAYS)
+      const result = await fetchFunnelHistoryOrders(apiKey, chunkDates[0], chunkDates[chunkDates.length - 1])
+      if (result.orders.length > 0) orders.push(...result.orders)
+      if (result.error) errors.push(result.error)
+      if (offset + FUNNEL_HISTORY_MAX_DAYS < rangeDates.length) {
+        await new Promise(resolve => setTimeout(resolve, 1200))
+      }
+    }
+
+    return {
+      orders,
+      error: [...new Set(errors)].slice(0, 3).join('; ') || undefined,
+    }
+  }
+
   const productsResult = await fetchFunnelProducts(apiKey, from, to)
   const nmIds = [...new Set(
     productsResult.products
@@ -1218,16 +1240,16 @@ export async function GET(request: NextRequest) {
     const needProduction = !section || section === 'production'
     const needSupply = !section || section === 'supply'
     const shouldUseFunnelOrders = dataMetric === 'orders' && !needSupply && (
-      needDaily || needProduction || (useExactSingleDayStats && (needDashboard || needMonthly))
+      needDaily || (useExactSingleDayStats && (needDashboard || needMonthly))
     )
 
     if (section === 'production') {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readCompleteDateMergedRedisDailyPayload(targets, currentDates, 'orders')
-      if (cachedDaily.daily) {
+      if (cachedDaily.daily && cachedDaily.missing === 0) {
         return NextResponse.json({
           rateLimitErrors: [],
-          cacheSource: cachedDaily.missing === 0 ? 'redis' : 'redis-complete-dates',
+          cacheSource: 'redis',
           cacheStats: {
             present: cachedDaily.present,
             missing: cachedDaily.missing,
