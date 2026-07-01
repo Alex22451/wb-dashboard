@@ -267,6 +267,27 @@ function parseUserApiKeys(raw: unknown): UserApiKeys | null {
   }
 }
 
+async function scanRedisUserApiKeyIds(): Promise<number[]> {
+  if (!hasRedisConfig()) return []
+  const ids = new Set<number>()
+  let cursor = '0'
+  let scanned = 0
+
+  do {
+    const result = await redisCommand<[string, string[]]>(['SCAN', cursor, 'MATCH', 'wb_user_*_api_keys', 'COUNT', 100])
+    if (!Array.isArray(result)) break
+    cursor = String(result[0] || '0')
+    const keys = Array.isArray(result[1]) ? result[1] : []
+    scanned += keys.length
+    for (const key of keys) {
+      const match = String(key).match(/^wb_user_(\d+)_api_keys$/)
+      if (match) ids.add(Number(match[1]))
+    }
+  } while (cursor !== '0' && scanned < 5000)
+
+  return [...ids].sort((a, b) => a - b)
+}
+
 async function getAdminAngelinaTarget(): Promise<WbTarget | null> {
   let angelinaUser: StoredUser | null = null
   for (const username of ['Angelina', 'angelina']) {
@@ -372,6 +393,29 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
         keys: edgeKeys.get(id) || null,
       })
       userIds.add(id)
+    }
+  } catch {
+    // Fall back to id probing below.
+  }
+
+  try {
+    const redisApiKeyIds = await scanRedisUserApiKeyIds()
+    for (const id of redisApiKeyIds) {
+      const keys = parseUserApiKeys(await kvGet<string>(apiKeysKey(id)))
+      let user = await getStoredUserById(id)
+      if (!user && id >= REDIS_USER_ID_OFFSET) user = await getStoredUserById(id - REDIS_USER_ID_OFFSET)
+      if (!user && keys?.apiKey) {
+        user = {
+          id: id >= REDIS_USER_ID_OFFSET ? id - REDIS_USER_ID_OFFSET : id,
+          username: keys.sellerName || String(id),
+          passwordHash: '',
+          role: 'user',
+          createdAt: '',
+        }
+      }
+      userRows.push({ user, keys })
+      userIds.add(id)
+      if (id >= REDIS_USER_ID_OFFSET) userIds.add(id - REDIS_USER_ID_OFFSET)
     }
   } catch {
     // Fall back to id probing below.
