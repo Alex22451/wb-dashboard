@@ -310,54 +310,62 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   }
 
   for (const target of targets) {
+    let cards: WbCard[] = []
+    let prices = new Map<number, WbPrice>()
+
     try {
-      const [cards, prices] = await Promise.all([
-        fetchWbCards(target),
-        fetchWbPrices(target),
-      ])
+      cards = await fetchWbCards(target)
       stats.cards += cards.length
+    } catch (error) {
+      stats.errors.push(error instanceof Error ? error.message : `${target.name}: ошибка WB Content API`)
+      continue
+    }
+
+    try {
+      prices = await fetchWbPrices(target)
       stats.prices += prices.size
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${target.name}: ошибка WB Prices API`
+      stats.errors.push(`${message}; цены пропущены, карточки замаплены`)
+    }
 
-      for (const card of cards) {
-        const mappedKey = normalizeUnitProductKey(mapWbOrderToProductKey(card.subject, card.vendorCode, card.brand) || '')
-        if (!mappedKey) continue
-        const matched = rowKeys.filter(({ row, key }) => {
-          if (key !== mappedKey) return false
-          if (!row.entrepreneurName) return true
-          return sameEntrepreneur(row.entrepreneurName, target.name)
-        })
+    for (const card of cards) {
+      const mappedKey = normalizeUnitProductKey(mapWbOrderToProductKey(card.subject, card.vendorCode, card.brand) || '')
+      if (!mappedKey) continue
+      const matched = rowKeys.filter(({ row, key }) => {
+        if (key !== mappedKey) return false
+        if (!row.entrepreneurName) return true
+        return sameEntrepreneur(row.entrepreneurName, target.name)
+      })
 
-        if (matched.length === 0) {
-          if (stats.unmatchedCards.length < 20) {
-            stats.unmatchedCards.push({ target: target.name, vendorCode: card.vendorCode, nmId: card.nmId, key: mappedKey })
-          }
-          continue
+      if (matched.length === 0) {
+        if (stats.unmatchedCards.length < 20) {
+          stats.unmatchedCards.push({ target: target.name, vendorCode: card.vendorCode, nmId: card.nmId, key: mappedKey })
         }
+        continue
+      }
 
-        const price = prices.get(card.nmId)
-        stats.matchedRows += matched.length
-        for (const match of matched) {
-          const row = match.row
-          const before = JSON.stringify(row)
-          const shouldUseCardValues = !row.nmId || row.nmId === card.nmId || row.vendorCode === card.vendorCode
-          if (shouldUseCardValues) {
-            row.nmId = row.nmId || card.nmId
-            row.vendorCode = row.vendorCode || card.vendorCode
-            row.wbSubject = card.subject
-            row.wbBrand = card.brand
-            row.wbSyncedAt = now
-            if (!row.category && card.subject) row.category = card.subject
-            if (price?.priceBeforeDiscountRub) row.priceBeforeDiscountRub = price.priceBeforeDiscountRub
-            if (price && Number.isFinite(price.discountPct)) row.discountPct = price.discountPct
-          }
-          if (JSON.stringify(row) !== before) {
-            row.updatedAt = now
-            stats.updatedRows += 1
-          }
+      const price = prices.get(card.nmId)
+      stats.matchedRows += matched.length
+      for (const match of matched) {
+        const row = match.row
+        const before = JSON.stringify(row)
+        const shouldUseCardValues = !row.nmId || row.nmId === card.nmId || row.vendorCode === card.vendorCode
+        if (shouldUseCardValues) {
+          row.nmId = row.nmId || card.nmId
+          row.vendorCode = row.vendorCode || card.vendorCode
+          row.wbSubject = card.subject
+          row.wbBrand = card.brand
+          row.wbSyncedAt = now
+          if (!row.category && card.subject) row.category = card.subject
+          if (price?.priceBeforeDiscountRub) row.priceBeforeDiscountRub = price.priceBeforeDiscountRub
+          if (price && Number.isFinite(price.discountPct)) row.discountPct = price.discountPct
+        }
+        if (JSON.stringify(row) !== before) {
+          row.updatedAt = now
+          stats.updatedRows += 1
         }
       }
-    } catch (error) {
-      stats.errors.push(error instanceof Error ? error.message : `${target.name}: ошибка WB API`)
     }
   }
 
