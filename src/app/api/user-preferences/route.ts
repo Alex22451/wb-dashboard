@@ -2,18 +2,20 @@ import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getUserPreferences, hasUserStore, saveUserPreferences } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
-const OPTIONAL_TABS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'compare'] as const
+const OPTIONAL_TABS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'unit', 'compare'] as const
 const DEFAULT_VISIBLE_TABS = [...OPTIONAL_TABS]
 
 function normalizeVisibleTabs(value: unknown, isAdmin: boolean): string[] {
-  if (!Array.isArray(value)) return DEFAULT_VISIBLE_TABS.filter((tab) => isAdmin || tab !== 'compare')
+  if (!Array.isArray(value)) return DEFAULT_VISIBLE_TABS.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
 
   const allowed = new Set<string>(OPTIONAL_TABS)
   const result = value
     .filter((tab): tab is string => typeof tab === 'string' && allowed.has(tab))
-    .filter((tab) => isAdmin || tab !== 'compare')
+    .filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
 
-  return [...new Set(result)]
+  const unique = [...new Set(result)]
+  if (isAdmin && !unique.includes('unit')) unique.push('unit')
+  return unique
 }
 
 export async function GET() {

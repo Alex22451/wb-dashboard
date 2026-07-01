@@ -19,6 +19,9 @@ import {
   Trash2,
   Plus,
   Download,
+  Upload,
+  Calculator,
+  Pencil,
   Thermometer,
   Truck,
   RefreshCw,
@@ -154,6 +157,66 @@ interface AuthUser {
   id: number
   username: string
   role: 'admin' | 'user'
+}
+
+type UnitFulfillment = 'fbs' | 'fbo'
+
+interface UnitEconomicsRow {
+  id: string
+  fulfillment: UnitFulfillment
+  productName: string
+  category?: string
+  entrepreneurName: string
+  nmId?: number | null
+  vendorCode?: string | null
+  costRub: number
+  priceBeforeDiscountRub: number
+  discountPct: number
+  sppPct: number
+  walletPct: number
+  commissionPct: number
+  avgDeliveryDays: number
+  warehouse: string
+  fixedWarehouseCoeff: number
+  buyoutPct: number
+  localizationIndex: number
+  returnLogisticsRub: number
+  deliveryLogisticsRub: number
+  logisticsTotalRub: number
+  taxAcquiringPct: number
+  drrPct: number
+  minProfitRub: number
+  lengthCm: number
+  widthCm: number
+  heightCm: number
+  weightKg: number
+  boxQty: number
+  source?: 'excel' | 'manual' | 'wb'
+  updatedAt?: string
+  priceAfterDiscountRub: number
+  priceAfterSppRub: number
+  priceWithWalletRub: number
+  commissionRub: number
+  extraCommissionPct: number
+  extraCommissionRub: number
+  taxAcquiringRub: number
+  adSpendRub: number
+  profitRub: number
+  profitWithAdsRub: number
+  profitabilityPct: number
+  volumeLiters: number
+  status: 'ok' | 'below-min-profit' | 'loss' | 'incomplete'
+}
+
+interface UnitEconomicsSummary {
+  totalRows: number
+  activeRows: number
+  lossRows: number
+  belowMinRows: number
+  profitableRows: number
+  avgProfitRub: number
+  avgProfitabilityPct: number
+  updatedAt: string | null
 }
 
 function getClientDateRange(from: string, to: string): string[] {
@@ -517,7 +580,7 @@ function createDashboardShell(selectedIds: string[], entrepreneurs: Entrepreneur
   }
 }
 
-const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'compare'] as const
+const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'unit', 'compare'] as const
 type OptionalTabId = typeof OPTIONAL_TAB_IDS[number]
 
 const DEFAULT_VISIBLE_OPTIONAL_TABS: OptionalTabId[] = [...OPTIONAL_TAB_IDS]
@@ -529,6 +592,7 @@ const OPTIONAL_TAB_LABELS: Record<OptionalTabId, string> = {
   monthly: 'Динамика',
   ads: 'Реклама',
   growth: 'Рост',
+  unit: 'Юнит экономика',
   compare: 'API vs Excel',
 }
 
@@ -5153,6 +5217,397 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
   )
 }
 
+const emptyUnitRow = (): Partial<UnitEconomicsRow> => ({
+  fulfillment: 'fbs',
+  productName: '',
+  category: '',
+  entrepreneurName: '',
+  costRub: 0,
+  priceBeforeDiscountRub: 0,
+  discountPct: 0,
+  sppPct: 0,
+  walletPct: 0.02,
+  commissionPct: 0,
+  avgDeliveryDays: 0,
+  warehouse: '',
+  fixedWarehouseCoeff: 1,
+  buyoutPct: 0.9,
+  localizationIndex: 1,
+  returnLogisticsRub: 0,
+  deliveryLogisticsRub: 0,
+  logisticsTotalRub: 0,
+  taxAcquiringPct: 0,
+  drrPct: 0,
+  minProfitRub: 0,
+  lengthCm: 0,
+  widthCm: 0,
+  heightCm: 0,
+  weightKg: 0,
+  boxQty: 0,
+  source: 'manual',
+})
+
+function UnitMetricCard({ title, value, subtitle }: { title: string; value: string; subtitle: string }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-xs font-medium text-muted-foreground">{title}</div>
+        <div className="mt-1 text-xl font-semibold">{value}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function UnitEconomicsTab() {
+  const [rows, setRows] = useState<UnitEconomicsRow[]>([])
+  const [summary, setSummary] = useState<UnitEconomicsSummary | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [query, setQuery] = useState('')
+  const [fulfillment, setFulfillment] = useState<'all' | UnitFulfillment>('all')
+  const [editingRow, setEditingRow] = useState<Partial<UnitEconomicsRow> | null>(null)
+  const [error, setError] = useState('')
+
+  const applyStore = useCallback((json: any) => {
+    const store = json?.store
+    setRows(Array.isArray(store?.rows) ? store.rows : [])
+    setSummary(store?.summary || null)
+  }, [])
+
+  const loadRows = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/unit-economics')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось загрузить юнитку')
+      applyStore(json)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить юнитку')
+    } finally {
+      setLoading(false)
+    }
+  }, [applyStore])
+
+  useEffect(() => {
+    loadRows()
+  }, [loadRows])
+
+  const uploadExcel = useCallback(async (file: File | null) => {
+    if (!file) return
+    setSaving(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.set('file', file)
+      const res = await fetch('/api/unit-economics', { method: 'POST', body: form })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось импортировать Excel')
+      applyStore(json)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось импортировать Excel')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore])
+
+  const saveRow = useCallback(async () => {
+    if (!editingRow) return
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row: editingRow }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось сохранить строку')
+      applyStore(json)
+      setEditingRow(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить строку')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore, editingRow])
+
+  const deleteRow = useCallback(async (row: UnitEconomicsRow) => {
+    setSaving(true)
+    setError('')
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id: row.id }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось удалить строку')
+      applyStore(json)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить строку')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore])
+
+  const visibleRows = useMemo(() => {
+    const text = query.trim().toLowerCase()
+    return rows
+      .filter((row) => fulfillment === 'all' || row.fulfillment === fulfillment)
+      .filter((row) => !text || [
+        row.productName,
+        row.category || '',
+        row.entrepreneurName,
+        row.vendorCode || '',
+        String(row.nmId || ''),
+      ].join(' ').toLowerCase().includes(text))
+      .sort((a, b) => {
+        const statusOrder = { loss: 0, 'below-min-profit': 1, incomplete: 2, ok: 3 }
+        return statusOrder[a.status] - statusOrder[b.status] || a.productName.localeCompare(b.productName, 'ru')
+      })
+  }, [fulfillment, query, rows])
+
+  const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
+    const number = Number(value)
+    setEditingRow((current) => ({
+      ...(current || emptyUnitRow()),
+      [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
+    }))
+  }
+
+  const setEditText = (key: keyof UnitEconomicsRow, value: string) => {
+    setEditingRow((current) => ({ ...(current || emptyUnitRow()), [key]: value }))
+  }
+
+  const unitStatus = (row: UnitEconomicsRow) => {
+    if (row.status === 'loss') return <Badge variant="destructive">Минус</Badge>
+    if (row.status === 'below-min-profit') return <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">Ниже минимума</Badge>
+    if (row.status === 'incomplete') return <Badge variant="outline">Неполно</Badge>
+    return <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Ок</Badge>
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">Юнит экономика</h2>
+          <p className="text-sm text-muted-foreground">Эталонные расчеты FBS/FBO с импортом из Excel и редактируемыми ручными полями.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={loadRows} disabled={loading || saving} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Обновить
+          </Button>
+          <label>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null
+                event.currentTarget.value = ''
+                uploadExcel(file)
+              }}
+            />
+            <span className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">
+              <Upload className="h-4 w-4" />
+              Импорт Excel
+            </span>
+          </label>
+          <Button onClick={() => setEditingRow(emptyUnitRow())} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Товар
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Ошибка</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-5">
+        <UnitMetricCard title="Строк" value={formatNumber(summary?.totalRows || 0)} subtitle={`${formatNumber(summary?.activeRows || 0)} активных`} />
+        <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle="после рекламы" />
+        <UnitMetricCard title="Рентабельность" value={`${(summary?.avgProfitabilityPct || 0).toFixed(1)}%`} subtitle="средняя по строкам" />
+        <UnitMetricCard title="В минусе" value={formatNumber(summary?.lossRows || 0)} subtitle="требуют внимания" />
+        <UnitMetricCard title="Ниже минимума" value={formatNumber(summary?.belowMinRows || 0)} subtitle="по целевой прибыли" />
+      </div>
+
+      <Card>
+        <CardHeader className="gap-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <CardTitle className="text-base">Товары</CardTitle>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по товару, ИП, nmId" className="sm:w-72" />
+              <Select value={fulfillment} onValueChange={(value) => setFulfillment(value as 'all' | UnitFulfillment)}>
+                <SelectTrigger className="sm:w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="fbs">FBS</SelectItem>
+                  <SelectItem value="fbo">FBO</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : visibleRows.length === 0 ? (
+            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+              Импортируйте Excel-юнитку или добавьте первый товар вручную.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left font-medium">Товар</th>
+                    <th className="px-3 py-2 text-left font-medium">ИП</th>
+                    <th className="px-3 py-2 text-right font-medium">Цена</th>
+                    <th className="px-3 py-2 text-right font-medium">Себес.</th>
+                    <th className="px-3 py-2 text-right font-medium">Логистика</th>
+                    <th className="px-3 py-2 text-right font-medium">ДРР</th>
+                    <th className="px-3 py-2 text-right font-medium">Прибыль</th>
+                    <th className="px-3 py-2 text-right font-medium">Рент.</th>
+                    <th className="px-3 py-2 text-left font-medium">Статус</th>
+                    <th className="px-3 py-2 text-right font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRows.slice(0, 250).map((row) => (
+                    <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
+                      <td className="max-w-[360px] px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{row.productName}</div>
+                            <div className="truncate text-xs text-muted-foreground">{row.category || row.warehouse || 'без категории'}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">{row.entrepreneurName || '—'}</td>
+                      <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
+                      <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
+                      <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
+                      <td className="px-3 py-2 text-right">{(row.drrPct * 100).toFixed(1)}%</td>
+                      <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                        {formatNumber(Math.round(row.profitWithAdsRub))} ₽
+                      </td>
+                      <td className="px-3 py-2 text-right">{row.profitabilityPct.toFixed(1)}%</td>
+                      <td className="px-3 py-2">{unitStatus(row)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => setEditingRow(row)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {visibleRows.length > 250 && (
+                <div className="px-3 py-3 text-xs text-muted-foreground">Показаны первые 250 строк из {formatNumber(visibleRows.length)}. Уточните поиск.</div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!editingRow} onOpenChange={(open) => !open && setEditingRow(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{editingRow?.id ? 'Редактировать товар' : 'Новый товар'}</DialogTitle>
+            <DialogDescription>Ручные поля сохраняются в общей админской юнитке и пересчитываются сразу после сохранения.</DialogDescription>
+          </DialogHeader>
+          {editingRow && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Товар</Label>
+                <Input value={editingRow.productName || ''} onChange={(e) => setEditText('productName', e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Тип</Label>
+                <Select value={editingRow.fulfillment || 'fbs'} onValueChange={(value) => setEditText('fulfillment', value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fbs">FBS</SelectItem>
+                    <SelectItem value="fbo">FBO</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>ИП</Label>
+                <Input value={editingRow.entrepreneurName || ''} onChange={(e) => setEditText('entrepreneurName', e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Категория</Label>
+                <Input value={editingRow.category || ''} onChange={(e) => setEditText('category', e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Склад</Label>
+                <Input value={editingRow.warehouse || ''} onChange={(e) => setEditText('warehouse', e.target.value)} />
+              </div>
+              {[
+                ['priceBeforeDiscountRub', 'Цена до скидки, ₽'],
+                ['discountPct', 'Скидка, %', true],
+                ['sppPct', 'СПП, %', true],
+                ['walletPct', 'Кошелек, %', true],
+                ['costRub', 'Себестоимость, ₽'],
+                ['commissionPct', 'Комиссия, %', true],
+                ['logisticsTotalRub', 'Логистика всего, ₽'],
+                ['taxAcquiringPct', 'Налог + эквайринг, %', true],
+                ['drrPct', 'ДРР, %', true],
+                ['minProfitRub', 'Минимальная прибыль, ₽'],
+                ['avgDeliveryDays', 'Среднее время доставки'],
+                ['buyoutPct', '% выкупа', true],
+                ['localizationIndex', 'Индекс локализации'],
+                ['lengthCm', 'Длина, см'],
+                ['widthCm', 'Ширина, см'],
+                ['heightCm', 'Высота, см'],
+                ['weightKg', 'Вес, кг'],
+                ['boxQty', 'Кол-во в коробке'],
+              ].map(([key, label, pct]) => (
+                <div key={String(key)} className="space-y-1">
+                  <Label>{String(label)}</Label>
+                  <Input
+                    type="number"
+                    value={pct ? Number(editingRow[key as keyof UnitEconomicsRow] || 0) * 100 : Number(editingRow[key as keyof UnitEconomicsRow] || 0)}
+                    onChange={(e) => setEditNumber(key as keyof UnitEconomicsRow, e.target.value, !!pct)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingRow(null)}>Отмена</Button>
+            <Button onClick={saveRow} disabled={saving} className="gap-2">
+              <Save className="h-4 w-4" />
+              Сохранить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 // --- Main Page ---
 export default function Home() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
@@ -5171,7 +5626,7 @@ export default function Home() {
   const [includeAngelina, setIncludeAngelina] = useState(false)
   const isAdmin = authUser?.role === 'admin'
   const tabEnabled = useCallback((tabId: OptionalTabId) => {
-    if (tabId === 'compare' && !isAdmin) return false
+    if ((tabId === 'compare' || tabId === 'unit') && !isAdmin) return false
     return visibleOptionalTabs.includes(tabId)
   }, [isAdmin, visibleOptionalTabs])
 
@@ -5210,11 +5665,13 @@ export default function Home() {
 
     const storageKey = `wb-visible-tabs-${authUser.id}`
     const normalizeTabs = (tabs: unknown): OptionalTabId[] => {
-      if (!Array.isArray(tabs)) return DEFAULT_VISIBLE_OPTIONAL_TABS.filter((tab) => isAdmin || tab !== 'compare')
+      if (!Array.isArray(tabs)) return DEFAULT_VISIBLE_OPTIONAL_TABS.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
       const allowed = new Set<OptionalTabId>(OPTIONAL_TAB_IDS)
-      return [...new Set(tabs)]
+      const normalized = [...new Set(tabs)]
         .filter((tab): tab is OptionalTabId => typeof tab === 'string' && allowed.has(tab as OptionalTabId))
-        .filter((tab) => isAdmin || tab !== 'compare')
+        .filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
+      if (isAdmin && !normalized.includes('unit')) normalized.push('unit')
+      return normalized
     }
     const readLocalTabs = () => {
       try {
@@ -5242,12 +5699,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!authUser) return
-    const visibleTabs = new Set(['dashboard', 'apikeys', ...visibleOptionalTabs.filter((tab) => tab !== 'compare' || isAdmin)])
+    const visibleTabs = new Set(['dashboard', 'apikeys', ...visibleOptionalTabs.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))])
     if (!visibleTabs.has(activeTab)) setActiveTab('dashboard')
   }, [activeTab, authUser, isAdmin, visibleOptionalTabs])
 
   const updateVisibleTab = useCallback((tabId: OptionalTabId, enabled: boolean) => {
-    if (tabId === 'compare' && !isAdmin) return
+    if ((tabId === 'compare' || tabId === 'unit') && !isAdmin) return
     const next = enabled
       ? ([...new Set([...visibleOptionalTabs, tabId])] as OptionalTabId[])
       : visibleOptionalTabs.filter((tab) => tab !== tabId)
@@ -5634,7 +6091,7 @@ export default function Home() {
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
-                  {OPTIONAL_TAB_IDS.filter((tabId) => isAdmin || tabId !== 'compare').map((tabId) => (
+                  {OPTIONAL_TAB_IDS.filter((tabId) => isAdmin || (tabId !== 'compare' && tabId !== 'unit')).map((tabId) => (
                     <label key={tabId} className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
                       <span className="text-sm font-medium">{OPTIONAL_TAB_LABELS[tabId]}</span>
                       <Switch
@@ -5696,6 +6153,12 @@ export default function Home() {
               <TabsTrigger value="growth" className="h-9 gap-2 px-3">
                 <TrendingUp className="h-4 w-4" />
                 <span className="hidden sm:inline">Рост</span>
+              </TabsTrigger>
+            )}
+            {tabEnabled('unit') && (
+              <TabsTrigger value="unit" className="h-9 gap-2 px-3">
+                <Calculator className="h-4 w-4" />
+                <span className="hidden sm:inline">Юнитка</span>
               </TabsTrigger>
             )}
             {tabEnabled('compare') && (
@@ -5761,6 +6224,11 @@ export default function Home() {
           {tabEnabled('growth') && (
             <TabsContent value="growth">
               <GrowthPotentialTab entrepreneurs={entrepreneurs} includeAngelina={includeAngelina} />
+            </TabsContent>
+          )}
+          {tabEnabled('unit') && (
+            <TabsContent value="unit">
+              <UnitEconomicsTab />
             </TabsContent>
           )}
           {tabEnabled('compare') && (
