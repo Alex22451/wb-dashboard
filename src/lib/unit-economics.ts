@@ -8,6 +8,10 @@ export interface UnitEconomicsRow {
   entrepreneurName: string
   nmId?: number | null
   vendorCode?: string | null
+  excelProductKey?: string | null
+  wbSubject?: string | null
+  wbBrand?: string | null
+  wbSyncedAt?: string | null
   costRub: number
   priceBeforeDiscountRub: number
   discountPct: number
@@ -74,6 +78,19 @@ export function roundMoney(value: number): number {
 export function roundPct(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.round(value * 10000) / 100
+}
+
+export function normalizeUnitProductKey(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[x*]/gi, 'х')
+    .replace(/внутренняя\s+подушка/g, 'подушка внутренняя')
+    .replace(/декоративная\s+подушка/g, 'подушка декоративная')
+    .replace(/наволочки\s+декоративные/g, 'наволочка декоративная')
+    .replace(/шеврон\b/g, 'шевроны')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function calculateExtraCommissionPct(days: number, fulfillment: UnitFulfillment): number {

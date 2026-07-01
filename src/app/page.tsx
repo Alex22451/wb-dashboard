@@ -169,6 +169,10 @@ interface UnitEconomicsRow {
   entrepreneurName: string
   nmId?: number | null
   vendorCode?: string | null
+  excelProductKey?: string | null
+  wbSubject?: string | null
+  wbBrand?: string | null
+  wbSyncedAt?: string | null
   costRub: number
   priceBeforeDiscountRub: number
   discountPct: number
@@ -5268,6 +5272,7 @@ function UnitEconomicsTab() {
   const [fulfillment, setFulfillment] = useState<'all' | UnitFulfillment>('all')
   const [editingRow, setEditingRow] = useState<Partial<UnitEconomicsRow> | null>(null)
   const [error, setError] = useState('')
+  const [syncInfo, setSyncInfo] = useState<any>(null)
 
   const applyStore = useCallback((json: any) => {
     const store = json?.store
@@ -5352,6 +5357,27 @@ function UnitEconomicsTab() {
     }
   }, [applyStore])
 
+  const syncWb = useCallback(async () => {
+    setSaving(true)
+    setError('')
+    setSyncInfo(null)
+    try {
+      const res = await fetch('/api/unit-economics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync-wb' }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось синхронизировать WB API')
+      applyStore(json)
+      setSyncInfo(json.sync || null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось синхронизировать WB API')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore])
+
   const visibleRows = useMemo(() => {
     const text = query.trim().toLowerCase()
     return rows
@@ -5400,6 +5426,10 @@ function UnitEconomicsTab() {
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Обновить
           </Button>
+          <Button variant="outline" onClick={syncWb} disabled={loading || saving} className="gap-2">
+            <Download className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
+            WB API
+          </Button>
           <label>
             <input
               type="file"
@@ -5428,6 +5458,17 @@ function UnitEconomicsTab() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Ошибка</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {syncInfo && (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>WB API синхронизация завершена</AlertTitle>
+          <AlertDescription>
+            Карточек: {formatNumber(syncInfo.cards || 0)}, цен: {formatNumber(syncInfo.prices || 0)}, совпадений строк: {formatNumber(syncInfo.matchedRows || 0)}, обновлено: {formatNumber(syncInfo.updatedRows || 0)}
+            {Array.isArray(syncInfo.errors) && syncInfo.errors.length > 0 ? `; ошибки: ${syncInfo.errors.slice(0, 2).join('; ')}` : ''}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -5494,7 +5535,10 @@ function UnitEconomicsTab() {
                           <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
                           <div className="min-w-0">
                             <div className="truncate font-medium">{row.productName}</div>
-                            <div className="truncate text-xs text-muted-foreground">{row.category || row.warehouse || 'без категории'}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
+                              {row.vendorCode ? ` · ${row.vendorCode}` : ''}
+                            </div>
                           </div>
                         </div>
                       </td>
