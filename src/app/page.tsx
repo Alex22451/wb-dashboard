@@ -223,6 +223,17 @@ interface UnitEconomicsSummary {
   updatedAt: string | null
 }
 
+interface UnitApiTargetReport {
+  name: string
+  cards: number
+  prices: number
+  matchedRows: number
+  updatedRows: number
+  contentStatus: 'ok' | 'error'
+  pricesStatus: 'ok' | 'error' | 'skipped'
+  warnings: string[]
+}
+
 function getClientDateRange(from: string, to: string): string[] {
   const start = new Date(`${from}T00:00:00Z`)
   const end = new Date(`${to}T00:00:00Z`)
@@ -5311,6 +5322,8 @@ function UnitEconomicsTab() {
   const [editingRow, setEditingRow] = useState<Partial<UnitEconomicsRow> | null>(null)
   const [error, setError] = useState('')
   const [syncInfo, setSyncInfo] = useState<any>(null)
+  const [selectedEntrepreneur, setSelectedEntrepreneur] = useState('')
+  const [selectedSubcategory, setSelectedSubcategory] = useState('')
 
   const applyStore = useCallback((json: any) => {
     const store = json?.store
@@ -5465,6 +5478,29 @@ function UnitEconomicsTab() {
       .sort((a, b) => a.entrepreneur.localeCompare(b.entrepreneur, 'ru'))
   }, [visibleRows])
 
+  useEffect(() => {
+    if (groupedRows.length === 0) {
+      setSelectedEntrepreneur('')
+      setSelectedSubcategory('')
+      return
+    }
+
+    const currentGroup = groupedRows.find((group) => group.entrepreneur === selectedEntrepreneur)
+    const nextGroup = currentGroup || groupedRows[0]
+    if (!currentGroup) setSelectedEntrepreneur(nextGroup.entrepreneur)
+
+    const currentSubcategory = nextGroup.subcategories.find((item) => item.subcategory === selectedSubcategory)
+    if (!currentSubcategory) setSelectedSubcategory(nextGroup.subcategories[0]?.subcategory || '')
+  }, [groupedRows, selectedEntrepreneur, selectedSubcategory])
+
+  const selectedGroup = groupedRows.find((group) => group.entrepreneur === selectedEntrepreneur) || groupedRows[0] || null
+  const selectedCategory = selectedGroup?.subcategories.find((item) => item.subcategory === selectedSubcategory)
+    || selectedGroup?.subcategories[0]
+    || null
+  const selectedRows = selectedCategory?.rows || []
+  const selectedSummary = summarizeUnitRows(selectedRows)
+  const targetReports = Array.isArray(syncInfo?.targetReports) ? syncInfo.targetReports as UnitApiTargetReport[] : []
+
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     const number = Number(value)
     setEditingRow((current) => ({
@@ -5516,7 +5552,12 @@ function UnitEconomicsTab() {
               Импорт Excel
             </span>
           </label>
-          <Button onClick={() => setEditingRow(emptyUnitRow())} className="gap-2">
+          <Button onClick={() => setEditingRow({
+            ...emptyUnitRow(),
+            entrepreneurName: selectedEntrepreneur,
+            category: selectedSubcategory,
+            excelProductKey: selectedSubcategory,
+          })} className="gap-2">
             <Plus className="h-4 w-4" />
             Товар
           </Button>
@@ -5535,9 +5576,31 @@ function UnitEconomicsTab() {
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>WB API синхронизация завершена</AlertTitle>
-          <AlertDescription>
-            Карточек: {formatNumber(syncInfo.cards || 0)}, цен: {formatNumber(syncInfo.prices || 0)}, совпадений строк: {formatNumber(syncInfo.matchedRows || 0)}, обновлено: {formatNumber(syncInfo.updatedRows || 0)}
-            {Array.isArray(syncInfo.errors) && syncInfo.errors.length > 0 ? `; предупреждения: ${syncInfo.errors.slice(0, 2).join('; ')}` : ''}
+          <AlertDescription className="space-y-3">
+            <div>
+              Карточек: {formatNumber(syncInfo.cards || 0)}, цен: {formatNumber(syncInfo.prices || 0)}, совпадений строк: {formatNumber(syncInfo.matchedRows || 0)}, обновлено: {formatNumber(syncInfo.updatedRows || 0)}
+            </div>
+            {targetReports.length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {targetReports.map((report) => (
+                  <div key={report.name} className="rounded-md border bg-background p-3 text-xs">
+                    <div className="mb-2 font-medium">{report.name}</div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant={report.contentStatus === 'ok' && report.cards > 0 ? 'secondary' : 'destructive'}>
+                        Cards: {report.contentStatus === 'ok' ? formatNumber(report.cards) : 'ошибка'}
+                      </Badge>
+                      <Badge variant={report.pricesStatus === 'ok' ? 'secondary' : report.pricesStatus === 'error' ? 'destructive' : 'outline'}>
+                        Prices: {report.pricesStatus === 'ok' ? formatNumber(report.prices) : report.pricesStatus === 'error' ? 'нет scope' : 'нет данных'}
+                      </Badge>
+                      <Badge variant="outline">match: {formatNumber(report.matchedRows)}</Badge>
+                    </div>
+                    {report.warnings.length > 0 && (
+                      <div className="mt-2 line-clamp-2 text-muted-foreground">{report.warnings[0]}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -5581,101 +5644,130 @@ function UnitEconomicsTab() {
               Импортируйте Excel-юнитку или добавьте первый товар вручную.
             </div>
           ) : (
-            <Accordion type="multiple" defaultValue={groupedRows.map((group) => group.entrepreneur)} className="space-y-3">
-              {groupedRows.map((group) => {
-                const entSummary = summarizeUnitRows(group.rows)
-                return (
-                  <AccordionItem key={group.entrepreneur} value={group.entrepreneur} className="rounded-md border px-3">
-                    <AccordionTrigger className="hover:no-underline">
-                      <div className="flex w-full flex-col gap-1 pr-3 text-left sm:flex-row sm:items-center sm:justify-between">
-                        <div className="font-semibold">{group.entrepreneur}</div>
-                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                          <span>{formatNumber(entSummary.count)} строк</span>
-                          <span>{formatNumber(group.subcategories.length)} подкатегорий</span>
-                          <span>WB: {formatNumber(entSummary.linked)}</span>
-                          <span>ср. прибыль: {formatNumber(Math.round(entSummary.avgProfit))} ₽</span>
-                        </div>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <Accordion type="multiple" defaultValue={query.trim() ? group.subcategories.map((item) => `${group.entrepreneur}:${item.subcategory}`) : []} className="space-y-2">
-                        {group.subcategories.map((item) => (
-                          <AccordionItem key={item.subcategory} value={`${group.entrepreneur}:${item.subcategory}`} className="rounded-md border px-3">
-                            <AccordionTrigger className="hover:no-underline">
-                              <div className="flex w-full flex-col gap-1 pr-3 text-left sm:flex-row sm:items-center sm:justify-between">
-                                <div className="font-medium">{item.subcategory}</div>
-                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <span>{formatNumber(item.summary.count)} товаров</span>
-                                  <span>WB: {formatNumber(item.summary.linked)}</span>
-                                  {item.summary.losses > 0 && <span className="text-red-600">минус: {formatNumber(item.summary.losses)}</span>}
-                                  <span>ср. прибыль: {formatNumber(Math.round(item.summary.avgProfit))} ₽</span>
+            <div className="grid gap-4 xl:grid-cols-[260px_300px_minmax(0,1fr)]">
+              <div className="rounded-md border">
+                <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">ИП</div>
+                <ScrollArea className="h-[560px]">
+                  <div className="space-y-1 p-2">
+                    {groupedRows.map((group) => {
+                      const itemSummary = summarizeUnitRows(group.rows)
+                      const active = group.entrepreneur === selectedEntrepreneur
+                      return (
+                        <button
+                          key={group.entrepreneur}
+                          type="button"
+                          onClick={() => {
+                            setSelectedEntrepreneur(group.entrepreneur)
+                            setSelectedSubcategory(group.subcategories[0]?.subcategory || '')
+                          }}
+                          className={`w-full rounded-md px-3 py-2 text-left text-sm ${active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        >
+                          <div className="font-medium">{group.entrepreneur}</div>
+                          <div className={`mt-1 text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                            {formatNumber(itemSummary.count)} строк · {formatNumber(group.subcategories.length)} подкат. · WB {formatNumber(itemSummary.linked)}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              <div className="rounded-md border">
+                <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">Подкатегории</div>
+                <ScrollArea className="h-[560px]">
+                  <div className="space-y-1 p-2">
+                    {(selectedGroup?.subcategories || []).map((item) => {
+                      const active = item.subcategory === selectedCategory?.subcategory
+                      return (
+                        <button
+                          key={item.subcategory}
+                          type="button"
+                          onClick={() => setSelectedSubcategory(item.subcategory)}
+                          className={`w-full rounded-md px-3 py-2 text-left text-sm ${active ? 'bg-muted ring-1 ring-border' : 'hover:bg-muted'}`}
+                        >
+                          <div className="font-medium">{item.subcategory}</div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>{formatNumber(item.summary.count)} товаров</span>
+                            <span>WB {formatNumber(item.summary.linked)}</span>
+                            {item.summary.losses > 0 && <span className="text-red-600">минус {formatNumber(item.summary.losses)}</span>}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              <div className="min-w-0 rounded-md border">
+                <div className="flex flex-col gap-3 border-b bg-muted/40 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{selectedCategory?.subcategory || 'Подкатегория'}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {selectedEntrepreneur || 'ИП'} · {formatNumber(selectedSummary.count)} товаров · WB {formatNumber(selectedSummary.linked)}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="outline">ср. прибыль {formatNumber(Math.round(selectedSummary.avgProfit))} ₽</Badge>
+                    {selectedSummary.losses > 0 && <Badge variant="destructive">минус {formatNumber(selectedSummary.losses)}</Badge>}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/20">
+                        <th className="px-3 py-2 text-left font-medium">Товар</th>
+                        <th className="px-3 py-2 text-right font-medium">Цена</th>
+                        <th className="px-3 py-2 text-right font-medium">Себес.</th>
+                        <th className="px-3 py-2 text-right font-medium">Логистика</th>
+                        <th className="px-3 py-2 text-right font-medium">ДРР</th>
+                        <th className="px-3 py-2 text-right font-medium">Прибыль</th>
+                        <th className="px-3 py-2 text-right font-medium">Рент.</th>
+                        <th className="px-3 py-2 text-left font-medium">Статус</th>
+                        <th className="px-3 py-2 text-right font-medium"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRows.map((row) => (
+                        <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
+                          <td className="max-w-[360px] px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{row.productName}</div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
+                                  {row.vendorCode ? ` · ${row.vendorCode}` : ''}
                                 </div>
                               </div>
-                            </AccordionTrigger>
-                            <AccordionContent>
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                  <thead>
-                                    <tr className="border-b bg-muted/40">
-                                      <th className="px-3 py-2 text-left font-medium">Товар</th>
-                                      <th className="px-3 py-2 text-right font-medium">Цена</th>
-                                      <th className="px-3 py-2 text-right font-medium">Себес.</th>
-                                      <th className="px-3 py-2 text-right font-medium">Логистика</th>
-                                      <th className="px-3 py-2 text-right font-medium">ДРР</th>
-                                      <th className="px-3 py-2 text-right font-medium">Прибыль</th>
-                                      <th className="px-3 py-2 text-right font-medium">Рент.</th>
-                                      <th className="px-3 py-2 text-left font-medium">Статус</th>
-                                      <th className="px-3 py-2 text-right font-medium"></th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {item.rows.map((row) => (
-                                      <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
-                                        <td className="max-w-[360px] px-3 py-2">
-                                          <div className="flex items-center gap-2">
-                                            <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
-                                            <div className="min-w-0">
-                                              <div className="truncate font-medium">{row.productName}</div>
-                                              <div className="truncate text-xs text-muted-foreground">
-                                                {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
-                                                {row.vendorCode ? ` · ${row.vendorCode}` : ''}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </td>
-                                        <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
-                                        <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
-                                        <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
-                                        <td className="px-3 py-2 text-right">{(row.drrPct * 100).toFixed(1)}%</td>
-                                        <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                                          {formatNumber(Math.round(row.profitWithAdsRub))} ₽
-                                        </td>
-                                        <td className="px-3 py-2 text-right">{row.profitabilityPct.toFixed(1)}%</td>
-                                        <td className="px-3 py-2">{unitStatus(row)}</td>
-                                        <td className="px-3 py-2 text-right">
-                                          <div className="flex justify-end gap-1">
-                                            <Button variant="ghost" size="sm" onClick={() => setEditingRow(row)}>
-                                              <Pencil className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
-                                              <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-                        ))}
-                      </Accordion>
-                    </AccordionContent>
-                  </AccordionItem>
-                )
-              })}
-            </Accordion>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
+                          <td className="px-3 py-2 text-right">{(row.drrPct * 100).toFixed(1)}%</td>
+                          <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                            {formatNumber(Math.round(row.profitWithAdsRub))} ₽
+                          </td>
+                          <td className="px-3 py-2 text-right">{row.profitabilityPct.toFixed(1)}%</td>
+                          <td className="px-3 py-2">{unitStatus(row)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => setEditingRow(row)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -305,6 +305,16 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
     prices: 0,
     matchedRows: 0,
     updatedRows: 0,
+    targetReports: [] as Array<{
+      name: string
+      cards: number
+      prices: number
+      matchedRows: number
+      updatedRows: number
+      contentStatus: 'ok' | 'error'
+      pricesStatus: 'ok' | 'error' | 'skipped'
+      warnings: string[]
+    }>,
     unmatchedCards: [] as Array<{ target: string; vendorCode: string; nmId: number; key: string }>,
     errors: [] as string[],
   }
@@ -312,20 +322,39 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   for (const target of targets) {
     let cards: WbCard[] = []
     let prices = new Map<number, WbPrice>()
+    const targetReport = {
+      name: target.name,
+      cards: 0,
+      prices: 0,
+      matchedRows: 0,
+      updatedRows: 0,
+      contentStatus: 'ok' as 'ok' | 'error',
+      pricesStatus: 'skipped' as 'ok' | 'error' | 'skipped',
+      warnings: [] as string[],
+    }
 
     try {
       cards = await fetchWbCards(target)
       stats.cards += cards.length
+      targetReport.cards = cards.length
     } catch (error) {
-      stats.errors.push(error instanceof Error ? error.message : `${target.name}: ошибка WB Content API`)
+      const message = error instanceof Error ? error.message : `${target.name}: ошибка WB Content API`
+      targetReport.contentStatus = 'error'
+      targetReport.warnings.push(message)
+      stats.errors.push(message)
+      stats.targetReports.push(targetReport)
       continue
     }
 
     try {
       prices = await fetchWbPrices(target)
       stats.prices += prices.size
+      targetReport.prices = prices.size
+      targetReport.pricesStatus = 'ok'
     } catch (error) {
       const message = error instanceof Error ? error.message : `${target.name}: ошибка WB Prices API`
+      targetReport.pricesStatus = 'error'
+      targetReport.warnings.push(`${message}; цены пропущены`)
       stats.errors.push(`${message}; цены пропущены, карточки замаплены`)
     }
 
@@ -347,6 +376,7 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
 
       const price = prices.get(card.nmId)
       stats.matchedRows += matched.length
+      targetReport.matchedRows += matched.length
       for (const match of matched) {
         const row = match.row
         const before = JSON.stringify(row)
@@ -364,9 +394,11 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
         if (JSON.stringify(row) !== before) {
           row.updatedAt = now
           stats.updatedRows += 1
+          targetReport.updatedRows += 1
         }
       }
     }
+    stats.targetReports.push(targetReport)
   }
 
   return {
