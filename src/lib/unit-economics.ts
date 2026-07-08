@@ -117,6 +117,7 @@ export function normalizeUnitProductKey(value: unknown): string {
     .replace(/декоративная\s+подушка/g, 'подушка декоративная')
     .replace(/наволочки\s+декоративные/g, 'наволочка декоративная')
     .replace(/шеврон\b/g, 'шевроны')
+    .replace(/\bремувк[аиуы]?\b/g, 'ремувки')
     .replace(/\s+/g, ' ')
     .trim()
 }

@@ -5362,6 +5362,7 @@ function getUnitSubcategory(row: UnitEconomicsRow) {
     .replace(/наволочки\s+декоративные/g, 'наволочка декоративная')
     .replace(/наволочка\s+декоративная\s+2\s+шт/g, 'наволочка декоративная')
     .replace(/шеврон\b/g, 'шевроны')
+    .replace(/\bремувк[аиуы]?\b/g, 'ремувки')
     .replace(/\b\d{1,3}\s*х\s*\d{1,3}\b/g, '')
     .replace(/\b\d+\s*шт\b/g, '')
     .replace(/\b\d{2,3}\s*см\b/g, '')
