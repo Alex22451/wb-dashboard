@@ -61,7 +61,6 @@ import {
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { SUBJECT_TO_EXCEL_TYPES } from '@/lib/wb-mapping'
 
 // Types
 interface DashboardData {
@@ -256,6 +255,30 @@ interface UnitCostSummary {
   avgCostRub: number
   components: number
   updatedAt: string | null
+}
+
+interface UnitTariffCategory {
+  subjectID: number
+  subjectName: string
+  parentName: string
+  fbsCommissionPct: number
+  fboCommissionPct: number
+}
+
+interface UnitTariffOptions {
+  date: string
+  sourceTarget: string
+  categories: UnitTariffCategory[]
+  tula: {
+    warehouseName: string
+    fbsBaseRub: number
+    fbsLiterRub: number
+    fbsCoefPct: number
+    fboBaseRub: number
+    fboLiterRub: number
+    fboCoefPct: number
+    returnRub: number
+  }
 }
 
 interface UnitApiTargetReport {
@@ -5297,11 +5320,6 @@ const emptyUnitRow = (): Partial<UnitEconomicsRow> => ({
   source: 'manual',
 })
 
-const WB_UNIT_CATEGORIES = SUBJECT_TO_EXCEL_TYPES
-  .map((entry) => entry.subject)
-  .filter((subject, index, items) => items.indexOf(subject) === index)
-  .sort((a, b) => a.localeCompare(b, 'ru'))
-
 const WB_READONLY_UNIT_FIELDS = new Set<keyof UnitEconomicsRow>([
   'nmId',
   'vendorCode',
@@ -5369,6 +5387,7 @@ function UnitEconomicsTab() {
   const [costs, setCosts] = useState<UnitProductCost[]>([])
   const [summary, setSummary] = useState<UnitEconomicsSummary | null>(null)
   const [costSummary, setCostSummary] = useState<UnitCostSummary | null>(null)
+  const [tariffOptions, setTariffOptions] = useState<UnitTariffOptions | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [query, setQuery] = useState('')
@@ -5388,6 +5407,7 @@ function UnitEconomicsTab() {
     setCosts(Array.isArray(store?.costs) ? store.costs : [])
     setSummary(store?.summary || null)
     setCostSummary(store?.costSummary || null)
+    if ('tariffOptions' in (json || {})) setTariffOptions(json?.tariffOptions || null)
   }, [])
 
   const loadRows = useCallback(async () => {
@@ -5632,30 +5652,56 @@ function UnitEconomicsTab() {
       ].join(' ').toLowerCase().includes(text))
       .sort((a, b) => a.productName.localeCompare(b.productName, 'ru'))
   }, [costs, query])
-  const wbCategoryOptions = useMemo(() => {
-    const values = new Set(WB_UNIT_CATEGORIES)
-    rows.forEach((row) => {
-      if (row.wbSubject) values.add(row.wbSubject)
-      if (row.category && WB_UNIT_CATEGORIES.includes(row.category)) values.add(row.category)
-    })
-    return [...values].sort((a, b) => a.localeCompare(b, 'ru'))
-  }, [rows])
+  const wbCategoryOptions = tariffOptions?.categories || []
+  const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
+    if (!tariffOptions) return row
+    const next = { ...row }
+    const category = tariffOptions.categories.find((item) => item.subjectName === (next.wbSubject || next.category))
+    if (category) {
+      next.wbSubject = category.subjectName
+      next.category = category.subjectName
+      next.commissionPct = next.fulfillment === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
+    }
+
+    const length = Number(next.lengthCm || 0)
+    const width = Number(next.widthCm || 0)
+    const height = Number(next.heightCm || 0)
+    const volume = Math.max(1, (length * width * height) / 1000)
+    const tula = tariffOptions.tula
+    const isFbo = next.fulfillment === 'fbo'
+    const base = isFbo ? tula.fboBaseRub : tula.fbsBaseRub
+    const liter = isFbo ? tula.fboLiterRub : tula.fbsLiterRub
+    const coef = (isFbo ? tula.fboCoefPct : tula.fbsCoefPct) || 100
+    if (length > 0 && width > 0 && height > 0 && base > 0) {
+      next.warehouse = 'Тула'
+      next.deliveryLogisticsRub = Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
+      next.returnLogisticsRub = tula.returnRub || 0
+      const buyout = Number(next.buyoutPct || 1) > 0 ? Number(next.buyoutPct || 1) : 1
+      const localization = Math.max(1, Number(next.localizationIndex || 1))
+      const returnPart = Number(next.returnLogisticsRub || 0) * Math.max(0, (1 - buyout) / buyout)
+      next.logisticsTotalRub = Math.round((Number(next.deliveryLogisticsRub || 0) + returnPart) * localization * 100) / 100
+    }
+
+    return next
+  }, [tariffOptions])
 
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     if (WB_READONLY_UNIT_FIELDS.has(key)) return
     const number = Number(value)
     setEditingRow((current) => ({
-      ...(current || emptyUnitRow()),
-      [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
+      ...applyClientAutomaticWbFields({
+        ...(current || emptyUnitRow()),
+        [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
+      }),
     }))
   }
 
   const setEditText = (key: keyof UnitEconomicsRow, value: string) => {
-    setEditingRow((current) => ({ ...(current || emptyUnitRow()), [key]: value }))
+    setEditingRow((current) => applyClientAutomaticWbFields({ ...(current || emptyUnitRow()), [key]: value }))
   }
 
   const setWbCategory = (value: string) => {
-    setEditingRow((current) => ({
+    setEditingRow((current) => applyClientAutomaticWbFields({
       ...(current || emptyUnitRow()),
       category: value,
       wbSubject: value,
@@ -5956,6 +6002,7 @@ function UnitEconomicsTab() {
                         <th className="px-3 py-2 text-left font-medium">Товар</th>
                         <th className="px-3 py-2 text-right font-medium">Цена</th>
                         <th className="px-3 py-2 text-right font-medium">Себес.</th>
+                        <th className="px-3 py-2 text-right font-medium">Комис.</th>
                         <th className="px-3 py-2 text-right font-medium">Логистика</th>
                         <th className="px-3 py-2 text-right font-medium">ДРР</th>
                         <th className="px-3 py-2 text-right font-medium">Прибыль</th>
@@ -5981,6 +6028,7 @@ function UnitEconomicsTab() {
                           </td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
+                          <td className="px-3 py-2 text-right">{(row.commissionPct * 100).toFixed(1)}%</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
                           <td className="px-3 py-2 text-right">{(row.drrPct * 100).toFixed(1)}%</td>
                           <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
@@ -6120,16 +6168,20 @@ function UnitEconomicsTab() {
                   <SelectTrigger>
                     <SelectValue placeholder="Выберите категорию WB" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-80">
                     {wbCategoryOptions.map((category) => (
-                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                      <SelectItem key={`${category.subjectID}-${category.subjectName}`} value={category.subjectName}>
+                        <div className="flex flex-col">
+                          <span>{category.subjectName}</span>
+                          {category.parentName && <span className="text-xs text-muted-foreground">{category.parentName}</span>}
+                        </div>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Склад</Label>
-                <Input value={editingRow.warehouse || ''} onChange={(e) => setEditText('warehouse', e.target.value)} />
+                <div className="text-xs text-muted-foreground">
+                  {tariffOptions ? `Список WB от ${tariffOptions.date}` : 'Список WB тарифов не загружен'}
+                </div>
               </div>
               {[
                 ['sppPct', 'СПП, %', true],
@@ -6158,33 +6210,17 @@ function UnitEconomicsTab() {
               ))}
               <div className="space-y-3 rounded-md border bg-muted/30 p-3 sm:col-span-2">
                 <div>
-                  <div className="text-sm font-medium">WB данные</div>
-                  <div className="text-xs text-muted-foreground">Эти поля обновляются через WB API и тарифы, вручную не редактируются.</div>
+                  <div className="text-sm font-medium">Автоматически из WB</div>
+                  <div className="text-xs text-muted-foreground">Комиссия берется из категории WB, логистика считается по складу Тула и габаритам.</div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <Label>nmId</Label>
-                    <Input value={editingRow.nmId ? String(editingRow.nmId) : ''} disabled />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Артикул WB</Label>
-                    <Input value={editingRow.vendorCode || ''} disabled />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Бренд WB</Label>
-                    <Input value={editingRow.wbBrand || ''} disabled />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Цена до скидки, ₽</Label>
-                    <Input value={formatNumber(Math.round(Number(editingRow.priceBeforeDiscountRub || 0)))} disabled />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Скидка WB, %</Label>
-                    <Input value={(Number(editingRow.discountPct || 0) * 100).toFixed(1)} disabled />
-                  </div>
-                  <div className="space-y-1">
                     <Label>Комиссия WB, %</Label>
                     <Input value={(Number(editingRow.commissionPct || 0) * 100).toFixed(1)} disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Склад логистики</Label>
+                    <Input value={editingRow.warehouse || 'Тула'} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика до клиента, ₽</Label>
@@ -6208,7 +6244,7 @@ function UnitEconomicsTab() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingRow(null)}>Отмена</Button>
-            <Button onClick={saveRow} disabled={saving} className="gap-2">
+            <Button onClick={saveRow} disabled={saving || !editingRow?.wbSubject} className="gap-2">
               <Save className="h-4 w-4" />
               Сохранить
             </Button>

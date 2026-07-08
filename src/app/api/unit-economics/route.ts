@@ -60,6 +60,14 @@ interface WbTariffsPayload {
   returnWarehouses: Record<string, unknown>[]
 }
 
+interface UnitTariffCategory {
+  subjectID: number
+  subjectName: string
+  parentName: string
+  fbsCommissionPct: number
+  fboCommissionPct: number
+}
+
 function seedStore(): UnitEconomicsStore {
   const costs = seedCosts.map((cost) => normalizeCost(cost))
   return {
@@ -100,7 +108,7 @@ async function writeStore(rows: UnitEconomicsRow[], costsInput?: UnitProductCost
   return store
 }
 
-function jsonResponse(store: UnitEconomicsStore) {
+function jsonResponse(store: UnitEconomicsStore, tariffOptions?: Awaited<ReturnType<typeof buildUnitTariffOptions>>) {
   const costs = (store.costs || seedCosts).map((cost) => normalizeCost(cost))
   const rows = applyCostCatalog(store.rows.map((row) => normalizeRow(row)), costs).map(calculateUnitEconomics)
   return NextResponse.json({
@@ -112,6 +120,7 @@ function jsonResponse(store: UnitEconomicsStore) {
       summary: summarizeUnitEconomics(rows),
       costSummary: summarizeUnitCosts(costs),
     },
+    tariffOptions,
   })
 }
 
@@ -708,6 +717,110 @@ function calculateLogisticsTotal(row: UnitEconomicsRow) {
   return Math.round((row.deliveryLogisticsRub + returnPart) * Math.max(1, row.localizationIndex || 1) * 100) / 100
 }
 
+function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
+  return warehouses.find((warehouse) => normalizeTariffName(warehouse.warehouseName) === 'тула') || null
+}
+
+function getCommissionPair(item: Record<string, unknown>) {
+  const fbs = parseWbNumber(item.kgvpMarketplace)
+  const fbo = parseWbNumber(item.kgvpSupplier) || parseWbNumber(item.paidStorageKgvp)
+  return {
+    fbsCommissionPct: fbs > 0 ? fbs / 100 : 0,
+    fboCommissionPct: fbo > 0 ? fbo / 100 : 0,
+  }
+}
+
+function tariffCategories(payload: WbTariffsPayload): UnitTariffCategory[] {
+  const bySubject = new Map<string, UnitTariffCategory>()
+  for (const item of payload.commissionReport) {
+    const subjectName = String(item.subjectName || '').trim()
+    if (!subjectName) continue
+    const pair = getCommissionPair(item)
+    bySubject.set(subjectName, {
+      subjectID: Number(item.subjectID) || 0,
+      subjectName,
+      parentName: String(item.parentName || '').trim(),
+      ...pair,
+    })
+  }
+  return [...bySubject.values()].sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'ru'))
+}
+
+function calculateTulaDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouse: Record<string, unknown> | null) {
+  if (!warehouse) return 0
+  const keys = fulfillment === 'fbs'
+    ? ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr']
+    : ['boxDeliveryBase', 'boxDeliveryLiter', 'boxDeliveryCoefExpr']
+  const base = parseWbNumber(warehouse[keys[0]])
+  const liter = parseWbNumber(warehouse[keys[1]])
+  const coef = parseWbNumber(warehouse[keys[2]], 100) || 100
+  if (base <= 0) return 0
+  const volume = Math.max(1, volumeLiters)
+  return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
+}
+
+function calculateTulaReturn(warehouse: Record<string, unknown> | null) {
+  if (!warehouse) return 0
+  const values = ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
+    .map((key) => parseWbNumber(warehouse[key]))
+    .filter((value) => value > 0)
+  if (values.length === 0) return 0
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+}
+
+async function buildUnitTariffOptions(targets: WbTarget[]) {
+  const target = targets.find((item) => item.wbApiKey)
+  if (!target) return null
+  try {
+    const date = todayMoscowDate()
+    const { payload, cacheHit } = await fetchWbTariffs(target, date)
+    const tulaBox = findTulaWarehouse(payload.boxWarehouses)
+    const tulaReturn = findTulaWarehouse(payload.returnWarehouses)
+    const returnRub = calculateTulaReturn(tulaReturn)
+    return {
+      date,
+      cacheHit,
+      sourceTarget: target.name,
+      categories: tariffCategories(payload),
+      tula: {
+        warehouseName: 'Тула',
+        fbsBaseRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceBase) : 0,
+        fbsLiterRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceLiter) : 0,
+        fbsCoefPct: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceCoefExpr, 100) : 100,
+        fboBaseRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryBase) : 0,
+        fboLiterRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryLiter) : 0,
+        fboCoefPct: tulaBox ? parseWbNumber(tulaBox.boxDeliveryCoefExpr, 100) : 100,
+        returnRub,
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[]) {
+  const target = targets.find((item) => item.wbApiKey)
+  if (!target) return row
+  try {
+    const { payload } = await fetchWbTariffs(target, todayMoscowDate())
+    const next = { ...row, warehouse: 'Тула' }
+    const subject = normalizeTariffName(next.wbSubject || next.category)
+    const commissionRow = payload.commissionReport.find((item) => normalizeTariffName(item.subjectName) === subject)
+    if (commissionRow) {
+      const pair = getCommissionPair(commissionRow)
+      next.commissionPct = next.fulfillment === 'fbs' ? pair.fbsCommissionPct : pair.fboCommissionPct
+    }
+
+    const volume = Math.max(1, (next.lengthCm * next.widthCm * next.heightCm) / 1000)
+    next.deliveryLogisticsRub = calculateTulaDelivery(volume, next.fulfillment, findTulaWarehouse(payload.boxWarehouses))
+    next.returnLogisticsRub = calculateTulaReturn(findTulaWarehouse(payload.returnWarehouses))
+    next.logisticsTotalRub = calculateLogisticsTotal(next)
+    return next
+  } catch {
+    return row
+  }
+}
+
 async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   const now = new Date().toISOString()
   const rows = store.rows.map((row) => normalizeRow(row))
@@ -887,6 +1000,7 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
     for (const row of rows) {
       if (!sameEntrepreneur(row.entrepreneurName, target.name)) continue
       const before = JSON.stringify(row)
+      row.warehouse = 'Тула'
       const commission = findCommission(row, payload.commissionReport)
       if (commission !== null) row.commissionPct = commission
 
@@ -920,7 +1034,8 @@ export async function GET(request: NextRequest) {
   if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const store = await readStore()
-  return jsonResponse(store)
+  const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
+  return jsonResponse(store, await buildUnitTariffOptions(targets))
 }
 
 export async function POST(request: NextRequest) {
@@ -1041,13 +1156,22 @@ export async function POST(request: NextRequest) {
   }
 
   const existing = store.rows.find((row) => row.id === body.row?.id)
-  const nextRow = normalizeRow(
+  const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
+  const tariffOptions = await buildUnitTariffOptions(targets)
+  const nextRowBase = normalizeRow(
     preserveWbManagedFields({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing),
     existing,
   )
+  if (!nextRowBase.wbSubject) {
+    return NextResponse.json({ error: 'Выберите WB категорию из списка тарифов' }, { status: 400 })
+  }
+  if (tariffOptions && !tariffOptions.categories.some((category) => category.subjectName === nextRowBase.wbSubject)) {
+    return NextResponse.json({ error: 'WB категория должна быть выбрана из актуального списка WB' }, { status: 400 })
+  }
+  const nextRow = await applyAutomaticWbTariffs(nextRowBase, targets)
   const rows = existing
     ? store.rows.map((row) => row.id === existing.id ? nextRow : row)
     : [nextRow, ...store.rows]
   const nextStore = await writeStore(rows, store.costs)
-  return jsonResponse(nextStore)
+  return jsonResponse(nextStore, tariffOptions)
 }
