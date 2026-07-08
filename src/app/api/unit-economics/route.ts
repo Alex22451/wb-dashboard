@@ -639,8 +639,8 @@ function findCommission(row: UnitEconomicsRow, report: Record<string, unknown>[]
   if (!partial) return null
 
   const pct = row.fulfillment === 'fbs'
-    ? parseWbNumber(partial.kgvpMarketplace)
-    : parseWbNumber(partial.kgvpSupplier) || parseWbNumber(partial.paidStorageKgvp)
+    ? parseWbNumber(partial.kgvpSupplier)
+    : parseWbNumber(partial.kgvpMarketplace) || parseWbNumber(partial.paidStorageKgvp)
   return pct > 0 ? pct / 100 : null
 }
 
@@ -722,8 +722,8 @@ function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
 }
 
 function getCommissionPair(item: Record<string, unknown>) {
-  const fbs = parseWbNumber(item.kgvpMarketplace)
-  const fbo = parseWbNumber(item.kgvpSupplier) || parseWbNumber(item.paidStorageKgvp)
+  const fbs = parseWbNumber(item.kgvpSupplier)
+  const fbo = parseWbNumber(item.kgvpMarketplace) || parseWbNumber(item.paidStorageKgvp)
   return {
     fbsCommissionPct: fbs > 0 ? fbs / 100 : 0,
     fboCommissionPct: fbo > 0 ? fbo / 100 : 0,

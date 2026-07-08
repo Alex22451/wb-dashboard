@@ -5395,6 +5395,8 @@ function UnitEconomicsTab() {
   const [editingRow, setEditingRow] = useState<Partial<UnitEconomicsRow> | null>(null)
   const [editingCost, setEditingCost] = useState<Partial<UnitProductCost> | null>(null)
   const [bulkPatch, setBulkPatch] = useState<Partial<UnitEconomicsRow> | null>(null)
+  const [categorySearch, setCategorySearch] = useState('')
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false)
   const [error, setError] = useState('')
   const [syncInfo, setSyncInfo] = useState<any>(null)
   const [selectedEntrepreneur, setSelectedEntrepreneur] = useState('')
@@ -5653,6 +5655,35 @@ function UnitEconomicsTab() {
       .sort((a, b) => a.productName.localeCompare(b.productName, 'ru'))
   }, [costs, query])
   const wbCategoryOptions = tariffOptions?.categories || []
+  const entrepreneurOptions = useMemo(() => {
+    const names = new Set(rows.map((row) => row.entrepreneurName).filter(Boolean))
+    if (selectedEntrepreneur) names.add(selectedEntrepreneur)
+    return [...names].sort((a, b) => a.localeCompare(b, 'ru'))
+  }, [rows, selectedEntrepreneur])
+  const filteredWbCategories = useMemo(() => {
+    const text = categorySearch.trim().toLowerCase()
+    return wbCategoryOptions
+      .filter((category) => !text || `${category.subjectName} ${category.parentName}`.toLowerCase().includes(text))
+      .slice(0, 80)
+  }, [categorySearch, wbCategoryOptions])
+  const formatAutoNumber = (value: number, suffix = '') => {
+    const rounded = Math.round((Number(value) || 0) * 10) / 10
+    return `${rounded.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}${suffix}`
+  }
+  const getTulaDeliveryPreview = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
+    if (!tariffOptions) return 0
+    const length = Number(row.lengthCm || 0)
+    const width = Number(row.widthCm || 0)
+    const height = Number(row.heightCm || 0)
+    if (length <= 0 || width <= 0 || height <= 0) return 0
+    const volume = Math.max(1, (length * width * height) / 1000)
+    const tula = tariffOptions.tula
+    const base = mode === 'fbo' ? tula.fboBaseRub : tula.fbsBaseRub
+    const liter = mode === 'fbo' ? tula.fboLiterRub : tula.fbsLiterRub
+    const coef = (mode === 'fbo' ? tula.fboCoefPct : tula.fbsCoefPct) || 100
+    if (base <= 0) return 0
+    return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 10) / 10
+  }, [tariffOptions])
   const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
     if (!tariffOptions) return row
     const next = { ...row }
@@ -6028,13 +6059,13 @@ function UnitEconomicsTab() {
                           </td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{(row.commissionPct * 100).toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.commissionPct * 100, '%')}</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{(row.drrPct * 100).toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.drrPct * 100, '%')}</td>
                           <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
                             {formatNumber(Math.round(row.profitWithAdsRub))} ₽
                           </td>
-                          <td className="px-3 py-2 text-right">{row.profitabilityPct.toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.profitabilityPct, '%')}</td>
                           <td className="px-3 py-2">{unitStatus(row)}</td>
                           <td className="px-3 py-2 text-right">
                             <div className="flex justify-end gap-1">
@@ -6160,27 +6191,59 @@ function UnitEconomicsTab() {
               </div>
               <div className="space-y-1">
                 <Label>ИП</Label>
-                <Input value={editingRow.entrepreneurName || ''} onChange={(e) => setEditText('entrepreneurName', e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>WB категория</Label>
-                <Select value={editingRow.wbSubject || ''} onValueChange={setWbCategory}>
+                <Select value={editingRow.entrepreneurName || ''} onValueChange={(value) => setEditText('entrepreneurName', value)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Выберите категорию WB" />
+                    <SelectValue placeholder="Выберите ИП" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-80">
-                    {wbCategoryOptions.map((category) => (
-                      <SelectItem key={`${category.subjectID}-${category.subjectName}`} value={category.subjectName}>
-                        <div className="flex flex-col">
-                          <span>{category.subjectName}</span>
-                          {category.parentName && <span className="text-xs text-muted-foreground">{category.parentName}</span>}
-                        </div>
-                      </SelectItem>
+                  <SelectContent>
+                    {entrepreneurOptions.map((name) => (
+                      <SelectItem key={name} value={name}>{name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>WB категория</Label>
+                <Popover open={categoryPickerOpen} onOpenChange={setCategoryPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start font-normal">
+                      <span className="truncate">{editingRow.wbSubject || 'Выберите категорию WB'}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[min(720px,calc(100vw-2rem))] p-2" align="start">
+                    <Input
+                      value={categorySearch}
+                      onChange={(event) => setCategorySearch(event.target.value)}
+                      placeholder="Поиск категории WB, например: биж"
+                      autoFocus
+                    />
+                    <ScrollArea className="mt-2 h-72">
+                      <div className="space-y-1 pr-2">
+                        {filteredWbCategories.length === 0 ? (
+                          <div className="px-3 py-6 text-center text-sm text-muted-foreground">Совпадений нет</div>
+                        ) : filteredWbCategories.map((category) => (
+                          <button
+                            key={`${category.subjectID}-${category.subjectName}`}
+                            type="button"
+                            onClick={() => {
+                              setWbCategory(category.subjectName)
+                              setCategorySearch('')
+                              setCategoryPickerOpen(false)
+                            }}
+                            className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                          >
+                            <div className="font-medium">{category.subjectName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {category.parentName || 'WB'} · FBS {formatAutoNumber(category.fbsCommissionPct * 100, '%')} · FBO {formatAutoNumber(category.fboCommissionPct * 100, '%')}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </PopoverContent>
+                </Popover>
                 <div className="text-xs text-muted-foreground">
-                  {tariffOptions ? `Список WB от ${tariffOptions.date}` : 'Список WB тарифов не загружен'}
+                  {tariffOptions ? `Список WB от ${tariffOptions.date}. Показаны первые ${formatNumber(filteredWbCategories.length)} совпадений.` : 'Список WB тарифов не загружен'}
                 </div>
               </div>
               {[
@@ -6216,23 +6279,31 @@ function UnitEconomicsTab() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label>Комиссия WB, %</Label>
-                    <Input value={(Number(editingRow.commissionPct || 0) * 100).toFixed(1)} disabled />
+                    <Input value={formatAutoNumber(Number(editingRow.commissionPct || 0) * 100)} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Склад логистики</Label>
                     <Input value={editingRow.warehouse || 'Тула'} disabled />
                   </div>
                   <div className="space-y-1">
-                    <Label>Логистика до клиента, ₽</Label>
-                    <Input value={formatNumber(Math.round(Number(editingRow.deliveryLogisticsRub || 0)))} disabled />
+                    <Label>Тула FBS, ₽</Label>
+                    <Input value={formatAutoNumber(getTulaDeliveryPreview(editingRow, 'fbs'))} disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Тула FBO, ₽</Label>
+                    <Input value={formatAutoNumber(getTulaDeliveryPreview(editingRow, 'fbo'))} disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Применено для {String(editingRow.fulfillment || 'fbs').toUpperCase()}, ₽</Label>
+                    <Input value={formatAutoNumber(Number(editingRow.deliveryLogisticsRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика возврата, ₽</Label>
-                    <Input value={formatNumber(Math.round(Number(editingRow.returnLogisticsRub || 0)))} disabled />
+                    <Input value={formatAutoNumber(Number(editingRow.returnLogisticsRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика всего, ₽</Label>
-                    <Input value={formatNumber(Math.round(Number(editingRow.logisticsTotalRub || 0)))} disabled />
+                    <Input value={formatAutoNumber(Number(editingRow.logisticsTotalRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Обновлено WB</Label>
@@ -6324,10 +6395,6 @@ function UnitEconomicsTab() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label>Склад</Label>
-              <Input value={String(bulkPatch?.warehouse || '')} onChange={(e) => setBulkText('warehouse', e.target.value)} />
-            </div>
             {[
               ['avgDeliveryDays', 'Среднее время доставки'],
               ['fixedWarehouseCoeff', 'Коэффициент склада'],
