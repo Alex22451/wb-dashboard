@@ -30,7 +30,6 @@ const WB_MANAGED_ROW_FIELDS: Array<keyof UnitEconomicsRow> = [
   'vendorCode',
   'wbBrand',
   'wbSyncedAt',
-  'discountPct',
   'commissionPct',
   'returnLogisticsRub',
   'deliveryLogisticsRub',
@@ -939,7 +938,6 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
           row.wbBrand = card.brand
           row.wbSyncedAt = now
           if (!row.category && card.subject) row.category = card.subject
-          if (price && Number.isFinite(price.discountPct)) row.discountPct = price.discountPct
           if (price && Number.isFinite(price.clubDiscountPct)) row.walletPct = price.clubDiscountPct
         }
         if (JSON.stringify(row) !== before) {

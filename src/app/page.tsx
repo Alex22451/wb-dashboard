@@ -5328,7 +5328,6 @@ const WB_READONLY_UNIT_FIELDS = new Set<keyof UnitEconomicsRow>([
   'nmId',
   'vendorCode',
   'wbBrand',
-  'discountPct',
   'commissionPct',
   'returnLogisticsRub',
   'deliveryLogisticsRub',
@@ -5672,6 +5671,11 @@ function UnitEconomicsTab() {
   const formatAutoNumber = (value: number, suffix = '') => {
     const rounded = Math.round((Number(value) || 0) * 10) / 10
     return `${rounded.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}${suffix}`
+  }
+  const getPriceAfterDiscountPreview = (row: Partial<UnitEconomicsRow>) => {
+    const price = Number(row.priceBeforeDiscountRub || 0)
+    const discount = Number(row.discountPct || 0)
+    return Math.round(price * (1 - discount) * 100) / 100
   }
   const getTariffDeliveryPreview = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
     if (!tariffOptions) return 0
@@ -6048,7 +6052,9 @@ function UnitEconomicsTab() {
                     <thead>
                       <tr className="border-b bg-muted/20">
                         <th className="px-3 py-2 text-left font-medium">Товар</th>
-                        <th className="px-3 py-2 text-right font-medium">Цена</th>
+                        <th className="px-3 py-2 text-right font-medium">До скидки</th>
+                        <th className="px-3 py-2 text-right font-medium">Скидка</th>
+                        <th className="px-3 py-2 text-right font-medium">После скидки</th>
                         <th className="px-3 py-2 text-right font-medium">Себес.</th>
                         <th className="px-3 py-2 text-right font-medium">Комис.</th>
                         <th className="px-3 py-2 text-right font-medium">Логистика</th>
@@ -6074,6 +6080,8 @@ function UnitEconomicsTab() {
                               </div>
                             </div>
                           </td>
+                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceBeforeDiscountRub))} ₽</td>
+                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.discountPct * 100, '%')}</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
                           <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
                           <td className="px-3 py-2 text-right">{formatAutoNumber(row.commissionPct * 100, '%')}</td>
@@ -6263,12 +6271,40 @@ function UnitEconomicsTab() {
                   {tariffOptions ? `Список WB от ${tariffOptions.date}. Показаны первые ${formatNumber(filteredWbCategories.length)} совпадений.` : 'Список WB тарифов не загружен'}
                 </div>
               </div>
+              <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:col-span-2 sm:grid-cols-4">
+                <div className="space-y-1">
+                  <Label>Цена до скидки, ₽</Label>
+                  <Input
+                    type="number"
+                    value={Number(editingRow.priceBeforeDiscountRub || 0)}
+                    onChange={(e) => setEditNumber('priceBeforeDiscountRub', e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Скидка, %</Label>
+                  <Input
+                    type="number"
+                    value={Number(editingRow.discountPct || 0) * 100}
+                    onChange={(e) => setEditNumber('discountPct', e.target.value, true)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Цена после скидки, ₽</Label>
+                  <Input value={formatAutoNumber(getPriceAfterDiscountPreview(editingRow))} disabled />
+                </div>
+                <div className="space-y-1">
+                  <Label>Налог, %</Label>
+                  <Input
+                    type="number"
+                    value={Number(editingRow.taxAcquiringPct || 0) * 100}
+                    onChange={(e) => setEditNumber('taxAcquiringPct', e.target.value, true)}
+                  />
+                </div>
+              </div>
               {[
-                ['priceBeforeDiscountRub', 'Цена до скидки, ₽'],
                 ['sppPct', 'СПП, %', true],
                 ['walletPct', 'Кошелек, %', true],
                 ['costRub', 'Себестоимость, ₽'],
-                ['taxAcquiringPct', 'Налог + эквайринг, %', true],
                 ['drrPct', 'ДРР, %', true],
                 ['minProfitRub', 'Минимальная прибыль, ₽'],
                 ['avgDeliveryDays', 'Среднее время доставки'],
