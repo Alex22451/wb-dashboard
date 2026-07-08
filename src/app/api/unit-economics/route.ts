@@ -30,7 +30,6 @@ const WB_MANAGED_ROW_FIELDS: Array<keyof UnitEconomicsRow> = [
   'vendorCode',
   'wbBrand',
   'wbSyncedAt',
-  'priceBeforeDiscountRub',
   'discountPct',
   'commissionPct',
   'returnLogisticsRub',
@@ -721,6 +720,23 @@ function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
   return warehouses.find((warehouse) => normalizeTariffName(warehouse.warehouseName) === 'тула') || null
 }
 
+function findCentralFederalDistrictWarehouse(warehouses: Record<string, unknown>[]) {
+  return warehouses.find((warehouse) => {
+    const name = normalizeTariffName(warehouse.warehouseName)
+    return name.includes('центральн')
+  }) || null
+}
+
+function findLogisticsWarehouse(warehouses: Record<string, unknown>[], fulfillment: UnitFulfillment) {
+  return fulfillment === 'fbs'
+    ? findCentralFederalDistrictWarehouse(warehouses)
+    : findTulaWarehouse(warehouses)
+}
+
+function logisticsWarehouseName(fulfillment: UnitFulfillment) {
+  return fulfillment === 'fbs' ? 'Центральный федеральный округ' : 'Тула'
+}
+
 function getCommissionPair(item: Record<string, unknown>) {
   const fbs = parseWbNumber(item.kgvpSupplier)
   const fbo = parseWbNumber(item.kgvpMarketplace) || parseWbNumber(item.paidStorageKgvp)
@@ -746,7 +762,7 @@ function tariffCategories(payload: WbTariffsPayload): UnitTariffCategory[] {
   return [...bySubject.values()].sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'ru'))
 }
 
-function calculateTulaDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouse: Record<string, unknown> | null) {
+function calculateTariffDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouse: Record<string, unknown> | null) {
   if (!warehouse) return 0
   const keys = fulfillment === 'fbs'
     ? ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr']
@@ -759,7 +775,7 @@ function calculateTulaDelivery(volumeLiters: number, fulfillment: UnitFulfillmen
   return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
 }
 
-function calculateTulaReturn(warehouse: Record<string, unknown> | null) {
+function calculateTariffReturn(warehouse: Record<string, unknown> | null) {
   if (!warehouse) return 0
   const values = ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
     .map((key) => parseWbNumber(warehouse[key]))
@@ -774,9 +790,10 @@ async function buildUnitTariffOptions(targets: WbTarget[]) {
   try {
     const date = todayMoscowDate()
     const { payload, cacheHit } = await fetchWbTariffs(target, date)
+    const fbsBox = findCentralFederalDistrictWarehouse(payload.boxWarehouses)
+    const fbsReturn = findCentralFederalDistrictWarehouse(payload.returnWarehouses)
     const tulaBox = findTulaWarehouse(payload.boxWarehouses)
     const tulaReturn = findTulaWarehouse(payload.returnWarehouses)
-    const returnRub = calculateTulaReturn(tulaReturn)
     return {
       date,
       cacheHit,
@@ -784,13 +801,17 @@ async function buildUnitTariffOptions(targets: WbTarget[]) {
       categories: tariffCategories(payload),
       tula: {
         warehouseName: 'Тула',
-        fbsBaseRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceBase) : 0,
-        fbsLiterRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceLiter) : 0,
-        fbsCoefPct: tulaBox ? parseWbNumber(tulaBox.boxDeliveryMarketplaceCoefExpr, 100) : 100,
+        fbsWarehouseName: 'Центральный федеральный округ',
+        fboWarehouseName: 'Тула',
+        fbsBaseRub: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceBase) : 0,
+        fbsLiterRub: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceLiter) : 0,
+        fbsCoefPct: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceCoefExpr, 100) : 100,
         fboBaseRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryBase) : 0,
         fboLiterRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryLiter) : 0,
         fboCoefPct: tulaBox ? parseWbNumber(tulaBox.boxDeliveryCoefExpr, 100) : 100,
-        returnRub,
+        fbsReturnRub: calculateTariffReturn(fbsReturn),
+        fboReturnRub: calculateTariffReturn(tulaReturn),
+        returnRub: calculateTariffReturn(tulaReturn),
       },
     }
   } catch {
@@ -803,7 +824,7 @@ async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[
   if (!target) return row
   try {
     const { payload } = await fetchWbTariffs(target, todayMoscowDate())
-    const next = { ...row, warehouse: 'Тула' }
+    const next = { ...row, warehouse: logisticsWarehouseName(row.fulfillment) }
     const subject = normalizeTariffName(next.wbSubject || next.category)
     const commissionRow = payload.commissionReport.find((item) => normalizeTariffName(item.subjectName) === subject)
     if (commissionRow) {
@@ -812,8 +833,8 @@ async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[
     }
 
     const volume = Math.max(1, (next.lengthCm * next.widthCm * next.heightCm) / 1000)
-    next.deliveryLogisticsRub = calculateTulaDelivery(volume, next.fulfillment, findTulaWarehouse(payload.boxWarehouses))
-    next.returnLogisticsRub = calculateTulaReturn(findTulaWarehouse(payload.returnWarehouses))
+    next.deliveryLogisticsRub = calculateTariffDelivery(volume, next.fulfillment, findLogisticsWarehouse(payload.boxWarehouses, next.fulfillment))
+    next.returnLogisticsRub = calculateTariffReturn(findLogisticsWarehouse(payload.returnWarehouses, next.fulfillment))
     next.logisticsTotalRub = calculateLogisticsTotal(next)
     return next
   } catch {
@@ -918,7 +939,6 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
           row.wbBrand = card.brand
           row.wbSyncedAt = now
           if (!row.category && card.subject) row.category = card.subject
-          if (price?.priceBeforeDiscountRub) row.priceBeforeDiscountRub = price.priceBeforeDiscountRub
           if (price && Number.isFinite(price.discountPct)) row.discountPct = price.discountPct
           if (price && Number.isFinite(price.clubDiscountPct)) row.walletPct = price.clubDiscountPct
         }
@@ -1000,7 +1020,7 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
     for (const row of rows) {
       if (!sameEntrepreneur(row.entrepreneurName, target.name)) continue
       const before = JSON.stringify(row)
-      row.warehouse = 'Тула'
+      row.warehouse = logisticsWarehouseName(row.fulfillment)
       const commission = findCommission(row, payload.commissionReport)
       if (commission !== null) row.commissionPct = commission
 

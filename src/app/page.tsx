@@ -271,12 +271,16 @@ interface UnitTariffOptions {
   categories: UnitTariffCategory[]
   tula: {
     warehouseName: string
+    fbsWarehouseName?: string
+    fboWarehouseName?: string
     fbsBaseRub: number
     fbsLiterRub: number
     fbsCoefPct: number
     fboBaseRub: number
     fboLiterRub: number
     fboCoefPct: number
+    fbsReturnRub?: number
+    fboReturnRub?: number
     returnRub: number
   }
 }
@@ -5324,7 +5328,6 @@ const WB_READONLY_UNIT_FIELDS = new Set<keyof UnitEconomicsRow>([
   'nmId',
   'vendorCode',
   'wbBrand',
-  'priceBeforeDiscountRub',
   'discountPct',
   'commissionPct',
   'returnLogisticsRub',
@@ -5670,7 +5673,7 @@ function UnitEconomicsTab() {
     const rounded = Math.round((Number(value) || 0) * 10) / 10
     return `${rounded.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}${suffix}`
   }
-  const getTulaDeliveryPreview = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
+  const getTariffDeliveryPreview = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
     if (!tariffOptions) return 0
     const length = Number(row.lengthCm || 0)
     const width = Number(row.widthCm || 0)
@@ -5683,6 +5686,18 @@ function UnitEconomicsTab() {
     const coef = (mode === 'fbo' ? tula.fboCoefPct : tula.fbsCoefPct) || 100
     if (base <= 0) return 0
     return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 10) / 10
+  }, [tariffOptions])
+  const getTariffReturnPreview = useCallback((mode: UnitFulfillment) => {
+    if (!tariffOptions) return 0
+    return mode === 'fbo'
+      ? Number(tariffOptions.tula.fboReturnRub ?? tariffOptions.tula.returnRub ?? 0)
+      : Number(tariffOptions.tula.fbsReturnRub ?? 0)
+  }, [tariffOptions])
+  const getLogisticsWarehouseName = useCallback((mode: UnitFulfillment) => {
+    if (!tariffOptions) return mode === 'fbo' ? 'Тула' : 'Центральный федеральный округ'
+    return mode === 'fbo'
+      ? tariffOptions.tula.fboWarehouseName || tariffOptions.tula.warehouseName || 'Тула'
+      : tariffOptions.tula.fbsWarehouseName || 'Центральный федеральный округ'
   }, [tariffOptions])
   const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
     if (!tariffOptions) return row
@@ -5704,9 +5719,11 @@ function UnitEconomicsTab() {
     const liter = isFbo ? tula.fboLiterRub : tula.fbsLiterRub
     const coef = (isFbo ? tula.fboCoefPct : tula.fbsCoefPct) || 100
     if (length > 0 && width > 0 && height > 0 && base > 0) {
-      next.warehouse = 'Тула'
+      next.warehouse = isFbo
+        ? tula.fboWarehouseName || tula.warehouseName || 'Тула'
+        : tula.fbsWarehouseName || 'Центральный федеральный округ'
       next.deliveryLogisticsRub = Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
-      next.returnLogisticsRub = tula.returnRub || 0
+      next.returnLogisticsRub = isFbo ? Number(tula.fboReturnRub ?? tula.returnRub ?? 0) : Number(tula.fbsReturnRub ?? 0)
       const buyout = Number(next.buyoutPct || 1) > 0 ? Number(next.buyoutPct || 1) : 1
       const localization = Math.max(1, Number(next.localizationIndex || 1))
       const returnPart = Number(next.returnLogisticsRub || 0) * Math.max(0, (1 - buyout) / buyout)
@@ -5824,10 +5841,10 @@ function UnitEconomicsTab() {
               Импорт Excel
             </span>
           </label>
-          <Button onClick={() => setEditingRow({
+          <Button onClick={() => setEditingRow(applyClientAutomaticWbFields({
             ...emptyUnitRow(),
             entrepreneurName: selectedEntrepreneur,
-          })} className="gap-2" disabled={unitMode !== 'products'}>
+          }))} className="gap-2" disabled={unitMode !== 'products'}>
             <Plus className="h-4 w-4" />
             Товар
           </Button>
@@ -6069,7 +6086,7 @@ function UnitEconomicsTab() {
                           <td className="px-3 py-2">{unitStatus(row)}</td>
                           <td className="px-3 py-2 text-right">
                             <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="sm" onClick={() => setEditingRow(row)}>
+                              <Button variant="ghost" size="sm" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
@@ -6247,6 +6264,7 @@ function UnitEconomicsTab() {
                 </div>
               </div>
               {[
+                ['priceBeforeDiscountRub', 'Цена до скидки, ₽'],
                 ['sppPct', 'СПП, %', true],
                 ['walletPct', 'Кошелек, %', true],
                 ['costRub', 'Себестоимость, ₽'],
@@ -6274,7 +6292,7 @@ function UnitEconomicsTab() {
               <div className="space-y-3 rounded-md border bg-muted/30 p-3 sm:col-span-2">
                 <div>
                   <div className="text-sm font-medium">Автоматически из WB</div>
-                  <div className="text-xs text-muted-foreground">Комиссия берется из категории WB, логистика считается по складу Тула и габаритам.</div>
+                  <div className="text-xs text-muted-foreground">Комиссия берется из категории WB, FBS-логистика считается по ЦФО, FBO-логистика по Туле.</div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
@@ -6283,23 +6301,23 @@ function UnitEconomicsTab() {
                   </div>
                   <div className="space-y-1">
                     <Label>Склад логистики</Label>
-                    <Input value={editingRow.warehouse || 'Тула'} disabled />
+                    <Input value={getLogisticsWarehouseName(editingRow.fulfillment || 'fbs')} disabled />
                   </div>
                   <div className="space-y-1">
-                    <Label>Тула FBS, ₽</Label>
-                    <Input value={formatAutoNumber(getTulaDeliveryPreview(editingRow, 'fbs'))} disabled />
+                    <Label>FBS ЦФО, ₽</Label>
+                    <Input value={formatAutoNumber(getTariffDeliveryPreview(editingRow, 'fbs'))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Тула FBO, ₽</Label>
-                    <Input value={formatAutoNumber(getTulaDeliveryPreview(editingRow, 'fbo'))} disabled />
+                    <Input value={formatAutoNumber(getTariffDeliveryPreview(editingRow, 'fbo'))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Применено для {String(editingRow.fulfillment || 'fbs').toUpperCase()}, ₽</Label>
                     <Input value={formatAutoNumber(Number(editingRow.deliveryLogisticsRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
-                    <Label>Логистика возврата, ₽</Label>
-                    <Input value={formatAutoNumber(Number(editingRow.returnLogisticsRub || 0))} disabled />
+                    <Label>Возврат {String(editingRow.fulfillment || 'fbs').toUpperCase()}, ₽</Label>
+                    <Input value={formatAutoNumber(Number(editingRow.returnLogisticsRub || getTariffReturnPreview(editingRow.fulfillment || 'fbs')))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика всего, ₽</Label>
