@@ -646,11 +646,16 @@ function pickWarehouse(row: UnitEconomicsRow, warehouses: Record<string, unknown
   if (warehouses.length === 0) return null
   const rowWarehouse = normalizeTariffName(row.warehouse)
   if (rowWarehouse && rowWarehouse !== 'маркетплеис' && rowWarehouse !== 'маркетплейс') {
-    const exact = warehouses.find((item) => normalizeTariffName(item.warehouseName) === rowWarehouse)
+    const exact = warehouses.find((item) => {
+      return normalizeTariffName(item.warehouseName) === rowWarehouse
+        || normalizeTariffName(item.geoName) === rowWarehouse
+    })
     if (exact) return exact
     const partial = warehouses.find((item) => {
       const name = normalizeTariffName(item.warehouseName)
-      return name.includes(rowWarehouse) || rowWarehouse.includes(name)
+      const geoName = normalizeTariffName(item.geoName)
+      return (name && (name.includes(rowWarehouse) || rowWarehouse.includes(name)))
+        || (geoName && (geoName.includes(rowWarehouse) || rowWarehouse.includes(geoName)))
     })
     if (partial) return partial
   }
@@ -661,10 +666,10 @@ function averageWarehouseTariff(warehouses: Record<string, unknown>[], keys: str
   const values = warehouses
     .map((warehouse) => {
       const next: Record<string, number> = {}
-      for (const key of keys) next[key] = parseWbNumber(warehouse[key])
+      for (const key of keys) next[key] = parseWbNumber(warehouse[key], key.toLowerCase().includes('coef') ? 100 : 0)
       return next
     })
-    .filter((item) => keys.every((key) => item[key] > 0))
+    .filter((item) => item[keys[0]] > 0 && item[keys[2]] > 0)
   if (values.length === 0) return null
   return keys.reduce<Record<string, number>>((acc, key) => {
     acc[key] = values.reduce((sum, item) => sum + item[key], 0) / values.length
@@ -719,17 +724,23 @@ function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
   return warehouses.find((warehouse) => normalizeTariffName(warehouse.warehouseName) === 'тула') || null
 }
 
-function findCentralFederalDistrictWarehouse(warehouses: Record<string, unknown>[]) {
-  return warehouses.find((warehouse) => {
-    const name = normalizeTariffName(warehouse.warehouseName)
-    return name.includes('центральн')
-  }) || null
+function isCentralFederalDistrictWarehouse(warehouse: Record<string, unknown>) {
+  const geoName = normalizeTariffName(warehouse.geoName)
+  const warehouseName = normalizeTariffName(warehouse.warehouseName)
+  return geoName.includes('центральн') || warehouseName.includes('центральн')
 }
 
-function findLogisticsWarehouse(warehouses: Record<string, unknown>[], fulfillment: UnitFulfillment) {
-  return fulfillment === 'fbs'
-    ? findCentralFederalDistrictWarehouse(warehouses)
-    : findTulaWarehouse(warehouses)
+function centralFederalDistrictWarehouses(warehouses: Record<string, unknown>[]) {
+  return warehouses.filter(isCentralFederalDistrictWarehouse)
+}
+
+function pickLogisticsWarehouses(warehouses: Record<string, unknown>[], fulfillment: UnitFulfillment) {
+  if (fulfillment === 'fbs') {
+    const central = centralFederalDistrictWarehouses(warehouses)
+    return central.length > 0 ? central : warehouses
+  }
+  const tula = findTulaWarehouse(warehouses)
+  return tula ? [tula] : warehouses
 }
 
 function logisticsWarehouseName(fulfillment: UnitFulfillment) {
@@ -761,24 +772,24 @@ function tariffCategories(payload: WbTariffsPayload): UnitTariffCategory[] {
   return [...bySubject.values()].sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'ru'))
 }
 
-function calculateTariffDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouse: Record<string, unknown> | null) {
-  if (!warehouse) return 0
+function calculateTariffDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouses: Record<string, unknown>[]) {
   const keys = fulfillment === 'fbs'
     ? ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr']
     : ['boxDeliveryBase', 'boxDeliveryLiter', 'boxDeliveryCoefExpr']
-  const base = parseWbNumber(warehouse[keys[0]])
-  const liter = parseWbNumber(warehouse[keys[1]])
-  const coef = parseWbNumber(warehouse[keys[2]], 100) || 100
+  const values = averageWarehouseTariff(warehouses, keys)
+  if (!values) return 0
+  const base = values[keys[0]]
+  const liter = values[keys[1]]
+  const coef = values[keys[2]] || 100
   if (base <= 0) return 0
   const volume = Math.max(1, volumeLiters)
   return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
 }
 
-function calculateTariffReturn(warehouse: Record<string, unknown> | null) {
-  if (!warehouse) return 0
-  const values = ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
+function calculateTariffReturn(warehouses: Record<string, unknown>[]) {
+  const values = warehouses.flatMap((warehouse) => ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
     .map((key) => parseWbNumber(warehouse[key]))
-    .filter((value) => value > 0)
+    .filter((value) => value > 0))
   if (values.length === 0) return 0
   return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
 }
@@ -789,10 +800,12 @@ async function buildUnitTariffOptions(targets: WbTarget[]) {
   try {
     const date = todayMoscowDate()
     const { payload, cacheHit } = await fetchWbTariffs(target, date)
-    const fbsBox = findCentralFederalDistrictWarehouse(payload.boxWarehouses)
-    const fbsReturn = findCentralFederalDistrictWarehouse(payload.returnWarehouses)
-    const tulaBox = findTulaWarehouse(payload.boxWarehouses)
-    const tulaReturn = findTulaWarehouse(payload.returnWarehouses)
+    const fbsBox = pickLogisticsWarehouses(payload.boxWarehouses, 'fbs')
+    const fbsReturn = pickLogisticsWarehouses(payload.returnWarehouses, 'fbs')
+    const tulaBox = pickLogisticsWarehouses(payload.boxWarehouses, 'fbo')
+    const tulaReturn = pickLogisticsWarehouses(payload.returnWarehouses, 'fbo')
+    const fbsBoxValues = averageWarehouseTariff(fbsBox, ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr'])
+    const fboBoxValues = averageWarehouseTariff(tulaBox, ['boxDeliveryBase', 'boxDeliveryLiter', 'boxDeliveryCoefExpr'])
     return {
       date,
       cacheHit,
@@ -802,12 +815,12 @@ async function buildUnitTariffOptions(targets: WbTarget[]) {
         warehouseName: 'Тула',
         fbsWarehouseName: 'Центральный федеральный округ',
         fboWarehouseName: 'Тула',
-        fbsBaseRub: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceBase) : 0,
-        fbsLiterRub: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceLiter) : 0,
-        fbsCoefPct: fbsBox ? parseWbNumber(fbsBox.boxDeliveryMarketplaceCoefExpr, 100) : 100,
-        fboBaseRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryBase) : 0,
-        fboLiterRub: tulaBox ? parseWbNumber(tulaBox.boxDeliveryLiter) : 0,
-        fboCoefPct: tulaBox ? parseWbNumber(tulaBox.boxDeliveryCoefExpr, 100) : 100,
+        fbsBaseRub: fbsBoxValues?.boxDeliveryMarketplaceBase || 0,
+        fbsLiterRub: fbsBoxValues?.boxDeliveryMarketplaceLiter || 0,
+        fbsCoefPct: fbsBoxValues?.boxDeliveryMarketplaceCoefExpr || 100,
+        fboBaseRub: fboBoxValues?.boxDeliveryBase || 0,
+        fboLiterRub: fboBoxValues?.boxDeliveryLiter || 0,
+        fboCoefPct: fboBoxValues?.boxDeliveryCoefExpr || 100,
         fbsReturnRub: calculateTariffReturn(fbsReturn),
         fboReturnRub: calculateTariffReturn(tulaReturn),
         returnRub: calculateTariffReturn(tulaReturn),
@@ -832,8 +845,8 @@ async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[
     }
 
     const volume = Math.max(1, (next.lengthCm * next.widthCm * next.heightCm) / 1000)
-    next.deliveryLogisticsRub = calculateTariffDelivery(volume, next.fulfillment, findLogisticsWarehouse(payload.boxWarehouses, next.fulfillment))
-    next.returnLogisticsRub = calculateTariffReturn(findLogisticsWarehouse(payload.returnWarehouses, next.fulfillment))
+    next.deliveryLogisticsRub = calculateTariffDelivery(volume, next.fulfillment, pickLogisticsWarehouses(payload.boxWarehouses, next.fulfillment))
+    next.returnLogisticsRub = calculateTariffReturn(pickLogisticsWarehouses(payload.returnWarehouses, next.fulfillment))
     next.logisticsTotalRub = calculateLogisticsTotal(next)
     return next
   } catch {

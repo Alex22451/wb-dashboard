@@ -5672,6 +5672,13 @@ function UnitEconomicsTab() {
     const rounded = Math.round((Number(value) || 0) * 10) / 10
     return `${rounded.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}${suffix}`
   }
+  const getEditNumberValue = (key: keyof UnitEconomicsRow, pct = false) => {
+    const value = editingRow?.[key]
+    if (value === undefined || value === null || value === '') return ''
+    const number = Number(value)
+    if (!Number.isFinite(number)) return ''
+    return pct ? number * 100 : number
+  }
   const getPriceAfterDiscountPreview = (row: Partial<UnitEconomicsRow>) => {
     const price = Number(row.priceBeforeDiscountRub || 0)
     const discount = Number(row.discountPct || 0)
@@ -5703,6 +5710,43 @@ function UnitEconomicsTab() {
       ? tariffOptions.tula.fboWarehouseName || tariffOptions.tula.warehouseName || 'Тула'
       : tariffOptions.tula.fbsWarehouseName || 'Центральный федеральный округ'
   }, [tariffOptions])
+  const getClientExtraCommissionPct = (days: number, mode: UnitFulfillment) => {
+    if (!Number.isFinite(days) || days <= 1) return 0
+    if (mode === 'fbo') {
+      if (days <= 13) return -0.01
+      if (days <= 15) return 0
+      if (days <= 42) return ((days - 15) * 0.15) / 100
+      return ((days - 15) * 0.25) / 100
+    }
+    if (days <= 13) return -0.015
+    if (days <= 18) return 0
+    if (days <= 30) return ((days - 18) * 0.3) / 100
+    if (days <= 36) return ((days - 18) * 0.35) / 100
+    return ((days - 18) * 0.45) / 100
+  }
+  const getScenarioProfit = useCallback((row: UnitEconomicsRow, mode: UnitFulfillment) => {
+    const category = tariffOptions?.categories.find((item) => item.subjectName === (row.wbSubject || row.category))
+    const commissionPct = category
+      ? mode === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
+      : mode === row.fulfillment ? row.commissionPct : 0
+    const deliveryLogisticsRub = getTariffDeliveryPreview(row, mode)
+    const returnLogisticsRub = getTariffReturnPreview(mode)
+    const buyout = Number(row.buyoutPct || 1) > 0 ? Number(row.buyoutPct || 1) : 1
+    const localization = Math.max(1, Number(row.localizationIndex || 1))
+    const returnPart = returnLogisticsRub * Math.max(0, (1 - buyout) / buyout)
+    const logisticsTotalRub = Math.round((deliveryLogisticsRub + returnPart) * localization * 100) / 100
+    const priceAfterDiscountRub = row.priceBeforeDiscountRub * (1 - row.discountPct)
+    const priceAfterSppRub = priceAfterDiscountRub * (1 - row.sppPct)
+    const priceWithWalletRub = priceAfterSppRub * (1 - row.walletPct)
+    const extraCommissionPct = getClientExtraCommissionPct(row.avgDeliveryDays, mode)
+    const profitRub = priceAfterDiscountRub
+      - (priceAfterDiscountRub * commissionPct)
+      - row.costRub
+      - logisticsTotalRub
+      - (priceWithWalletRub * row.taxAcquiringPct)
+      - (priceAfterDiscountRub * extraCommissionPct)
+    return Math.round((profitRub - (priceAfterDiscountRub * row.drrPct)) * 100) / 100
+  }, [getTariffDeliveryPreview, getTariffReturnPreview, tariffOptions])
   const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
     if (!tariffOptions) return row
     const next = { ...row }
@@ -5739,6 +5783,15 @@ function UnitEconomicsTab() {
 
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     if (WB_READONLY_UNIT_FIELDS.has(key)) return
+    if (value === '') {
+      setEditingRow((current) => ({
+        ...applyClientAutomaticWbFields({
+          ...(current || emptyUnitRow()),
+          [key]: undefined,
+        }),
+      }))
+      return
+    }
     const number = Number(value)
     setEditingRow((current) => ({
       ...applyClientAutomaticWbFields({
@@ -6059,51 +6112,59 @@ function UnitEconomicsTab() {
                         <th className="px-3 py-2 text-right font-medium">Комис.</th>
                         <th className="px-3 py-2 text-right font-medium">Логистика</th>
                         <th className="px-3 py-2 text-right font-medium">ДРР</th>
-                        <th className="px-3 py-2 text-right font-medium">Прибыль</th>
+                        <th className="px-3 py-2 text-right font-medium">Прибыль FBS</th>
+                        <th className="px-3 py-2 text-right font-medium">Прибыль FBO</th>
                         <th className="px-3 py-2 text-right font-medium">Рент.</th>
                         <th className="px-3 py-2 text-left font-medium">Статус</th>
                         <th className="px-3 py-2 text-right font-medium"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedRows.map((row) => (
-                        <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
-                          <td className="max-w-[360px] px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">{row.productName}</div>
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
-                                  {row.vendorCode ? ` · ${row.vendorCode}` : ''}
+                      {selectedRows.map((row) => {
+                        const fbsProfit = getScenarioProfit(row, 'fbs')
+                        const fboProfit = getScenarioProfit(row, 'fbo')
+                        return (
+                          <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
+                            <td className="max-w-[360px] px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium">{row.productName}</div>
+                                  <div className="truncate text-xs text-muted-foreground">
+                                    {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
+                                    {row.vendorCode ? ` · ${row.vendorCode}` : ''}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceBeforeDiscountRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.discountPct * 100, '%')}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.commissionPct * 100, '%')}</td>
-                          <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
-                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.drrPct * 100, '%')}</td>
-                          <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                            {formatNumber(Math.round(row.profitWithAdsRub))} ₽
-                          </td>
-                          <td className="px-3 py-2 text-right">{formatAutoNumber(row.profitabilityPct, '%')}</td>
-                          <td className="px-3 py-2">{unitStatus(row)}</td>
-                          <td className="px-3 py-2 text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="sm" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceBeforeDiscountRub))} ₽</td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.discountPct * 100, '%')}</td>
+                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
+                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.commissionPct * 100, '%')}</td>
+                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.drrPct * 100, '%')}</td>
+                            <td className={`px-3 py-2 text-right font-semibold ${fbsProfit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                              {formatNumber(Math.round(fbsProfit))} ₽
+                            </td>
+                            <td className={`px-3 py-2 text-right font-semibold ${fboProfit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                              {formatNumber(Math.round(fboProfit))} ₽
+                            </td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.profitabilityPct, '%')}</td>
+                            <td className="px-3 py-2">{unitStatus(row)}</td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -6276,7 +6337,7 @@ function UnitEconomicsTab() {
                   <Label>Цена до скидки, ₽</Label>
                   <Input
                     type="number"
-                    value={Number(editingRow.priceBeforeDiscountRub || 0)}
+                    value={getEditNumberValue('priceBeforeDiscountRub')}
                     onChange={(e) => setEditNumber('priceBeforeDiscountRub', e.target.value)}
                   />
                 </div>
@@ -6284,7 +6345,7 @@ function UnitEconomicsTab() {
                   <Label>Скидка, %</Label>
                   <Input
                     type="number"
-                    value={Number(editingRow.discountPct || 0) * 100}
+                    value={getEditNumberValue('discountPct', true)}
                     onChange={(e) => setEditNumber('discountPct', e.target.value, true)}
                   />
                 </div>
@@ -6296,7 +6357,7 @@ function UnitEconomicsTab() {
                   <Label>Налог, %</Label>
                   <Input
                     type="number"
-                    value={Number(editingRow.taxAcquiringPct || 0) * 100}
+                    value={getEditNumberValue('taxAcquiringPct', true)}
                     onChange={(e) => setEditNumber('taxAcquiringPct', e.target.value, true)}
                   />
                 </div>
@@ -6320,7 +6381,7 @@ function UnitEconomicsTab() {
                   <Label>{String(label)}</Label>
                   <Input
                     type="number"
-                    value={pct ? Number(editingRow[key as keyof UnitEconomicsRow] || 0) * 100 : Number(editingRow[key as keyof UnitEconomicsRow] || 0)}
+                    value={getEditNumberValue(key as keyof UnitEconomicsRow, !!pct)}
                     onChange={(e) => setEditNumber(key as keyof UnitEconomicsRow, e.target.value, !!pct)}
                   />
                 </div>
