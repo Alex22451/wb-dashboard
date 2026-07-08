@@ -526,6 +526,70 @@ function sameEntrepreneur(rowName: string, targetName: string) {
   return row && target && (row.includes(target) || target.includes(row))
 }
 
+function normalizeUnitMatchKey(value: unknown) {
+  return normalizeUnitProductKey(value)
+    .replace(/\bбрелки\b/g, 'ремувки')
+    .replace(/\bбрелок\b/g, 'ремувки')
+    .replace(/\bковрик для намаза\b/g, 'коврики для намаза')
+    .replace(/\bчехлы для бутылей с дном\b/g, 'чехлы для бутылей')
+    .replace(/\bчехол для бутылей с дном\b/g, 'чехлы для бутылей')
+    .replace(/\bшеврон\b/g, 'шевроны')
+    .replace(/\bбез печати\b/g, '')
+    .replace(/\bвелюр\b/g, '')
+    .replace(/\bгабардин\b/g, '')
+    .replace(/\bo[хx]ford\b/g, '')
+    .replace(/\bоксфорд\b/g, '')
+    .replace(/\b2\s*шт\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getDimension(value: string) {
+  return value.match(/\b(\d{1,3})\s*х\s*(\d{1,3})\b/)
+}
+
+function swapFirstDimension(value: string) {
+  return value.replace(/\b(\d{1,3})\s*х\s*(\d{1,3})\b/, '$2х$1')
+}
+
+function baseUnitMatchKey(value: string) {
+  return value
+    .replace(/\b\d{1,3}\s*х\s*\d{1,3}\b/g, '')
+    .replace(/\b\d+\s*шт\b/g, '')
+    .replace(/\b\d{2,3}\s*см\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function unitMatchCandidates(value: unknown) {
+  const exact = normalizeUnitMatchKey(value)
+  const candidates = new Set<string>()
+  if (exact) {
+    candidates.add(exact)
+    const swapped = swapFirstDimension(exact)
+    if (swapped !== exact) candidates.add(swapped)
+    const base = baseUnitMatchKey(exact)
+    if (base) candidates.add(base)
+  }
+  return {
+    exact,
+    hasDimension: !!getDimension(exact),
+    base: baseUnitMatchKey(exact),
+    candidates,
+  }
+}
+
+function unitKeysMatch(rowKey: ReturnType<typeof unitMatchCandidates>, cardKey: ReturnType<typeof unitMatchCandidates>) {
+  if (!rowKey.exact || !cardKey.exact) return false
+  for (const candidate of cardKey.candidates) {
+    if (rowKey.candidates.has(candidate)) return true
+  }
+  if ((!rowKey.hasDimension || !cardKey.hasDimension) && rowKey.base && cardKey.base) {
+    return rowKey.base === cardKey.base
+  }
+  return false
+}
+
 function findCommission(row: UnitEconomicsRow, report: Record<string, unknown>[]) {
   const candidates = [
     row.wbSubject,
@@ -628,7 +692,7 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   const rows = store.rows.map((row) => normalizeRow(row))
   const rowKeys = rows.map((row) => ({
     row,
-    key: normalizeUnitProductKey(row.excelProductKey || row.productName),
+    key: unitMatchCandidates(row.excelProductKey || row.productName),
   }))
   const stats = {
     targets: targets.length,
@@ -690,17 +754,18 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
     }
 
     for (const card of cards) {
-      const mappedKey = normalizeUnitProductKey(mapWbOrderToProductKey(card.subject, card.vendorCode, card.brand) || '')
-      if (!mappedKey) continue
+      const mappedRaw = mapWbOrderToProductKey(card.subject, card.vendorCode, card.brand) || ''
+      const mappedKey = unitMatchCandidates(mappedRaw)
+      if (!mappedKey.exact) continue
       const matched = rowKeys.filter(({ row, key }) => {
-        if (key !== mappedKey) return false
+        if (!unitKeysMatch(key, mappedKey)) return false
         if (!row.entrepreneurName) return true
         return sameEntrepreneur(row.entrepreneurName, target.name)
       })
 
       if (matched.length === 0) {
         if (stats.unmatchedCards.length < 20) {
-          stats.unmatchedCards.push({ target: target.name, vendorCode: card.vendorCode, nmId: card.nmId, key: mappedKey })
+          stats.unmatchedCards.push({ target: target.name, vendorCode: card.vendorCode, nmId: card.nmId, key: mappedKey.exact || mappedRaw })
         }
         continue
       }
@@ -918,13 +983,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'WB API ключи не найдены' }, { status: 400 })
     }
     const { store: nextStore, stats } = await syncWithWb(store, targets)
+    const costs = (nextStore.costs || seedCosts).map((cost) => normalizeCost(cost))
     const rows = nextStore.rows.map(calculateUnitEconomics)
     return NextResponse.json({
       store: {
         version: nextStore.version,
         updatedAt: nextStore.updatedAt,
         rows,
+        costs,
         summary: summarizeUnitEconomics(rows),
+        costSummary: summarizeUnitCosts(costs),
       },
       sync: stats,
     })
@@ -936,13 +1004,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'WB API ключи не найдены' }, { status: 400 })
     }
     const { store: nextStore, stats } = await syncWbTariffs(store, targets, body.force === true)
+    const costs = (nextStore.costs || seedCosts).map((cost) => normalizeCost(cost))
     const rows = nextStore.rows.map(calculateUnitEconomics)
     return NextResponse.json({
       store: {
         version: nextStore.version,
         updatedAt: nextStore.updatedAt,
         rows,
+        costs,
         summary: summarizeUnitEconomics(rows),
+        costSummary: summarizeUnitCosts(costs),
       },
       sync: stats,
     })

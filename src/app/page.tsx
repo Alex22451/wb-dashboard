@@ -5836,11 +5836,14 @@ function UnitEconomicsTab() {
               Импортируйте Excel-юнитку или добавьте первый товар вручную.
             </div>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-[260px_300px_minmax(0,1fr)]">
+            <div className="space-y-4">
               <div className="rounded-md border">
-                <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">ИП</div>
-                <ScrollArea className="h-[560px]">
-                  <div className="space-y-1 p-2">
+                <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-3 py-2">
+                  <div className="text-sm font-medium">ИП</div>
+                  <div className="text-xs text-muted-foreground">{formatNumber(groupedRows.length)} кабинетов</div>
+                </div>
+                <ScrollArea className="w-full">
+                  <div className="flex gap-2 p-2">
                     {groupedRows.map((group) => {
                       const itemSummary = summarizeUnitRows(group.rows)
                       const active = group.entrepreneur === selectedEntrepreneur
@@ -5852,7 +5855,7 @@ function UnitEconomicsTab() {
                             setSelectedEntrepreneur(group.entrepreneur)
                             setSelectedSubcategory(group.subcategories[0]?.subcategory || '')
                           }}
-                          className={`w-full rounded-md px-3 py-2 text-left text-sm ${active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                          className={`min-w-[220px] rounded-md px-3 py-2 text-left text-sm ${active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
                         >
                           <div className="font-medium">{group.entrepreneur}</div>
                           <div className={`mt-1 text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
@@ -5865,6 +5868,7 @@ function UnitEconomicsTab() {
                 </ScrollArea>
               </div>
 
+              <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
               <div className="rounded-md border">
                 <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">Подкатегории</div>
                 <ScrollArea className="h-[560px]">
@@ -5966,6 +5970,7 @@ function UnitEconomicsTab() {
                     </tbody>
                   </table>
                 </div>
+              </div>
               </div>
             </div>
           )}
