@@ -25,6 +25,18 @@ const PRICES_URL = 'https://discounts-prices-api.wildberries.ru/api/v2/list/good
 const COMMON_API_BASE = 'https://common-api.wildberries.ru'
 const seedRows = seedRowsRaw as UnitEconomicsRow[]
 const seedCosts = seedCostsRaw as UnitProductCost[]
+const WB_MANAGED_ROW_FIELDS: Array<keyof UnitEconomicsRow> = [
+  'nmId',
+  'vendorCode',
+  'wbBrand',
+  'wbSyncedAt',
+  'priceBeforeDiscountRub',
+  'discountPct',
+  'commissionPct',
+  'returnLogisticsRub',
+  'deliveryLogisticsRub',
+  'logisticsTotalRub',
+]
 
 interface WbCard {
   nmId: number
@@ -190,6 +202,15 @@ function normalizeCost(input: Partial<UnitProductCost>, existing?: UnitProductCo
     boxQty: toNumber(input.boxQty, existing?.boxQty || 0),
     updatedAt: input.updatedAt || existing?.updatedAt || now,
   }
+}
+
+function preserveWbManagedFields(input: Partial<UnitEconomicsRow>, existing?: UnitEconomicsRow): Partial<UnitEconomicsRow> {
+  if (!existing) return input
+  const next = { ...input }
+  for (const key of WB_MANAGED_ROW_FIELDS) {
+    ;(next as Record<string, unknown>)[key] = existing[key]
+  }
+  return next
 }
 
 function applyCostCatalog(rows: UnitEconomicsRow[], costs: UnitProductCost[]): UnitEconomicsRow[] {
@@ -1020,7 +1041,10 @@ export async function POST(request: NextRequest) {
   }
 
   const existing = store.rows.find((row) => row.id === body.row?.id)
-  const nextRow = normalizeRow({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing)
+  const nextRow = normalizeRow(
+    preserveWbManagedFields({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing),
+    existing,
+  )
   const rows = existing
     ? store.rows.map((row) => row.id === existing.id ? nextRow : row)
     : [nextRow, ...store.rows]
