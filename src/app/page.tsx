@@ -5711,6 +5711,11 @@ function UnitEconomicsTab() {
       ? tariffOptions.tula.fboWarehouseName || tariffOptions.tula.warehouseName || 'Тула'
       : tariffOptions.tula.fbsWarehouseName || 'Центральный федеральный округ'
   }, [tariffOptions])
+  const getCategoryCommission = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
+    const category = tariffOptions?.categories.find((item) => item.subjectName === (row.wbSubject || row.category))
+    if (category) return mode === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
+    return row.fulfillment === mode ? Number(row.commissionPct || 0) : 0
+  }, [tariffOptions])
   const getClientExtraCommissionPct = (days: number, mode: UnitFulfillment) => {
     if (!Number.isFinite(days) || days <= 1) return 0
     if (mode === 'fbo') {
@@ -5726,10 +5731,7 @@ function UnitEconomicsTab() {
     return ((days - 18) * 0.45) / 100
   }
   const getScenarioProfit = useCallback((row: UnitEconomicsRow, mode: UnitFulfillment) => {
-    const category = tariffOptions?.categories.find((item) => item.subjectName === (row.wbSubject || row.category))
-    const commissionPct = category
-      ? mode === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
-      : mode === row.fulfillment ? row.commissionPct : 0
+    const commissionPct = getCategoryCommission(row, mode)
     const deliveryLogisticsRub = getTariffDeliveryPreview(row, mode)
     const returnLogisticsRub = getTariffReturnPreview(mode)
     const buyout = Number(row.buyoutPct || 1) > 0 ? Number(row.buyoutPct || 1) : 1
@@ -5747,7 +5749,7 @@ function UnitEconomicsTab() {
       - (priceWithWalletRub * row.taxAcquiringPct)
       - (priceAfterDiscountRub * extraCommissionPct)
     return Math.round((profitRub - (priceAfterDiscountRub * row.drrPct)) * 100) / 100
-  }, [getTariffDeliveryPreview, getTariffReturnPreview, tariffOptions])
+  }, [getCategoryCommission, getTariffDeliveryPreview, getTariffReturnPreview])
   const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
     if (!tariffOptions) return row
     const next = { ...row }
@@ -6110,7 +6112,8 @@ function UnitEconomicsTab() {
                         <th className="px-3 py-2 text-right font-medium">Скидка</th>
                         <th className="px-3 py-2 text-right font-medium">После скидки</th>
                         <th className="px-3 py-2 text-right font-medium">Себес.</th>
-                        <th className="px-3 py-2 text-right font-medium">Комис.</th>
+                        <th className="px-3 py-2 text-right font-medium">Комис FBS</th>
+                        <th className="px-3 py-2 text-right font-medium">Комис FBO</th>
                         <th className="px-3 py-2 text-right font-medium">Логистика</th>
                         <th className="px-3 py-2 text-right font-medium">ДРР</th>
                         <th className="px-3 py-2 text-right font-medium">Прибыль FBS</th>
@@ -6122,6 +6125,8 @@ function UnitEconomicsTab() {
                     </thead>
                     <tbody>
                       {selectedRows.map((row) => {
+                        const fbsCommission = getCategoryCommission(row, 'fbs')
+                        const fboCommission = getCategoryCommission(row, 'fbo')
                         const fbsProfit = getScenarioProfit(row, 'fbs')
                         const fboProfit = getScenarioProfit(row, 'fbo')
                         return (
@@ -6142,7 +6147,8 @@ function UnitEconomicsTab() {
                             <td className="px-3 py-2 text-right">{formatAutoNumber(row.discountPct * 100, '%')}</td>
                             <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
                             <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.commissionPct * 100, '%')}</td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(fbsCommission * 100, '%')}</td>
+                            <td className="px-3 py-2 text-right">{formatAutoNumber(fboCommission * 100, '%')}</td>
                             <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
                             <td className="px-3 py-2 text-right">{formatAutoNumber(row.drrPct * 100, '%')}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${fbsProfit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
@@ -6394,8 +6400,12 @@ function UnitEconomicsTab() {
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <Label>Комиссия WB, %</Label>
-                    <Input value={formatAutoNumber(Number(editingRow.commissionPct || 0) * 100)} disabled />
+                    <Label>Комиссия FBS, %</Label>
+                    <Input value={formatAutoNumber(getCategoryCommission(editingRow, 'fbs') * 100)} disabled />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Комиссия FBO, %</Label>
+                    <Input value={formatAutoNumber(getCategoryCommission(editingRow, 'fbo') * 100)} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Склад логистики</Label>

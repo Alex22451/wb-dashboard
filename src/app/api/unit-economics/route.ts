@@ -122,6 +122,31 @@ function jsonResponse(store: UnitEconomicsStore, tariffOptions?: Awaited<ReturnT
   })
 }
 
+async function refreshStoreCommissions(
+  store: UnitEconomicsStore,
+  tariffOptions: Awaited<ReturnType<typeof buildUnitTariffOptions>>,
+) {
+  if (!tariffOptions) return store
+  const now = new Date().toISOString()
+  let changed = false
+  const rows = store.rows.map((row) => {
+    const next = normalizeRow(row)
+    const subject = normalizeTariffName(next.wbSubject || next.category)
+    if (!subject) return next
+    const category = tariffOptions.categories.find((item) => normalizeTariffName(item.subjectName) === subject)
+    if (!category) return next
+    const commissionPct = next.fulfillment === 'fbs' ? category.fbsCommissionPct : category.fboCommissionPct
+    if (Math.abs((next.commissionPct || 0) - commissionPct) < 0.000001) return next
+    changed = true
+    return {
+      ...next,
+      commissionPct,
+      updatedAt: now,
+    }
+  })
+  return changed ? await writeStore(rows, store.costs) : store
+}
+
 async function getAuthorizedUser(request: NextRequest) {
   const internalWarmRequest = !!(
     process.env.WB_VERCEL_API_TOKEN
@@ -964,7 +989,7 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
   }
 
   return {
-    store: await writeStore(rows, store.costs),
+    store: stats.updatedRows > 0 ? await writeStore(rows, store.costs) : store,
     stats,
   }
 }
@@ -1054,7 +1079,7 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
   }
 
   return {
-    store: await writeStore(rows, store.costs),
+    store: stats.updatedRows > 0 ? await writeStore(rows, store.costs) : store,
     stats,
   }
 }
@@ -1066,7 +1091,9 @@ export async function GET(request: NextRequest) {
 
   const store = await readStore()
   const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
-  return jsonResponse(store, await buildUnitTariffOptions(targets))
+  const tariffOptions = await buildUnitTariffOptions(targets)
+  const syncedStore = await refreshStoreCommissions(store, tariffOptions)
+  return jsonResponse(syncedStore, tariffOptions)
 }
 
 export async function POST(request: NextRequest) {
