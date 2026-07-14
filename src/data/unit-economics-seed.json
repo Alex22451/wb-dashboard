@@ -31,7 +31,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-3",
@@ -65,7 +66,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-4",
@@ -99,7 +101,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-5",
@@ -133,7 +136,8 @@
     "weightKg": 0.35,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-6",
@@ -167,7 +171,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-7",
@@ -201,7 +206,8 @@
     "weightKg": 1.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-8",
@@ -235,7 +241,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-9",
@@ -269,7 +276,8 @@
     "weightKg": 0.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-10",
@@ -303,7 +311,8 @@
     "weightKg": 1.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-11",
@@ -337,7 +346,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-12",
@@ -371,7 +381,8 @@
     "weightKg": 0.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-13",
@@ -405,7 +416,8 @@
     "weightKg": 1.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-14",
@@ -439,7 +451,8 @@
     "weightKg": 1.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-15",
@@ -473,7 +486,8 @@
     "weightKg": 1.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-16",
@@ -507,7 +521,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-17",
@@ -541,7 +556,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-18",
@@ -575,7 +591,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-19",
@@ -609,7 +626,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-20",
@@ -643,7 +661,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-21",
@@ -677,7 +696,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-22",
@@ -711,7 +731,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-23",
@@ -745,7 +766,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-24",
@@ -779,7 +801,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-25",
@@ -813,7 +836,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-26",
@@ -847,7 +871,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-27",
@@ -881,7 +906,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-28",
@@ -915,7 +941,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-29",
@@ -949,7 +976,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-30",
@@ -983,7 +1011,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-31",
@@ -1017,7 +1046,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-32",
@@ -1051,7 +1081,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-33",
@@ -1085,7 +1116,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-34",
@@ -1119,7 +1151,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-35",
@@ -1153,7 +1186,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-36",
@@ -1187,7 +1221,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-37",
@@ -1221,7 +1256,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-38",
@@ -1255,7 +1291,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-39",
@@ -1289,7 +1326,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-40",
@@ -1323,7 +1361,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-41",
@@ -1357,7 +1396,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-42",
@@ -1391,7 +1431,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-43",
@@ -1425,7 +1466,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-44",
@@ -1459,7 +1501,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-45",
@@ -1493,7 +1536,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-46",
@@ -1527,7 +1571,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-47",
@@ -1561,7 +1606,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-48",
@@ -1595,7 +1641,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-49",
@@ -1629,7 +1676,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-50",
@@ -1663,7 +1711,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-51",
@@ -1697,7 +1746,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-52",
@@ -1731,7 +1781,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-53",
@@ -1765,7 +1816,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-54",
@@ -1799,7 +1851,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-55",
@@ -1833,7 +1886,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-56",
@@ -1867,7 +1921,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-57",
@@ -1901,7 +1956,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-58",
@@ -1935,7 +1991,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-59",
@@ -1969,7 +2026,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-60",
@@ -2003,7 +2061,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-61",
@@ -2037,7 +2096,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-62",
@@ -2071,7 +2131,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-63",
@@ -2105,7 +2166,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-64",
@@ -2139,7 +2201,8 @@
     "weightKg": 1.03,
     "boxQty": 1.03,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-65",
@@ -2173,7 +2236,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-66",
@@ -2207,7 +2271,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-67",
@@ -2241,7 +2306,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-68",
@@ -2275,7 +2341,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-69",
@@ -2309,7 +2376,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-70",
@@ -2343,7 +2411,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-71",
@@ -2377,7 +2446,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-72",
@@ -2411,7 +2481,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-73",
@@ -2445,7 +2516,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-74",
@@ -2479,7 +2551,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-75",
@@ -2513,7 +2586,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-76",
@@ -2547,7 +2621,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-77",
@@ -2581,7 +2656,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-78",
@@ -2615,7 +2691,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-79",
@@ -2649,7 +2726,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-80",
@@ -2683,7 +2761,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-81",
@@ -2717,7 +2796,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-82",
@@ -2751,7 +2831,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-83",
@@ -2785,7 +2866,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-84",
@@ -2819,7 +2901,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-85",
@@ -2853,7 +2936,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-86",
@@ -2887,7 +2971,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-87",
@@ -2921,7 +3006,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-88",
@@ -2955,7 +3041,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-89",
@@ -2989,7 +3076,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-90",
@@ -3023,7 +3111,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-91",
@@ -3057,7 +3146,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-92",
@@ -3091,7 +3181,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-93",
@@ -3125,7 +3216,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-94",
@@ -3159,7 +3251,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-95",
@@ -3193,7 +3286,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-96",
@@ -3227,7 +3321,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-97",
@@ -3261,7 +3356,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-98",
@@ -3295,7 +3391,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-99",
@@ -3329,7 +3426,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-100",
@@ -3363,7 +3461,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-101",
@@ -3397,7 +3496,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-102",
@@ -3431,7 +3531,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-103",
@@ -3465,7 +3566,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-104",
@@ -3499,7 +3601,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-105",
@@ -3533,7 +3636,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-106",
@@ -3567,7 +3671,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-107",
@@ -3601,7 +3706,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-108",
@@ -3635,7 +3741,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-109",
@@ -3669,7 +3776,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-110",
@@ -3703,7 +3811,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-111",
@@ -3737,7 +3846,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-112",
@@ -3771,7 +3881,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-113",
@@ -3805,7 +3916,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-114",
@@ -3839,7 +3951,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-115",
@@ -3873,7 +3986,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-116",
@@ -3907,7 +4021,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-117",
@@ -3941,7 +4056,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-118",
@@ -3975,7 +4091,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-119",
@@ -4009,7 +4126,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-120",
@@ -4043,7 +4161,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-121",
@@ -4077,7 +4196,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-122",
@@ -4111,7 +4231,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-123",
@@ -4145,7 +4266,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-124",
@@ -4179,7 +4301,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-125",
@@ -4213,7 +4336,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-126",
@@ -4247,7 +4371,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-127",
@@ -4281,7 +4406,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-128",
@@ -4315,7 +4441,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-129",
@@ -4349,7 +4476,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-130",
@@ -4383,7 +4511,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-131",
@@ -4417,7 +4546,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-132",
@@ -4451,7 +4581,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-133",
@@ -4485,7 +4616,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-134",
@@ -4519,7 +4651,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-135",
@@ -4553,7 +4686,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-136",
@@ -4587,7 +4721,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-137",
@@ -4621,7 +4756,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-138",
@@ -4655,7 +4791,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-139",
@@ -4689,7 +4826,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-140",
@@ -4723,7 +4861,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-141",
@@ -4757,7 +4896,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-142",
@@ -4791,7 +4931,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-143",
@@ -4825,7 +4966,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-144",
@@ -4859,7 +5001,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-145",
@@ -4893,7 +5036,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-146",
@@ -4927,7 +5071,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-147",
@@ -4961,7 +5106,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-148",
@@ -4995,7 +5141,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-149",
@@ -5029,7 +5176,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-150",
@@ -5063,7 +5211,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-151",
@@ -5097,7 +5246,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-152",
@@ -5131,7 +5281,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-153",
@@ -5165,7 +5316,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-154",
@@ -5199,7 +5351,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-155",
@@ -5233,7 +5386,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-156",
@@ -5267,7 +5421,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-157",
@@ -5301,7 +5456,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-158",
@@ -5335,7 +5491,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-159",
@@ -5369,7 +5526,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-160",
@@ -5403,7 +5561,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-161",
@@ -5437,7 +5596,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-162",
@@ -5471,7 +5631,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-163",
@@ -5505,7 +5666,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-164",
@@ -5539,7 +5701,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-165",
@@ -5573,7 +5736,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-166",
@@ -5607,7 +5771,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-167",
@@ -5641,7 +5806,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-168",
@@ -5675,7 +5841,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-169",
@@ -5709,7 +5876,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-170",
@@ -5743,7 +5911,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-171",
@@ -5777,7 +5946,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-172",
@@ -5811,7 +5981,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-173",
@@ -5845,7 +6016,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-174",
@@ -5879,7 +6051,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-175",
@@ -5913,7 +6086,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-176",
@@ -5947,7 +6121,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-177",
@@ -5981,7 +6156,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-178",
@@ -6015,7 +6191,8 @@
     "weightKg": 1.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-179",
@@ -6049,7 +6226,8 @@
     "weightKg": 0.55,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-180",
@@ -6083,7 +6261,8 @@
     "weightKg": 0.55,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-181",
@@ -6117,7 +6296,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-182",
@@ -6151,7 +6331,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-183",
@@ -6185,7 +6366,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-184",
@@ -6219,7 +6401,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-185",
@@ -6253,7 +6436,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-186",
@@ -6287,7 +6471,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-187",
@@ -6321,7 +6506,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-188",
@@ -6355,7 +6541,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-189",
@@ -6389,7 +6576,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-190",
@@ -6423,7 +6611,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-191",
@@ -6457,7 +6646,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-192",
@@ -6491,7 +6681,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-193",
@@ -6525,7 +6716,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-194",
@@ -6559,7 +6751,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-195",
@@ -6593,7 +6786,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-196",
@@ -6627,7 +6821,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-197",
@@ -6661,7 +6856,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-198",
@@ -6695,7 +6891,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-199",
@@ -6729,7 +6926,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-200",
@@ -6763,7 +6961,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-201",
@@ -6797,7 +6996,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-202",
@@ -6831,7 +7031,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-203",
@@ -6865,7 +7066,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-204",
@@ -6899,7 +7101,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-205",
@@ -6933,7 +7136,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-206",
@@ -6967,7 +7171,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-207",
@@ -7001,7 +7206,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-208",
@@ -7035,7 +7241,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-209",
@@ -7069,7 +7276,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-210",
@@ -7103,7 +7311,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-211",
@@ -7137,7 +7346,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-212",
@@ -7171,7 +7381,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-213",
@@ -7205,7 +7416,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-214",
@@ -7239,7 +7451,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-215",
@@ -7273,7 +7486,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-216",
@@ -7307,7 +7521,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-217",
@@ -7341,7 +7556,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-218",
@@ -7375,7 +7591,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-219",
@@ -7409,7 +7626,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-220",
@@ -7443,7 +7661,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-221",
@@ -7477,7 +7696,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-222",
@@ -7511,7 +7731,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-223",
@@ -7545,7 +7766,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-224",
@@ -7579,7 +7801,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-225",
@@ -7613,7 +7836,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-226",
@@ -7647,7 +7871,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-227",
@@ -7681,7 +7906,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-228",
@@ -7715,7 +7941,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-229",
@@ -7749,7 +7976,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-230",
@@ -7783,7 +8011,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-231",
@@ -7817,7 +8046,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-232",
@@ -7851,7 +8081,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-233",
@@ -7885,7 +8116,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-234",
@@ -7919,7 +8151,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-235",
@@ -7953,7 +8186,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-236",
@@ -7987,7 +8221,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-237",
@@ -8021,7 +8256,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-238",
@@ -8055,7 +8291,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-239",
@@ -8089,7 +8326,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-240",
@@ -8123,7 +8361,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-241",
@@ -8157,7 +8396,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-242",
@@ -8191,7 +8431,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-243",
@@ -8225,7 +8466,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-244",
@@ -8259,7 +8501,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-245",
@@ -8293,7 +8536,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-246",
@@ -8327,7 +8571,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-247",
@@ -8361,7 +8606,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-248",
@@ -8395,7 +8641,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-249",
@@ -8429,7 +8676,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-250",
@@ -8463,7 +8711,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-251",
@@ -8497,7 +8746,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-252",
@@ -8531,7 +8781,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-253",
@@ -8565,7 +8816,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-254",
@@ -8599,7 +8851,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-255",
@@ -8633,7 +8886,8 @@
     "weightKg": 100,
     "boxQty": 100,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-256",
@@ -8667,7 +8921,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-257",
@@ -8701,7 +8956,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-258",
@@ -8735,7 +8991,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-259",
@@ -8769,7 +9026,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-260",
@@ -8803,7 +9061,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-261",
@@ -8837,7 +9096,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-262",
@@ -8871,7 +9131,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-263",
@@ -8905,7 +9166,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbs-264",
@@ -8939,7 +9201,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-265",
@@ -8973,7 +9236,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-266",
@@ -9007,7 +9271,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-267",
@@ -9041,7 +9306,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbs-268",
@@ -9075,7 +9341,8 @@
     "weightKg": 0,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-2",
@@ -9109,7 +9376,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-3",
@@ -9143,7 +9411,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-4",
@@ -9177,7 +9446,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-5",
@@ -9211,7 +9481,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-6",
@@ -9245,7 +9516,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-7",
@@ -9279,7 +9551,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-8",
@@ -9313,7 +9586,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-9",
@@ -9347,7 +9621,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-10",
@@ -9381,7 +9656,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-11",
@@ -9415,7 +9691,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-12",
@@ -9449,7 +9726,8 @@
     "weightKg": 2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-13",
@@ -9483,7 +9761,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-14",
@@ -9517,7 +9796,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-15",
@@ -9551,7 +9831,8 @@
     "weightKg": 1.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-16",
@@ -9585,7 +9866,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-17",
@@ -9619,7 +9901,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-18",
@@ -9653,7 +9936,8 @@
     "weightKg": 0.7,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-19",
@@ -9687,7 +9971,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-20",
@@ -9721,7 +10006,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-21",
@@ -9755,7 +10041,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-22",
@@ -9789,7 +10076,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-23",
@@ -9823,7 +10111,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-24",
@@ -9857,7 +10146,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-25",
@@ -9891,7 +10181,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-26",
@@ -9925,7 +10216,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-27",
@@ -9959,7 +10251,8 @@
     "weightKg": 1.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-28",
@@ -9993,7 +10286,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-29",
@@ -10027,7 +10321,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-30",
@@ -10061,7 +10356,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-31",
@@ -10095,7 +10391,8 @@
     "weightKg": 0.55,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-32",
@@ -10129,7 +10426,8 @@
     "weightKg": 0.55,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-33",
@@ -10163,7 +10461,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-34",
@@ -10197,7 +10496,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-35",
@@ -10231,7 +10531,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-36",
@@ -10265,7 +10566,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-37",
@@ -10299,7 +10601,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-38",
@@ -10333,7 +10636,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-39",
@@ -10367,7 +10671,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-40",
@@ -10401,7 +10706,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-41",
@@ -10435,7 +10741,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-42",
@@ -10469,7 +10776,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-43",
@@ -10503,7 +10811,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-44",
@@ -10537,7 +10846,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-45",
@@ -10571,7 +10881,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-46",
@@ -10605,7 +10916,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-47",
@@ -10639,7 +10951,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-48",
@@ -10673,7 +10986,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-49",
@@ -10707,7 +11021,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-50",
@@ -10741,7 +11056,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-51",
@@ -10775,7 +11091,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-52",
@@ -10809,7 +11126,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-53",
@@ -10843,7 +11161,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-54",
@@ -10877,7 +11196,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-55",
@@ -10911,7 +11231,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-56",
@@ -10945,7 +11266,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-57",
@@ -10979,7 +11301,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-58",
@@ -11013,7 +11336,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-59",
@@ -11047,7 +11371,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-60",
@@ -11081,7 +11406,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-61",
@@ -11115,7 +11441,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-62",
@@ -11149,7 +11476,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-63",
@@ -11183,7 +11511,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-64",
@@ -11217,7 +11546,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-65",
@@ -11251,7 +11581,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-66",
@@ -11285,7 +11616,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-67",
@@ -11319,7 +11651,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-68",
@@ -11353,7 +11686,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-69",
@@ -11387,7 +11721,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-70",
@@ -11421,7 +11756,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-71",
@@ -11455,7 +11791,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-72",
@@ -11489,7 +11826,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-73",
@@ -11523,7 +11861,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-74",
@@ -11557,7 +11896,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-75",
@@ -11591,7 +11931,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-76",
@@ -11625,7 +11966,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-77",
@@ -11659,7 +12001,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-78",
@@ -11693,7 +12036,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-79",
@@ -11727,7 +12071,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-80",
@@ -11761,7 +12106,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-81",
@@ -11795,7 +12141,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-82",
@@ -11829,7 +12176,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-83",
@@ -11863,7 +12211,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-84",
@@ -11897,7 +12246,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-85",
@@ -11931,7 +12281,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-86",
@@ -11965,7 +12316,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-87",
@@ -11999,7 +12351,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-88",
@@ -12033,7 +12386,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-89",
@@ -12067,7 +12421,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-90",
@@ -12101,7 +12456,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-91",
@@ -12135,7 +12491,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-92",
@@ -12169,7 +12526,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-93",
@@ -12203,7 +12561,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-94",
@@ -12237,7 +12596,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-95",
@@ -12271,7 +12631,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-96",
@@ -12305,7 +12666,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-97",
@@ -12339,7 +12701,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-98",
@@ -12373,7 +12736,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-99",
@@ -12407,7 +12771,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-100",
@@ -12441,7 +12806,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-101",
@@ -12475,7 +12841,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-102",
@@ -12509,7 +12876,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-103",
@@ -12543,7 +12911,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-104",
@@ -12577,7 +12946,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-105",
@@ -12611,7 +12981,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-106",
@@ -12645,7 +13016,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-107",
@@ -12679,7 +13051,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-108",
@@ -12713,7 +13086,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-109",
@@ -12747,7 +13121,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-110",
@@ -12781,7 +13156,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-111",
@@ -12815,7 +13191,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-112",
@@ -12849,7 +13226,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-113",
@@ -12883,7 +13261,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-114",
@@ -12917,7 +13296,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-115",
@@ -12951,7 +13331,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-116",
@@ -12985,7 +13366,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-117",
@@ -13019,7 +13401,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-118",
@@ -13053,7 +13436,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-119",
@@ -13087,7 +13471,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-120",
@@ -13121,7 +13506,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-121",
@@ -13155,7 +13541,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-122",
@@ -13189,7 +13576,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-123",
@@ -13223,7 +13611,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-124",
@@ -13257,7 +13646,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-125",
@@ -13291,7 +13681,8 @@
     "weightKg": 0.75,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-126",
@@ -13325,7 +13716,8 @@
     "weightKg": 1.25,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-127",
@@ -13359,7 +13751,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-128",
@@ -13393,7 +13786,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-129",
@@ -13427,7 +13821,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-130",
@@ -13461,7 +13856,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-131",
@@ -13495,7 +13891,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-132",
@@ -13529,7 +13926,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-133",
@@ -13563,7 +13961,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-134",
@@ -13597,7 +13996,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-135",
@@ -13631,7 +14031,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-136",
@@ -13665,7 +14066,8 @@
     "weightKg": 0.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-137",
@@ -13699,7 +14101,8 @@
     "weightKg": 1.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-138",
@@ -13733,7 +14136,8 @@
     "weightKg": 0.4,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-139",
@@ -13767,7 +14171,8 @@
     "weightKg": 0.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-140",
@@ -13801,7 +14206,8 @@
     "weightKg": 1.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-141",
@@ -13835,7 +14241,8 @@
     "weightKg": 0.35,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-142",
@@ -13869,7 +14276,8 @@
     "weightKg": 0.6,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-143",
@@ -13903,7 +14311,8 @@
     "weightKg": 1.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-144",
@@ -13937,7 +14346,8 @@
     "weightKg": 1.8,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-145",
@@ -13971,7 +14381,8 @@
     "weightKg": 1.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-146",
@@ -14005,7 +14416,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-147",
@@ -14039,7 +14451,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-148",
@@ -14073,7 +14486,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-149",
@@ -14107,7 +14521,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-150",
@@ -14141,7 +14556,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-151",
@@ -14175,7 +14591,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-152",
@@ -14209,7 +14626,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-153",
@@ -14243,7 +14661,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-154",
@@ -14277,7 +14696,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-155",
@@ -14311,7 +14731,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-156",
@@ -14345,7 +14766,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-157",
@@ -14379,7 +14801,8 @@
     "weightKg": 0.1,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-158",
@@ -14413,7 +14836,8 @@
     "weightKg": 0.15,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-159",
@@ -14447,7 +14871,8 @@
     "weightKg": 0.2,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-160",
@@ -14481,7 +14906,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-161",
@@ -14515,7 +14941,8 @@
     "weightKg": 0.3,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-162",
@@ -14549,7 +14976,8 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-163",
@@ -14583,7 +15011,8 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-164",
@@ -14617,7 +15046,8 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-165",
@@ -14651,7 +15081,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-166",
@@ -14685,7 +15116,8 @@
     "weightKg": 0.5,
     "boxQty": 0,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "excel-auto"
   },
   {
     "id": "excel-fbo-421",
@@ -14719,7 +15151,8 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbo-422",
@@ -14753,7 +15186,8 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   },
   {
     "id": "excel-fbo-423",
@@ -14787,6 +15221,7 @@
     "weightKg": 0.3,
     "boxQty": 29,
     "source": "excel",
-    "updatedAt": "2026-07-01T00:00:00.000Z"
+    "updatedAt": "2026-07-01T00:00:00.000Z",
+    "drrMode": "manual"
   }
 ]

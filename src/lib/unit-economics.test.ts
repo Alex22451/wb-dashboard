@@ -31,6 +31,7 @@ function row(patch: Partial<UnitEconomicsRow> = {}): UnitEconomicsRow {
     logisticsTotalRub: 0,
     taxAcquiringPct: 0.02,
     drrPct: 0.1,
+    drrMode: 'manual',
     minProfitRub: 100,
     lengthCm: 20,
     widthCm: 10,
@@ -41,30 +42,103 @@ function row(patch: Partial<UnitEconomicsRow> = {}): UnitEconomicsRow {
   }
 }
 
-test('logistics reacts to buyout, warehouse coefficient and localization', () => {
-  assert.equal(calculateUnitLogistics(row()), 110)
-  assert.equal(calculateUnitLogistics(row({ fixedWarehouseCoeff: 1.5 })), 160)
-  assert.equal(calculateUnitLogistics(row({ localizationIndex: 1.25 })), 137.5)
+test('logistics follows the Excel W = V*T + U*(1-S) formula', () => {
+  assert.equal(calculateUnitLogistics(row()), 108)
+  assert.equal(calculateUnitLogistics(row({ fixedWarehouseCoeff: 1.5 })), 108)
+  assert.equal(calculateUnitLogistics(row({ localizationIndex: 1.25 })), 133)
   assert.equal(calculateUnitLogistics(row({ buyoutPct: 1 })), 100)
 })
 
-test('profitability and status use profit after advertising', () => {
+test('profitability matches Excel before ads and is explicit after ads', () => {
   const result = calculateUnitEconomics(row())
   assert.equal(result.priceAfterDiscountRub, 900)
   assert.equal(result.commissionRub, 180)
-  assert.equal(result.logisticsTotalRub, 110)
+  assert.equal(result.logisticsTotalRub, 108)
   assert.equal(result.taxAcquiringRub, 18)
   assert.equal(result.adSpendRub, 90)
-  assert.equal(result.profitWithAdsRub, 202)
-  assert.equal(result.profitabilityPct, 22.44)
+  assert.equal(result.profitRub, 294)
+  assert.equal(result.profitWithAdsRub, 204)
+  assert.equal(result.profitabilityPct, 32.67)
+  assert.equal(result.profitabilityWithAdsPct, 22.67)
   assert.equal(result.status, 'ok')
 })
 
 test('advertising can turn a row into a loss', () => {
   const result = calculateUnitEconomics(row({ drrPct: 0.4 }))
-  assert.equal(result.profitWithAdsRub, -68)
+  assert.equal(result.profitWithAdsRub, -66)
   assert.equal(result.status, 'loss')
-  assert.equal(result.profitabilityPct, -7.56)
+  assert.equal(result.profitabilityPct, 32.67)
+  assert.equal(result.profitabilityWithAdsPct, -7.33)
+})
+
+test('automatic Excel DRR never credits negative advertising to a loss', () => {
+  const result = calculateUnitEconomics(row({
+    costRub: 1_000,
+    drrMode: 'excel-auto',
+    drrPct: -0.5,
+  }))
+  assert.equal(result.profitRub, -406)
+  assert.equal(result.drrPct, 0)
+  assert.equal(result.adSpendRub, 0)
+  assert.equal(result.profitWithAdsRub, -406)
+})
+
+test('FBS row matches ЮНИТКА ОБЩАЯ 2.0 row 2', () => {
+  const result = calculateUnitEconomics(row({
+    productName: 'Брелки 15*5',
+    entrepreneurName: 'Зубахина Н.В.',
+    costRub: 56,
+    priceBeforeDiscountRub: 940,
+    discountPct: 0.7,
+    sppPct: 0.1,
+    walletPct: 0.02,
+    commissionPct: 0.2425,
+    avgDeliveryDays: 30,
+    fixedWarehouseCoeff: 1.65,
+    buyoutPct: 0.9,
+    localizationIndex: 1.03,
+    returnLogisticsRub: 51.11111111111111,
+    deliveryLogisticsRub: 58.08,
+    taxAcquiringPct: 0.135,
+    drrPct: 0.057862587339112155,
+    drrMode: 'excel-auto',
+  }))
+  assert.equal(result.logisticsTotalRub, 64.93)
+  assert.equal(result.profitRub, 48.95)
+  assert.equal(result.adSpendRub, 16.32)
+  assert.equal(result.profitWithAdsRub, 32.63)
+  assert.equal(result.profitabilityPct, 17.36)
+  assert.equal(result.profitabilityWithAdsPct, 11.57)
+  assert.ok(Math.abs(result.drrPct - 0.05786258293838862) < 0.000001)
+})
+
+test('FBO row matches ЮНИТКА ОБЩАЯ 2.0 row 2', () => {
+  const result = calculateUnitEconomics(row({
+    fulfillment: 'fbo',
+    productName: 'Подушка декоративная 150*50',
+    entrepreneurName: 'Бураго Т.В.',
+    costRub: 673,
+    priceBeforeDiscountRub: 3630,
+    discountPct: 0,
+    sppPct: 0.43,
+    walletPct: 0.02,
+    commissionPct: 0.295,
+    avgDeliveryDays: 0,
+    fixedWarehouseCoeff: 1.65,
+    buyoutPct: 0.87,
+    localizationIndex: 1.03,
+    returnLogisticsRub: 275.264367816092,
+    deliveryLogisticsRub: 446.51045999999997,
+    taxAcquiringPct: 0.12,
+    drrPct: 0.10533826431440846,
+    drrMode: 'excel-auto',
+  }))
+  assert.equal(result.logisticsTotalRub, 495.69)
+  assert.equal(result.profitRub, 1147.13)
+  assert.equal(result.adSpendRub, 382.38)
+  assert.equal(result.profitWithAdsRub, 764.76)
+  assert.equal(result.profitabilityPct, 31.6)
+  assert.equal(result.profitabilityWithAdsPct, 21.07)
 })
 
 test('invalid logistics inputs keep the row incomplete', () => {

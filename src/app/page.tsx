@@ -190,6 +190,7 @@ interface UnitEconomicsRow {
   logisticsTotalRub: number
   taxAcquiringPct: number
   drrPct: number
+  drrMode?: 'excel-auto' | 'manual'
   minProfitRub: number
   lengthCm: number
   widthCm: number
@@ -209,6 +210,7 @@ interface UnitEconomicsRow {
   profitRub: number
   profitWithAdsRub: number
   profitabilityPct: number
+  profitabilityWithAdsPct: number
   volumeLiters: number
   expenseTotalRub: number
   status: 'ok' | 'below-min-profit' | 'loss' | 'incomplete'
@@ -225,6 +227,7 @@ interface UnitEconomicsSummary {
   completeRows: number
   avgProfitRub: number
   avgProfitabilityPct: number
+  avgProfitabilityWithAdsPct: number
   updatedAt: string | null
 }
 
@@ -5332,6 +5335,7 @@ const emptyUnitRow = (): Partial<UnitEconomicsRow> => ({
   logisticsTotalRub: 0,
   taxAcquiringPct: 0,
   drrPct: 0,
+  drrMode: 'manual',
   minProfitRub: 0,
   lengthCm: 0,
   widthCm: 0,
@@ -5734,15 +5738,12 @@ function UnitEconomicsTab() {
     const tula = tariffOptions.tula
     const base = mode === 'fbo' ? tula.fboBaseRub : tula.fbsBaseRub
     const liter = mode === 'fbo' ? tula.fboLiterRub : tula.fbsLiterRub
-    const coef = (mode === 'fbo' ? tula.fboCoefPct : tula.fbsCoefPct) || 100
+    const fallbackCoeff = ((mode === 'fbo' ? tula.fboCoefPct : tula.fbsCoefPct) || 100) / 100
+    const warehouseCoeff = Number(row.fixedWarehouseCoeff || 0) > 0 ? Number(row.fixedWarehouseCoeff) : fallbackCoeff
+    const buyoutPct = Math.min(1, Math.max(0, Number(row.buyoutPct ?? 1)))
     if (base <= 0) return 0
-    return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 10) / 10
-  }, [tariffOptions])
-  const getTariffReturnPreview = useCallback((mode: UnitFulfillment) => {
-    if (!tariffOptions) return 0
-    return mode === 'fbo'
-      ? Number(tariffOptions.tula.fboReturnRub ?? tariffOptions.tula.returnRub ?? 0)
-      : Number(tariffOptions.tula.fbsReturnRub ?? 0)
+    const delivery = (base + Math.max(0, volume - 1) * liter) * warehouseCoeff
+    return Math.round(delivery * (2 - buyoutPct) * 10) / 10
   }, [tariffOptions])
   const getLogisticsWarehouseName = useCallback((mode: UnitFulfillment) => {
     if (!tariffOptions) return mode === 'fbo' ? 'Тула' : 'Центральный федеральный округ'
@@ -5755,84 +5756,80 @@ function UnitEconomicsTab() {
     if (category) return mode === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
     return row.fulfillment === mode ? Number(row.commissionPct || 0) : 0
   }, [tariffOptions])
-  const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
-    if (!tariffOptions) return row
-    const next = { ...row }
-    const category = tariffOptions.categories.find((item) => item.subjectName === (next.wbSubject || next.category))
-    if (category) {
-      next.wbSubject = category.subjectName
-      next.category = category.subjectName
-      next.commissionPct = next.fulfillment === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
-    }
-
-    const length = Number(next.lengthCm || 0)
-    const width = Number(next.widthCm || 0)
-    const height = Number(next.heightCm || 0)
-    const volume = Math.max(1, (length * width * height) / 1000)
-    const tula = tariffOptions.tula
-    const isFbo = next.fulfillment === 'fbo'
-    const base = isFbo ? tula.fboBaseRub : tula.fbsBaseRub
-    const liter = isFbo ? tula.fboLiterRub : tula.fbsLiterRub
-    const coef = (isFbo ? tula.fboCoefPct : tula.fbsCoefPct) || 100
-    if (length > 0 && width > 0 && height > 0 && base > 0) {
-      next.warehouse = isFbo
-        ? tula.fboWarehouseName || tula.warehouseName || 'Тула'
-        : tula.fbsWarehouseName || 'Центральный федеральный округ'
-      next.deliveryLogisticsRub = Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
-      next.returnLogisticsRub = isFbo ? Number(tula.fboReturnRub ?? tula.returnRub ?? 0) : Number(tula.fbsReturnRub ?? 0)
-      next.logisticsTotalRub = calculateUnitLogistics({
-        deliveryLogisticsRub: Number(next.deliveryLogisticsRub || 0),
-        returnLogisticsRub: Number(next.returnLogisticsRub || 0),
-        fixedWarehouseCoeff: Number(next.fixedWarehouseCoeff ?? 1),
-        buyoutPct: Number(next.buyoutPct ?? 1),
-        localizationIndex: Number(next.localizationIndex ?? 1),
-      })
-    }
-
-    return next
-  }, [tariffOptions])
+  const recalculateClientLogistics = (row: Partial<UnitEconomicsRow>) => ({
+    ...row,
+    logisticsTotalRub: calculateUnitLogistics({
+      deliveryLogisticsRub: Number(row.deliveryLogisticsRub || 0),
+      returnLogisticsRub: Number(row.returnLogisticsRub || 0),
+      buyoutPct: Number(row.buyoutPct ?? 1),
+      localizationIndex: Number(row.localizationIndex ?? 1),
+    }),
+  })
 
   const editingPreview = useMemo(() => {
     if (!editingRow) return null
     return calculateUnitEconomics({
       ...emptyUnitRow(),
-      ...applyClientAutomaticWbFields(editingRow),
+      ...editingRow,
       id: editingRow.id || 'preview',
       productName: editingRow.productName || '',
       entrepreneurName: editingRow.entrepreneurName || '',
     } as UnitEconomicsRow)
-  }, [applyClientAutomaticWbFields, editingRow])
+  }, [editingRow])
 
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     if (WB_READONLY_UNIT_FIELDS.has(key)) return
     if (value === '') {
-      setEditingRow((current) => ({
-        ...applyClientAutomaticWbFields({
-          ...(current || emptyUnitRow()),
-          [key]: undefined,
-        }),
+      setEditingRow((current) => recalculateClientLogistics({
+        ...(current || emptyUnitRow()),
+        [key]: undefined,
       }))
       return
     }
     const number = Number(value)
-    setEditingRow((current) => ({
-      ...applyClientAutomaticWbFields({
-        ...(current || emptyUnitRow()),
-        [key]: Number.isFinite(number) ? (pct ? number / 100 : number) : 0,
-      }),
-    }))
+    setEditingRow((current) => {
+      const previous = current || emptyUnitRow()
+      const nextValue = Number.isFinite(number) ? (pct ? number / 100 : number) : 0
+      const next: Partial<UnitEconomicsRow> = { ...previous, [key]: nextValue }
+
+      if (key === 'fixedWarehouseCoeff') {
+        const oldCoeff = Number(previous.fixedWarehouseCoeff || 1)
+        const newCoeff = Number(nextValue || oldCoeff)
+        if (oldCoeff > 0 && newCoeff > 0) {
+          next.deliveryLogisticsRub = Number(previous.deliveryLogisticsRub || 0) * (newCoeff / oldCoeff)
+        }
+      }
+      if (key === 'buyoutPct') {
+        const oldBuyout = Math.min(1, Math.max(0, Number(previous.buyoutPct ?? 1)))
+        const newBuyout = Math.min(1, Math.max(0, nextValue))
+        next.deliveryLogisticsRub = Number(previous.deliveryLogisticsRub || 0)
+          * ((2 - newBuyout) / (2 - oldBuyout))
+        next.returnLogisticsRub = newBuyout > 0
+          ? Number(previous.returnLogisticsRub || 0) * (oldBuyout / newBuyout)
+          : 0
+      }
+
+      return recalculateClientLogistics(next)
+    })
   }
 
   const setEditText = (key: keyof UnitEconomicsRow, value: string) => {
-    setEditingRow((current) => applyClientAutomaticWbFields({ ...(current || emptyUnitRow()), [key]: value }))
+    setEditingRow((current) => ({ ...(current || emptyUnitRow()), [key]: value }))
   }
 
   const setWbCategory = (value: string) => {
-    setEditingRow((current) => applyClientAutomaticWbFields({
-      ...(current || emptyUnitRow()),
-      category: value,
-      wbSubject: value,
-    }))
+    setEditingRow((current) => {
+      const previous = current || emptyUnitRow()
+      const category = tariffOptions?.categories.find((item) => item.subjectName === value)
+      return {
+        ...previous,
+        category: value,
+        wbSubject: value,
+        commissionPct: category
+          ? previous.fulfillment === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
+          : previous.commissionPct,
+      }
+    })
   }
 
   const setCostNumber = (key: keyof UnitProductCost, value: string, pct = false) => {
@@ -5875,7 +5872,7 @@ function UnitEconomicsTab() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">Юнит экономика</h2>
-          <p className="text-sm text-muted-foreground">Контроль прибыли после рекламы, расходов WB и полноты данных по каждому товару.</p>
+          <p className="text-sm text-muted-foreground">Расчет по формулам Excel. Цены и тарифы WB меняются только после явной синхронизации.</p>
           <ToggleGroup type="single" value={unitMode} onValueChange={(value) => value && setUnitMode(value as 'products' | 'costs')} className="mt-3 justify-start">
             <ToggleGroupItem value="products" className="gap-2">
               <Calculator className="h-4 w-4" />
@@ -5898,7 +5895,7 @@ function UnitEconomicsTab() {
           </Button>
           <Button variant="outline" onClick={syncWbTariffs} disabled={loading || saving} className="gap-2">
             <Calculator className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
-            Тарифы WB
+            Применить тарифы WB
           </Button>
           <label>
             <input
@@ -5916,10 +5913,10 @@ function UnitEconomicsTab() {
               Импорт Excel
             </span>
           </label>
-          <Button onClick={() => setEditingRow(applyClientAutomaticWbFields({
+          <Button onClick={() => setEditingRow({
             ...emptyUnitRow(),
             entrepreneurName: selectedEntrepreneur,
-          }))} className="gap-2" disabled={unitMode !== 'products'}>
+          })} className="gap-2" disabled={unitMode !== 'products'}>
             <Plus className="h-4 w-4" />
             Товар
           </Button>
@@ -6002,7 +5999,7 @@ function UnitEconomicsTab() {
         <UnitMetricCard title="Товары" value={formatNumber(summary?.totalRows || 0)} subtitle={`${formatNumber(summary?.completeRows || 0)} полностью рассчитано`} />
         <UnitMetricCard title="Связано с WB" value={`${formatNumber(summary?.linkedRows || 0)} / ${formatNumber(summary?.totalRows || 0)}`} subtitle={`${formatNumber(summary?.categorizedRows || 0)} с категорией тарифа`} />
         <UnitMetricCard title="Требуют внимания" value={formatNumber((summary?.lossRows || 0) + (summary?.belowMinRows || 0) + Math.max(0, (summary?.totalRows || 0) - (summary?.completeRows || 0)))} subtitle={`${formatNumber(summary?.lossRows || 0)} убыточных`} />
-        <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle={`маржа ${(summary?.avgProfitabilityPct || 0).toFixed(1)}%`} />
+        <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle={`Excel-рентаб. ${(summary?.avgProfitabilityPct || 0).toFixed(1)}% · после рекламы ${(summary?.avgProfitabilityWithAdsPct || 0).toFixed(1)}%`} />
         <UnitMetricCard title="Себестоимость" value={formatNumber(costSummary?.totalRows || 0)} subtitle={`ср. ${formatNumber(Math.round(costSummary?.avgCostRub || 0))} ₽`} />
       </div>
 
@@ -6152,7 +6149,7 @@ function UnitEconomicsTab() {
                         <th className="px-3 py-2 text-right font-medium">Цена</th>
                         <th className="px-3 py-2 text-right font-medium">Расходы</th>
                         <th className="px-3 py-2 text-right font-medium">Прибыль</th>
-                        <th className="px-3 py-2 text-right font-medium">Маржа</th>
+                        <th className="px-3 py-2 text-right font-medium">Рентабельность</th>
                         <th className="px-3 py-2 text-left font-medium">Статус</th>
                         <th className="px-3 py-2 text-right font-medium"></th>
                       </tr>
@@ -6176,6 +6173,7 @@ function UnitEconomicsTab() {
                             <td className="px-3 py-2">
                               <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
                               <div className="mt-1 text-xs text-muted-foreground">{formatAutoNumber(row.commissionPct * 100, '%')} комиссия</div>
+                              <div className="text-xs text-muted-foreground">{row.source === 'wb' ? 'тарифы WB' : row.source === 'excel' ? 'данные Excel' : 'ручные данные'}</div>
                             </td>
                             <td className="px-3 py-2 text-right">
                               <div className="font-medium">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</div>
@@ -6189,11 +6187,14 @@ function UnitEconomicsTab() {
                               <div>{formatNumber(Math.round(row.profitWithAdsRub))} ₽</div>
                               <div className="text-xs font-normal text-muted-foreground">после ДРР {formatAutoNumber(row.drrPct * 100, '%')}</div>
                             </td>
-                            <td className="px-3 py-2 text-right font-medium">{formatAutoNumber(row.profitabilityPct, '%')}</td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="font-medium">{formatAutoNumber(row.profitabilityPct, '%')}</div>
+                              <div className="text-xs text-muted-foreground">после рекламы {formatAutoNumber(row.profitabilityWithAdsPct, '%')}</div>
+                            </td>
                             <td className="px-3 py-2">{unitStatus(row)}</td>
                             <td className="px-3 py-2 text-right">
                               <div className="flex justify-end gap-1">
-                                <Button variant="ghost" size="icon" title="Редактировать товар" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
+                                <Button variant="ghost" size="icon" title="Редактировать товар" onClick={() => setEditingRow({ ...row })}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" title="Удалить товар" onClick={() => deleteRow(row)} disabled={saving}>
@@ -6429,8 +6430,9 @@ function UnitEconomicsTab() {
                     </div>
                   </div>
                   <div className="bg-background p-3">
-                    <div className="text-xs text-muted-foreground">Маржа</div>
+                    <div className="text-xs text-muted-foreground">Рентабельность Excel (до рекламы)</div>
                     <div className="mt-1 font-semibold">{formatAutoNumber(editingPreview.profitabilityPct, '%')}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">после рекламы {formatAutoNumber(editingPreview.profitabilityWithAdsPct, '%')}</div>
                   </div>
                 </div>
               )}
@@ -6464,11 +6466,38 @@ function UnitEconomicsTab() {
                   />
                 </div>
               </div>
+              <div className="space-y-1">
+                <Label>Расчет ДРР</Label>
+                <Select
+                  value={editingRow.drrMode || (editingRow.source === 'manual' ? 'manual' : 'excel-auto')}
+                  onValueChange={(value) => setEditingRow((current) => ({
+                    ...(current || emptyUnitRow()),
+                    drrMode: value as 'excel-auto' | 'manual',
+                    drrPct: value === 'manual' ? Number(editingPreview?.drrPct || 0) : Number(current?.drrPct || 0),
+                  }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="excel-auto">Как в Excel: рентабельность / 3</SelectItem>
+                    <SelectItem value="manual">Вручную</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>{editingRow.drrMode === 'manual' ? 'ДРР вручную, %' : 'ДРР по формуле Excel, %'}</Label>
+                <Input
+                  type="number"
+                  value={editingRow.drrMode === 'manual'
+                    ? getEditNumberValue('drrPct', true)
+                    : formatAutoNumber(Number(editingPreview?.drrPct || 0) * 100)}
+                  onChange={(event) => setEditNumber('drrPct', event.target.value, true)}
+                  disabled={editingRow.drrMode !== 'manual'}
+                />
+              </div>
               {[
                 ['sppPct', 'СПП, %', true],
                 ['walletPct', 'Кошелек, %', true],
                 ['costRub', 'Себестоимость, ₽'],
-                ['drrPct', 'ДРР, %', true],
                 ['minProfitRub', 'Минимальная прибыль, ₽'],
                 ['avgDeliveryDays', 'Среднее время доставки'],
                 ['fixedWarehouseCoeff', 'Коэффициент склада'],
@@ -6491,8 +6520,7 @@ function UnitEconomicsTab() {
               ))}
               <div className="space-y-3 rounded-md border bg-muted/30 p-3 sm:col-span-2">
                 <div>
-                  <div className="text-sm font-medium">Автоматически из WB</div>
-                  <div className="text-xs text-muted-foreground">Комиссия берется из категории WB, FBS-логистика считается по ЦФО, FBO-логистика по Туле.</div>
+                  <div className="text-sm font-medium">Тарифы WB (предпросмотр)</div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
@@ -6521,7 +6549,7 @@ function UnitEconomicsTab() {
                   </div>
                   <div className="space-y-1">
                     <Label>Возврат {String(editingRow.fulfillment || 'fbs').toUpperCase()}, ₽</Label>
-                    <Input value={formatAutoNumber(Number(editingRow.returnLogisticsRub || getTariffReturnPreview(editingRow.fulfillment || 'fbs')))} disabled />
+                    <Input value={formatAutoNumber(Number(editingRow.returnLogisticsRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика всего, ₽</Label>
@@ -6623,7 +6651,7 @@ function UnitEconomicsTab() {
               ['buyoutPct', '% выкупа', true],
               ['localizationIndex', 'Индекс локализации'],
               ['taxAcquiringPct', 'Налог + эквайринг, %', true],
-              ['drrPct', 'ДРР, %', true],
+              ['drrPct', 'ДРР вручную, %', true],
               ['sppPct', 'СПП, %', true],
               ['walletPct', 'Кошелек WB, %', true],
               ['minProfitRub', 'Минимальная прибыль, ₽'],

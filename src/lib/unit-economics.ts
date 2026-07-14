@@ -28,6 +28,7 @@ export interface UnitEconomicsRow {
   logisticsTotalRub: number
   taxAcquiringPct: number
   drrPct: number
+  drrMode?: 'excel-auto' | 'manual'
   minProfitRub: number
   lengthCm: number
   widthCm: number
@@ -84,6 +85,7 @@ export interface UnitEconomicsCalculatedRow extends UnitEconomicsRow {
   profitRub: number
   profitWithAdsRub: number
   profitabilityPct: number
+  profitabilityWithAdsPct: number
   volumeLiters: number
   expenseTotalRub: number
   status: 'ok' | 'below-min-profit' | 'loss' | 'incomplete'
@@ -114,17 +116,22 @@ export function clampUnitRatio(value: number, fallback = 0): number {
   return Math.min(1, Math.max(0, value))
 }
 
+function calculateRawUnitLogistics(row: Pick<
+  UnitEconomicsRow,
+  'deliveryLogisticsRub' | 'returnLogisticsRub' | 'buyoutPct' | 'localizationIndex'
+>): number {
+  const buyoutPct = clampUnitRatio(row.buyoutPct, 1)
+  const localizationIndex = Math.max(0, Number(row.localizationIndex) || 1)
+  const delivery = Math.max(0, Number(row.deliveryLogisticsRub) || 0)
+  const returns = Math.max(0, Number(row.returnLogisticsRub) || 0)
+  return delivery * localizationIndex + returns * (1 - buyoutPct)
+}
+
 export function calculateUnitLogistics(row: Pick<
   UnitEconomicsRow,
-  'deliveryLogisticsRub' | 'returnLogisticsRub' | 'fixedWarehouseCoeff' | 'buyoutPct' | 'localizationIndex'
+  'deliveryLogisticsRub' | 'returnLogisticsRub' | 'buyoutPct' | 'localizationIndex'
 >): number {
-  const buyoutPct = clampUnitRatio(row.buyoutPct, 1) || 1
-  const warehouseCoeff = Math.max(0, Number(row.fixedWarehouseCoeff) || 1)
-  const localizationIndex = Math.max(0, Number(row.localizationIndex) || 1)
-  const delivery = Math.max(0, Number(row.deliveryLogisticsRub) || 0) * warehouseCoeff
-  const returnsPerBuyout = Math.max(0, (1 - buyoutPct) / buyoutPct)
-  const returns = Math.max(0, Number(row.returnLogisticsRub) || 0) * returnsPerBuyout
-  return roundMoney((delivery + returns) * localizationIndex)
+  return roundMoney(calculateRawUnitLogistics(row))
 }
 
 export function normalizeUnitProductKey(value: unknown): string {
@@ -163,28 +170,41 @@ export function calculateUnitEconomics(row: UnitEconomicsRow): UnitEconomicsCalc
   const walletPct = clampUnitRatio(row.walletPct)
   const commissionPct = clampUnitRatio(row.commissionPct)
   const taxAcquiringPct = clampUnitRatio(row.taxAcquiringPct)
-  const drrPct = clampUnitRatio(row.drrPct)
-  const priceAfterDiscountRub = roundMoney(Math.max(0, row.priceBeforeDiscountRub) * (1 - discountPct))
-  const priceAfterSppRub = roundMoney(priceAfterDiscountRub * (1 - sppPct))
-  const priceWithWalletRub = roundMoney(priceAfterSppRub * (1 - walletPct))
-  const commissionRub = roundMoney(priceAfterDiscountRub * commissionPct)
+  const rawPriceAfterDiscountRub = Math.max(0, row.priceBeforeDiscountRub) * (1 - discountPct)
+  const rawPriceAfterSppRub = rawPriceAfterDiscountRub * (1 - sppPct)
+  const rawPriceWithWalletRub = rawPriceAfterSppRub * (1 - walletPct)
+  const rawCommissionRub = rawPriceAfterDiscountRub * commissionPct
   const extraCommissionPct = calculateExtraCommissionPct(row.avgDeliveryDays, row.fulfillment)
-  const extraCommissionRub = roundMoney(priceAfterDiscountRub * extraCommissionPct)
-  const taxAcquiringRub = roundMoney(priceWithWalletRub * taxAcquiringPct)
-  const adSpendRub = roundMoney(priceAfterDiscountRub * drrPct)
+  const rawExtraCommissionRub = rawPriceAfterDiscountRub * extraCommissionPct
+  const rawTaxAcquiringRub = rawPriceWithWalletRub * taxAcquiringPct
   const volumeLiters = roundMoney((row.lengthCm * row.widthCm * row.heightCm) / 1000)
-  const logisticsTotalRub = calculateUnitLogistics(row)
-  const profitRub = roundMoney(
-    priceAfterDiscountRub
-    - commissionRub
+  const rawLogisticsTotalRub = calculateRawUnitLogistics(row)
+  const logisticsTotalRub = roundMoney(rawLogisticsTotalRub)
+  const rawProfitRub = rawPriceAfterDiscountRub
+    - rawCommissionRub
     - row.costRub
-    - logisticsTotalRub
-    - taxAcquiringRub
-    - extraCommissionRub,
-  )
-  const profitWithAdsRub = roundMoney(profitRub - adSpendRub)
-  const expenseTotalRub = roundMoney(commissionRub + row.costRub + logisticsTotalRub + taxAcquiringRub + extraCommissionRub + adSpendRub)
-  const profitabilityPct = priceAfterDiscountRub > 0 ? roundPct(profitWithAdsRub / priceAfterDiscountRub) : 0
+    - rawLogisticsTotalRub
+    - rawTaxAcquiringRub
+    - rawExtraCommissionRub
+  const rawProfitability = rawPriceAfterDiscountRub > 0 ? rawProfitRub / rawPriceAfterDiscountRub : 0
+  const drrMode = row.drrMode || (row.source === 'manual' ? 'manual' : 'excel-auto')
+  // Excel derives DRR from profitability, but a loss must never create negative ad spend.
+  const drrPct = drrMode === 'excel-auto' ? clampUnitRatio(rawProfitability / 3) : clampUnitRatio(row.drrPct)
+  const rawAdSpendRub = rawPriceAfterDiscountRub * drrPct
+  const rawProfitWithAdsRub = rawProfitRub - rawAdSpendRub
+  const rawProfitabilityWithAds = rawPriceAfterDiscountRub > 0 ? rawProfitWithAdsRub / rawPriceAfterDiscountRub : 0
+  const priceAfterDiscountRub = roundMoney(rawPriceAfterDiscountRub)
+  const priceAfterSppRub = roundMoney(rawPriceAfterSppRub)
+  const priceWithWalletRub = roundMoney(rawPriceWithWalletRub)
+  const commissionRub = roundMoney(rawCommissionRub)
+  const extraCommissionRub = roundMoney(rawExtraCommissionRub)
+  const taxAcquiringRub = roundMoney(rawTaxAcquiringRub)
+  const adSpendRub = roundMoney(rawAdSpendRub)
+  const profitRub = roundMoney(rawProfitRub)
+  const profitWithAdsRub = roundMoney(rawProfitWithAdsRub)
+  const expenseTotalRub = roundMoney(rawCommissionRub + row.costRub + rawLogisticsTotalRub + rawTaxAcquiringRub + rawExtraCommissionRub + rawAdSpendRub)
+  const profitabilityPct = roundPct(rawProfitability)
+  const profitabilityWithAdsPct = roundPct(rawProfitabilityWithAds)
   const incomplete = !row.productName
     || priceAfterDiscountRub <= 0
     || row.costRub <= 0
@@ -207,6 +227,7 @@ export function calculateUnitEconomics(row: UnitEconomicsRow): UnitEconomicsCalc
     commissionPct,
     taxAcquiringPct,
     drrPct,
+    drrMode,
     logisticsTotalRub,
     priceAfterDiscountRub,
     priceAfterSppRub,
@@ -219,6 +240,7 @@ export function calculateUnitEconomics(row: UnitEconomicsRow): UnitEconomicsCalc
     profitRub,
     profitWithAdsRub,
     profitabilityPct,
+    profitabilityWithAdsPct,
     volumeLiters,
     expenseTotalRub,
     status,
@@ -234,6 +256,9 @@ export function summarizeUnitEconomics(rows: UnitEconomicsCalculatedRow[]) {
   const avgProfitability = activeRows.length
     ? activeRows.reduce((sum, row) => sum + row.profitabilityPct, 0) / activeRows.length
     : 0
+  const avgProfitabilityWithAds = activeRows.length
+    ? activeRows.reduce((sum, row) => sum + row.profitabilityWithAdsPct, 0) / activeRows.length
+    : 0
 
   return {
     totalRows: rows.length,
@@ -246,6 +271,7 @@ export function summarizeUnitEconomics(rows: UnitEconomicsCalculatedRow[]) {
     completeRows: activeRows.length,
     avgProfitRub: roundMoney(avgProfit),
     avgProfitabilityPct: roundPct(avgProfitability / 100),
+    avgProfitabilityWithAdsPct: roundPct(avgProfitabilityWithAds / 100),
     updatedAt: rows.reduce<string | null>((latest, row) => {
       if (!row.updatedAt) return latest
       if (!latest || row.updatedAt > latest) return row.updatedAt

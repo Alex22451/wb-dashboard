@@ -29,15 +29,12 @@ const PRICES_URL = 'https://discounts-prices-api.wildberries.ru/api/v2/list/good
 const COMMON_API_BASE = 'https://common-api.wildberries.ru'
 const seedRows = seedRowsRaw as UnitEconomicsRow[]
 const seedCosts = seedCostsRaw as UnitProductCost[]
+const seedDrrModeById = new Map(seedRows.map((row) => [row.id, row.drrMode]))
 const WB_MANAGED_ROW_FIELDS: Array<keyof UnitEconomicsRow> = [
   'nmId',
   'vendorCode',
   'wbBrand',
   'wbSyncedAt',
-  'commissionPct',
-  'returnLogisticsRub',
-  'deliveryLogisticsRub',
-  'logisticsTotalRub',
 ]
 let localStore: UnitEconomicsStore | null = null
 
@@ -140,31 +137,6 @@ function jsonResponse(store: UnitEconomicsStore, tariffOptions?: Awaited<ReturnT
   })
 }
 
-async function refreshStoreCommissions(
-  store: UnitEconomicsStore,
-  tariffOptions: Awaited<ReturnType<typeof buildUnitTariffOptions>>,
-) {
-  if (!tariffOptions) return store
-  const now = new Date().toISOString()
-  let changed = false
-  const rows = store.rows.map((row) => {
-    const next = normalizeRow(row)
-    const subject = normalizeTariffName(next.wbSubject || next.category)
-    if (!subject) return next
-    const category = tariffOptions.categories.find((item) => normalizeTariffName(item.subjectName) === subject)
-    if (!category) return next
-    const commissionPct = next.fulfillment === 'fbs' ? category.fbsCommissionPct : category.fboCommissionPct
-    if (Math.abs((next.commissionPct || 0) - commissionPct) < 0.000001) return next
-    changed = true
-    return {
-      ...next,
-      commissionPct,
-      updatedAt: now,
-    }
-  })
-  return changed ? await writeStore(rows, store.costs) : store
-}
-
 async function getAuthorizedUser(request: NextRequest) {
   const internalWarmRequest = !!(
     process.env.WB_VERCEL_API_TOKEN
@@ -183,8 +155,11 @@ function normalizePct(value: unknown) {
 
 function normalizeRow(input: Partial<UnitEconomicsRow>, existing?: UnitEconomicsRow): UnitEconomicsRow {
   const now = new Date().toISOString()
+  const id = String(input.id || existing?.id || randomUUID())
+  const source = input.source || existing?.source || 'manual'
+  const drrMode = input.drrMode || existing?.drrMode || seedDrrModeById.get(id) || (source === 'manual' ? 'manual' : 'excel-auto')
   const row: UnitEconomicsRow = {
-    id: String(input.id || existing?.id || randomUUID()),
+    id,
     fulfillment: (input.fulfillment ?? existing?.fulfillment) === 'fbo' ? 'fbo' : 'fbs',
     productName: String(input.productName ?? existing?.productName ?? '').trim(),
     category: String(input.category ?? existing?.category ?? '').trim(),
@@ -210,14 +185,17 @@ function normalizeRow(input: Partial<UnitEconomicsRow>, existing?: UnitEconomics
     deliveryLogisticsRub: Math.max(0, toNumber(input.deliveryLogisticsRub, existing?.deliveryLogisticsRub || 0)),
     logisticsTotalRub: 0,
     taxAcquiringPct: normalizePct(input.taxAcquiringPct ?? existing?.taxAcquiringPct ?? 0),
-    drrPct: normalizePct(input.drrPct ?? existing?.drrPct ?? 0),
+    drrPct: drrMode === 'excel-auto'
+      ? toNumber(input.drrPct, existing?.drrPct || 0)
+      : normalizePct(input.drrPct ?? existing?.drrPct ?? 0),
+    drrMode,
     minProfitRub: Math.max(0, toNumber(input.minProfitRub, existing?.minProfitRub || 0)),
     lengthCm: Math.max(0, toNumber(input.lengthCm, existing?.lengthCm || 0)),
     widthCm: Math.max(0, toNumber(input.widthCm, existing?.widthCm || 0)),
     heightCm: Math.max(0, toNumber(input.heightCm, existing?.heightCm || 0)),
     weightKg: Math.max(0, toNumber(input.weightKg, existing?.weightKg || 0)),
     boxQty: Math.max(0, toNumber(input.boxQty, existing?.boxQty || 0)),
-    source: input.source || existing?.source || 'manual',
+    source,
     updatedAt: input.updatedAt || existing?.updatedAt || now,
   }
   row.logisticsTotalRub = calculateUnitLogistics(row)
@@ -261,6 +239,33 @@ function preserveWbManagedFields(input: Partial<UnitEconomicsRow>, existing?: Un
   const next = { ...input }
   for (const key of WB_MANAGED_ROW_FIELDS) {
     ;(next as Record<string, unknown>)[key] = existing[key]
+  }
+  return next
+}
+
+function adjustExcelLogisticsInputs(input: Partial<UnitEconomicsRow>, existing?: UnitEconomicsRow) {
+  if (!existing) return input
+  const next = { ...input }
+  const oldBuyout = clampUnitRatio(existing.buyoutPct, 1)
+  const newBuyout = clampUnitRatio(toNumber(input.buyoutPct, oldBuyout), oldBuyout)
+  const oldCoeff = existing.fixedWarehouseCoeff > 0 ? existing.fixedWarehouseCoeff : 1
+  const newCoeff = Math.max(0, toNumber(input.fixedWarehouseCoeff, oldCoeff)) || oldCoeff
+  const deliveryWasNotRecalculated = input.deliveryLogisticsRub === undefined
+    || Math.abs(toNumber(input.deliveryLogisticsRub) - existing.deliveryLogisticsRub) < 0.000001
+  const returnWasNotRecalculated = input.returnLogisticsRub === undefined
+    || Math.abs(toNumber(input.returnLogisticsRub) - existing.returnLogisticsRub) < 0.000001
+
+  if (deliveryWasNotRecalculated && (oldCoeff !== newCoeff || oldBuyout !== newBuyout)) {
+    const oldRiskFactor = 2 - oldBuyout
+    const newRiskFactor = 2 - newBuyout
+    next.deliveryLogisticsRub = oldRiskFactor > 0
+      ? existing.deliveryLogisticsRub * (newCoeff / oldCoeff) * (newRiskFactor / oldRiskFactor)
+      : existing.deliveryLogisticsRub
+  }
+  if (returnWasNotRecalculated && oldBuyout !== newBuyout) {
+    next.returnLogisticsRub = newBuyout > 0
+      ? existing.returnLogisticsRub * (oldBuyout / newBuyout)
+      : existing.returnLogisticsRub
   }
   return next
 }
@@ -392,6 +397,7 @@ async function parseWorkbook(file: File): Promise<{ rows: UnitEconomicsRow[]; co
         logisticsTotalRub: toNumber(cell(row, 22)),
         taxAcquiringPct: toNumber(cell(row, 23)),
         drrPct: toNumber(cell(row, 25)),
+        drrMode: sheet[XLSX.utils.encode_cell({ r: row, c: 25 })]?.f ? 'excel-auto' : 'manual',
         minProfitRub: toNumber(cell(row, fulfillment === 'fbs' ? 30 : 29)),
         lengthCm: toNumber(cell(row, 32)),
         widthCm: toNumber(cell(row, 33)),
@@ -797,10 +803,13 @@ function calculateDeliveryFromBoxTariff(row: UnitEconomicsRow, boxWarehouses: Re
 
   const base = values[keys[0]]
   const liter = values[keys[1]]
-  const coef = values[keys[2]] || 100
+  const fallbackCoeff = (values[keys[2]] || 100) / 100
+  const warehouseCoeff = row.fixedWarehouseCoeff > 0 ? row.fixedWarehouseCoeff : fallbackCoeff
   if (base <= 0) return null
   const volume = Math.max(1, (row.lengthCm * row.widthCm * row.heightCm) / 1000)
-  return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
+  const buyoutPct = clampUnitRatio(row.buyoutPct, 1)
+  const delivery = (base + Math.max(0, volume - 1) * liter) * warehouseCoeff
+  return Math.round(delivery * (2 - buyoutPct) * 100) / 100
 }
 
 function calculateReturnFromTariff(row: UnitEconomicsRow, returnWarehouses: Record<string, unknown>[]) {
@@ -815,7 +824,10 @@ function calculateReturnFromTariff(row: UnitEconomicsRow, returnWarehouses: Reco
         .map((key) => parseWbNumber(item[key]))
         .filter((value) => value > 0))
   if (values.length === 0) return null
-  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+  const buyoutPct = clampUnitRatio(row.buyoutPct, 1)
+  if (buyoutPct <= 0) return null
+  const returnBase = values.reduce((sum, value) => sum + value, 0) / values.length
+  return Math.round((returnBase / buyoutPct) * 100) / 100
 }
 
 function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
@@ -870,20 +882,6 @@ function tariffCategories(payload: WbTariffsPayload): UnitTariffCategory[] {
   return [...bySubject.values()].sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'ru'))
 }
 
-function calculateTariffDelivery(volumeLiters: number, fulfillment: UnitFulfillment, warehouses: Record<string, unknown>[]) {
-  const keys = fulfillment === 'fbs'
-    ? ['boxDeliveryMarketplaceBase', 'boxDeliveryMarketplaceLiter', 'boxDeliveryMarketplaceCoefExpr']
-    : ['boxDeliveryBase', 'boxDeliveryLiter', 'boxDeliveryCoefExpr']
-  const values = averageWarehouseTariff(warehouses, keys)
-  if (!values) return 0
-  const base = values[keys[0]]
-  const liter = values[keys[1]]
-  const coef = values[keys[2]] || 100
-  if (base <= 0) return 0
-  const volume = Math.max(1, volumeLiters)
-  return Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
-}
-
 function calculateTariffReturn(warehouses: Record<string, unknown>[]) {
   const values = warehouses.flatMap((warehouse) => ['deliveryDumpSrgReturnExpr', 'deliveryDumpSupReturnExpr']
     .map((key) => parseWbNumber(warehouse[key]))
@@ -926,29 +924,6 @@ async function buildUnitTariffOptions(targets: WbTarget[]) {
     }
   } catch {
     return null
-  }
-}
-
-async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[]) {
-  const target = targets.find((item) => item.wbApiKey)
-  if (!target) return row
-  try {
-    const { payload } = await fetchWbTariffs(target, todayMoscowDate())
-    const next = { ...row, warehouse: logisticsWarehouseName(row.fulfillment) }
-    const subject = normalizeTariffName(next.wbSubject || next.category)
-    const commissionRow = payload.commissionReport.find((item) => normalizeTariffName(item.subjectName) === subject)
-    if (commissionRow) {
-      const pair = getCommissionPair(commissionRow)
-      next.commissionPct = next.fulfillment === 'fbs' ? pair.fbsCommissionPct : pair.fboCommissionPct
-    }
-
-    const volume = Math.max(1, (next.lengthCm * next.widthCm * next.heightCm) / 1000)
-    next.deliveryLogisticsRub = calculateTariffDelivery(volume, next.fulfillment, pickLogisticsWarehouses(payload.boxWarehouses, next.fulfillment))
-    next.returnLogisticsRub = calculateTariffReturn(pickLogisticsWarehouses(payload.returnWarehouses, next.fulfillment))
-    next.logisticsTotalRub = calculateUnitLogistics(next)
-    return next
-  } catch {
-    return row
   }
 }
 
@@ -1169,8 +1144,7 @@ export async function GET(request: NextRequest) {
   const store = await readStore()
   const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
   const tariffOptions = await buildUnitTariffOptions(targets)
-  const syncedStore = await refreshStoreCommissions(store, tariffOptions)
-  return jsonResponse(syncedStore, tariffOptions)
+  return jsonResponse(store, tariffOptions)
 }
 
 export async function POST(request: NextRequest) {
@@ -1254,6 +1228,7 @@ export async function POST(request: NextRequest) {
       'localizationIndex',
       'taxAcquiringPct',
       'drrPct',
+      'drrMode',
       'minProfitRub',
       'sppPct',
       'walletPct',
@@ -1265,6 +1240,7 @@ export async function POST(request: NextRequest) {
         ;(acc as Record<string, unknown>)[key] = value
         return acc
       }, {})
+      if (patch.drrPct !== undefined && patch.drrMode === undefined) patch.drrMode = 'manual'
       return normalizeRow({ ...row, ...patch, updatedAt: new Date().toISOString() }, row)
     })
     const nextStore = await writeStore(rows, store.costs)
@@ -1317,7 +1293,7 @@ export async function POST(request: NextRequest) {
   const targets = await getVercelWbTargets(user, 'all', { includeAdminAngelina: true })
   const tariffOptions = await buildUnitTariffOptions(targets)
   const nextRowBase = normalizeRow(
-    preserveWbManagedFields({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing),
+    preserveWbManagedFields(adjustExcelLogisticsInputs({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing), existing),
     existing,
   )
   if (!nextRowBase.productName) {
@@ -1329,7 +1305,7 @@ export async function POST(request: NextRequest) {
   if (nextRowBase.wbSubject && tariffOptions && !tariffOptions.categories.some((category) => category.subjectName === nextRowBase.wbSubject)) {
     return NextResponse.json({ error: 'WB категория должна быть выбрана из актуального списка WB' }, { status: 400 })
   }
-  const nextRow = await applyAutomaticWbTariffs(nextRowBase, targets)
+  const nextRow = nextRowBase
   const rows = existing
     ? store.rows.map((row) => row.id === existing.id ? nextRow : row)
     : [nextRow, ...store.rows]
