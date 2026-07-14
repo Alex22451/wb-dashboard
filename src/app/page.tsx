@@ -61,6 +61,7 @@ import {
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
+import { calculateUnitEconomics, calculateUnitLogistics } from '@/lib/unit-economics'
 
 // Types
 interface DashboardData {
@@ -209,6 +210,7 @@ interface UnitEconomicsRow {
   profitWithAdsRub: number
   profitabilityPct: number
   volumeLiters: number
+  expenseTotalRub: number
   status: 'ok' | 'below-min-profit' | 'loss' | 'incomplete'
 }
 
@@ -218,6 +220,9 @@ interface UnitEconomicsSummary {
   lossRows: number
   belowMinRows: number
   profitableRows: number
+  linkedRows: number
+  categorizedRows: number
+  completeRows: number
   avgProfitRub: number
   avgProfitabilityPct: number
   updatedAt: string | null
@@ -293,6 +298,18 @@ interface UnitApiTargetReport {
   updatedRows: number
   contentStatus: 'ok' | 'error'
   pricesStatus: 'ok' | 'error' | 'skipped'
+  warnings: string[]
+}
+
+interface UnitImportPreview {
+  fileName: string
+  rows: number
+  costs: number
+  fbs: number
+  fbo: number
+  entrepreneurs: number
+  retainedLinks: number
+  incomplete: number
   warnings: string[]
 }
 
@@ -5405,6 +5422,8 @@ function UnitEconomicsTab() {
   const [selectedEntrepreneur, setSelectedEntrepreneur] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [unitMode, setUnitMode] = useState<'products' | 'costs'>('products')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'unlinked'>('all')
+  const [pendingImport, setPendingImport] = useState<{ file: File; preview: UnitImportPreview } | null>(null)
 
   const applyStore = useCallback((json: any) => {
     const store = json?.store
@@ -5444,13 +5463,33 @@ function UnitEconomicsTab() {
       const res = await fetch('/api/unit-economics', { method: 'POST', body: form })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Не удалось импортировать Excel')
-      applyStore(json)
+      if (!json.preview) throw new Error('Сервер не вернул предпросмотр импорта')
+      setPendingImport({ file, preview: json.preview })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось импортировать Excel')
     } finally {
       setSaving(false)
     }
-  }, [applyStore])
+  }, [])
+
+  const commitExcelImport = useCallback(async () => {
+    if (!pendingImport) return
+    setSaving(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.set('file', pendingImport.file)
+      const res = await fetch('/api/unit-economics?commit=1', { method: 'POST', body: form })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Не удалось импортировать Excel')
+      applyStore(json)
+      setPendingImport(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось импортировать Excel')
+    } finally {
+      setSaving(false)
+    }
+  }, [applyStore, pendingImport])
 
   const saveRow = useCallback(async () => {
     if (!editingRow) return
@@ -5580,6 +5619,11 @@ function UnitEconomicsTab() {
     const text = query.trim().toLowerCase()
     return rows
       .filter((row) => fulfillment === 'all' || row.fulfillment === fulfillment)
+      .filter((row) => {
+        if (statusFilter === 'attention') return row.status !== 'ok'
+        if (statusFilter === 'unlinked') return !row.nmId || !row.wbSubject
+        return true
+      })
       .filter((row) => !text || [
         row.productName,
         getUnitSubcategory(row),
@@ -5597,7 +5641,7 @@ function UnitEconomicsTab() {
           || statusOrder[a.status] - statusOrder[b.status]
           || a.productName.localeCompare(b.productName, 'ru')
       })
-  }, [fulfillment, query, rows])
+  }, [fulfillment, query, rows, statusFilter])
 
   const groupedRows = useMemo(() => {
     const entrepreneurMap = new Map<string, Map<string, UnitEconomicsRow[]>>()
@@ -5678,12 +5722,7 @@ function UnitEconomicsTab() {
     if (value === undefined || value === null || value === '') return ''
     const number = Number(value)
     if (!Number.isFinite(number)) return ''
-    return pct ? number * 100 : number
-  }
-  const getPriceAfterDiscountPreview = (row: Partial<UnitEconomicsRow>) => {
-    const price = Number(row.priceBeforeDiscountRub || 0)
-    const discount = Number(row.discountPct || 0)
-    return Math.round(price * (1 - discount) * 100) / 100
+    return pct ? Math.round(number * 10000) / 100 : number
   }
   const getTariffDeliveryPreview = useCallback((row: Partial<UnitEconomicsRow>, mode: UnitFulfillment) => {
     if (!tariffOptions) return 0
@@ -5716,40 +5755,6 @@ function UnitEconomicsTab() {
     if (category) return mode === 'fbo' ? category.fboCommissionPct : category.fbsCommissionPct
     return row.fulfillment === mode ? Number(row.commissionPct || 0) : 0
   }, [tariffOptions])
-  const getClientExtraCommissionPct = (days: number, mode: UnitFulfillment) => {
-    if (!Number.isFinite(days) || days <= 1) return 0
-    if (mode === 'fbo') {
-      if (days <= 13) return -0.01
-      if (days <= 15) return 0
-      if (days <= 42) return ((days - 15) * 0.15) / 100
-      return ((days - 15) * 0.25) / 100
-    }
-    if (days <= 13) return -0.015
-    if (days <= 18) return 0
-    if (days <= 30) return ((days - 18) * 0.3) / 100
-    if (days <= 36) return ((days - 18) * 0.35) / 100
-    return ((days - 18) * 0.45) / 100
-  }
-  const getScenarioProfit = useCallback((row: UnitEconomicsRow, mode: UnitFulfillment) => {
-    const commissionPct = getCategoryCommission(row, mode)
-    const deliveryLogisticsRub = getTariffDeliveryPreview(row, mode)
-    const returnLogisticsRub = getTariffReturnPreview(mode)
-    const buyout = Number(row.buyoutPct || 1) > 0 ? Number(row.buyoutPct || 1) : 1
-    const localization = Math.max(1, Number(row.localizationIndex || 1))
-    const returnPart = returnLogisticsRub * Math.max(0, (1 - buyout) / buyout)
-    const logisticsTotalRub = Math.round((deliveryLogisticsRub + returnPart) * localization * 100) / 100
-    const priceAfterDiscountRub = row.priceBeforeDiscountRub * (1 - row.discountPct)
-    const priceAfterSppRub = priceAfterDiscountRub * (1 - row.sppPct)
-    const priceWithWalletRub = priceAfterSppRub * (1 - row.walletPct)
-    const extraCommissionPct = getClientExtraCommissionPct(row.avgDeliveryDays, mode)
-    const profitRub = priceAfterDiscountRub
-      - (priceAfterDiscountRub * commissionPct)
-      - row.costRub
-      - logisticsTotalRub
-      - (priceWithWalletRub * row.taxAcquiringPct)
-      - (priceAfterDiscountRub * extraCommissionPct)
-    return Math.round((profitRub - (priceAfterDiscountRub * row.drrPct)) * 100) / 100
-  }, [getCategoryCommission, getTariffDeliveryPreview, getTariffReturnPreview])
   const applyClientAutomaticWbFields = useCallback((row: Partial<UnitEconomicsRow>) => {
     if (!tariffOptions) return row
     const next = { ...row }
@@ -5775,14 +5780,28 @@ function UnitEconomicsTab() {
         : tula.fbsWarehouseName || 'Центральный федеральный округ'
       next.deliveryLogisticsRub = Math.round((base + Math.max(0, volume - 1) * liter) * (coef / 100) * 100) / 100
       next.returnLogisticsRub = isFbo ? Number(tula.fboReturnRub ?? tula.returnRub ?? 0) : Number(tula.fbsReturnRub ?? 0)
-      const buyout = Number(next.buyoutPct || 1) > 0 ? Number(next.buyoutPct || 1) : 1
-      const localization = Math.max(1, Number(next.localizationIndex || 1))
-      const returnPart = Number(next.returnLogisticsRub || 0) * Math.max(0, (1 - buyout) / buyout)
-      next.logisticsTotalRub = Math.round((Number(next.deliveryLogisticsRub || 0) + returnPart) * localization * 100) / 100
+      next.logisticsTotalRub = calculateUnitLogistics({
+        deliveryLogisticsRub: Number(next.deliveryLogisticsRub || 0),
+        returnLogisticsRub: Number(next.returnLogisticsRub || 0),
+        fixedWarehouseCoeff: Number(next.fixedWarehouseCoeff ?? 1),
+        buyoutPct: Number(next.buyoutPct ?? 1),
+        localizationIndex: Number(next.localizationIndex ?? 1),
+      })
     }
 
     return next
   }, [tariffOptions])
+
+  const editingPreview = useMemo(() => {
+    if (!editingRow) return null
+    return calculateUnitEconomics({
+      ...emptyUnitRow(),
+      ...applyClientAutomaticWbFields(editingRow),
+      id: editingRow.id || 'preview',
+      productName: editingRow.productName || '',
+      entrepreneurName: editingRow.entrepreneurName || '',
+    } as UnitEconomicsRow)
+  }, [applyClientAutomaticWbFields, editingRow])
 
   const setEditNumber = (key: keyof UnitEconomicsRow, value: string, pct = false) => {
     if (WB_READONLY_UNIT_FIELDS.has(key)) return
@@ -5844,10 +5863,6 @@ function UnitEconomicsTab() {
     }))
   }
 
-  const setBulkText = (key: keyof UnitEconomicsRow, value: string) => {
-    setBulkPatch((current) => ({ ...(current || {}), [key]: value }))
-  }
-
   const unitStatus = (row: UnitEconomicsRow) => {
     if (row.status === 'loss') return <Badge variant="destructive">Минус</Badge>
     if (row.status === 'below-min-profit') return <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">Ниже минимума</Badge>
@@ -5860,7 +5875,7 @@ function UnitEconomicsTab() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">Юнит экономика</h2>
-          <p className="text-sm text-muted-foreground">Расчет как в Excel: себестоимость отдельно, WB данные отдельно, ручные параметры массово.</p>
+          <p className="text-sm text-muted-foreground">Контроль прибыли после рекламы, расходов WB и полноты данных по каждому товару.</p>
           <ToggleGroup type="single" value={unitMode} onValueChange={(value) => value && setUnitMode(value as 'products' | 'costs')} className="mt-3 justify-start">
             <ToggleGroupItem value="products" className="gap-2">
               <Calculator className="h-4 w-4" />
@@ -5879,7 +5894,7 @@ function UnitEconomicsTab() {
           </Button>
           <Button variant="outline" onClick={syncWb} disabled={loading || saving} className="gap-2">
             <Download className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
-            WB API
+            Карточки и цены WB
           </Button>
           <Button variant="outline" onClick={syncWbTariffs} disabled={loading || saving} className="gap-2">
             <Calculator className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
@@ -5983,11 +5998,11 @@ function UnitEconomicsTab() {
         </Alert>
       )}
 
-      <div className="grid gap-3 md:grid-cols-5">
-        <UnitMetricCard title="Строк" value={formatNumber(summary?.totalRows || 0)} subtitle={`${formatNumber(summary?.activeRows || 0)} активных`} />
-        <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle="после рекламы" />
-        <UnitMetricCard title="Рентабельность" value={`${(summary?.avgProfitabilityPct || 0).toFixed(1)}%`} subtitle="средняя по строкам" />
-        <UnitMetricCard title="В минусе" value={formatNumber(summary?.lossRows || 0)} subtitle="требуют внимания" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <UnitMetricCard title="Товары" value={formatNumber(summary?.totalRows || 0)} subtitle={`${formatNumber(summary?.completeRows || 0)} полностью рассчитано`} />
+        <UnitMetricCard title="Связано с WB" value={`${formatNumber(summary?.linkedRows || 0)} / ${formatNumber(summary?.totalRows || 0)}`} subtitle={`${formatNumber(summary?.categorizedRows || 0)} с категорией тарифа`} />
+        <UnitMetricCard title="Требуют внимания" value={formatNumber((summary?.lossRows || 0) + (summary?.belowMinRows || 0) + Math.max(0, (summary?.totalRows || 0) - (summary?.completeRows || 0)))} subtitle={`${formatNumber(summary?.lossRows || 0)} убыточных`} />
+        <UnitMetricCard title="Средняя прибыль" value={`${formatNumber(Math.round(summary?.avgProfitRub || 0))} ₽`} subtitle={`маржа ${(summary?.avgProfitabilityPct || 0).toFixed(1)}%`} />
         <UnitMetricCard title="Себестоимость" value={formatNumber(costSummary?.totalRows || 0)} subtitle={`ср. ${formatNumber(Math.round(costSummary?.avgCostRub || 0))} ₽`} />
       </div>
 
@@ -5996,7 +6011,7 @@ function UnitEconomicsTab() {
         <CardHeader className="gap-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <CardTitle className="text-base">Товары</CardTitle>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по товару, ИП, nmId" className="sm:w-72" />
               <Select value={fulfillment} onValueChange={(value) => setFulfillment(value as 'all' | UnitFulfillment)}>
                 <SelectTrigger className="sm:w-36">
@@ -6008,6 +6023,17 @@ function UnitEconomicsTab() {
                   <SelectItem value="fbo">FBO</SelectItem>
                 </SelectContent>
               </Select>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={statusFilter}
+                onValueChange={(value) => value && setStatusFilter(value as 'all' | 'attention' | 'unlinked')}
+                className="justify-start"
+              >
+                <ToggleGroupItem value="all">Все</ToggleGroupItem>
+                <ToggleGroupItem value="attention">Проблемы</ToggleGroupItem>
+                <ToggleGroupItem value="unlinked">Без WB</ToggleGroupItem>
+              </ToggleGroup>
             </div>
           </div>
         </CardHeader>
@@ -6024,6 +6050,20 @@ function UnitEconomicsTab() {
             </div>
           ) : (
             <div className="space-y-4">
+              <div className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-3">
+                <button type="button" onClick={() => setStatusFilter('unlinked')} className="bg-background px-4 py-3 text-left hover:bg-muted/50">
+                  <div className="text-xs text-muted-foreground">Без связи с WB</div>
+                  <div className="mt-1 text-lg font-semibold">{formatNumber(Math.max(0, (summary?.totalRows || 0) - (summary?.linkedRows || 0)))}</div>
+                </button>
+                <button type="button" onClick={() => setStatusFilter('attention')} className="bg-background px-4 py-3 text-left hover:bg-muted/50">
+                  <div className="text-xs text-muted-foreground">Неполные данные</div>
+                  <div className="mt-1 text-lg font-semibold">{formatNumber(Math.max(0, (summary?.totalRows || 0) - (summary?.completeRows || 0)))}</div>
+                </button>
+                <button type="button" onClick={() => setStatusFilter('attention')} className="bg-background px-4 py-3 text-left hover:bg-muted/50">
+                  <div className="text-xs text-muted-foreground">Ниже цели или в минусе</div>
+                  <div className="mt-1 text-lg font-semibold">{formatNumber((summary?.lossRows || 0) + (summary?.belowMinRows || 0))}</div>
+                </button>
+              </div>
               <div className="rounded-md border">
                 <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-3 py-2">
                   <div className="text-sm font-medium">ИП</div>
@@ -6104,67 +6144,59 @@ function UnitEconomicsTab() {
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[980px] text-sm">
                     <thead>
                       <tr className="border-b bg-muted/20">
                         <th className="px-3 py-2 text-left font-medium">Товар</th>
-                        <th className="px-3 py-2 text-right font-medium">До скидки</th>
-                        <th className="px-3 py-2 text-right font-medium">Скидка</th>
-                        <th className="px-3 py-2 text-right font-medium">После скидки</th>
-                        <th className="px-3 py-2 text-right font-medium">Себес.</th>
-                        <th className="px-3 py-2 text-right font-medium">Комис FBS</th>
-                        <th className="px-3 py-2 text-right font-medium">Комис FBO</th>
-                        <th className="px-3 py-2 text-right font-medium">Логистика</th>
-                        <th className="px-3 py-2 text-right font-medium">ДРР</th>
-                        <th className="px-3 py-2 text-right font-medium">Прибыль FBS</th>
-                        <th className="px-3 py-2 text-right font-medium">Прибыль FBO</th>
-                        <th className="px-3 py-2 text-right font-medium">Рент.</th>
+                        <th className="px-3 py-2 text-left font-medium">Канал</th>
+                        <th className="px-3 py-2 text-right font-medium">Цена</th>
+                        <th className="px-3 py-2 text-right font-medium">Расходы</th>
+                        <th className="px-3 py-2 text-right font-medium">Прибыль</th>
+                        <th className="px-3 py-2 text-right font-medium">Маржа</th>
                         <th className="px-3 py-2 text-left font-medium">Статус</th>
                         <th className="px-3 py-2 text-right font-medium"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedRows.map((row) => {
-                        const fbsCommission = getCategoryCommission(row, 'fbs')
-                        const fboCommission = getCategoryCommission(row, 'fbo')
-                        const fbsProfit = getScenarioProfit(row, 'fbs')
-                        const fboProfit = getScenarioProfit(row, 'fbo')
+                        const expenses = row.expenseTotalRub ?? (
+                          row.costRub + row.commissionRub + row.logisticsTotalRub + row.taxAcquiringRub + row.extraCommissionRub + row.adSpendRub
+                        )
                         return (
                           <tr key={row.id} className={`border-b ${DAILY_TABLE_ROW_HOVER}`}>
                             <td className="max-w-[360px] px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
-                                <div className="min-w-0">
-                                  <div className="truncate font-medium">{row.productName}</div>
-                                  <div className="truncate text-xs text-muted-foreground">
-                                    {row.nmId ? `nmId ${row.nmId}` : row.category || row.warehouse || 'без категории'}
-                                    {row.vendorCode ? ` · ${row.vendorCode}` : ''}
-                                  </div>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{row.productName}</div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {row.nmId ? `nmId ${row.nmId}` : 'нет связи с WB'}
+                                  {row.vendorCode ? ` · ${row.vendorCode}` : ''}
                                 </div>
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceBeforeDiscountRub))} ₽</td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.discountPct * 100, '%')}</td>
-                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</td>
-                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.costRub))} ₽</td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(fbsCommission * 100, '%')}</td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(fboCommission * 100, '%')}</td>
-                            <td className="px-3 py-2 text-right">{formatNumber(Math.round(row.logisticsTotalRub))} ₽</td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.drrPct * 100, '%')}</td>
-                            <td className={`px-3 py-2 text-right font-semibold ${fbsProfit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                              {formatNumber(Math.round(fbsProfit))} ₽
+                            <td className="px-3 py-2">
+                              <Badge variant="outline" className="uppercase">{row.fulfillment}</Badge>
+                              <div className="mt-1 text-xs text-muted-foreground">{formatAutoNumber(row.commissionPct * 100, '%')} комиссия</div>
                             </td>
-                            <td className={`px-3 py-2 text-right font-semibold ${fboProfit < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                              {formatNumber(Math.round(fboProfit))} ₽
+                            <td className="px-3 py-2 text-right">
+                              <div className="font-medium">{formatNumber(Math.round(row.priceAfterDiscountRub))} ₽</div>
+                              <div className="text-xs text-muted-foreground">{formatNumber(Math.round(row.priceBeforeDiscountRub))} ₽ · -{formatAutoNumber(row.discountPct * 100, '%')}</div>
                             </td>
-                            <td className="px-3 py-2 text-right">{formatAutoNumber(row.profitabilityPct, '%')}</td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="font-medium">{formatNumber(Math.round(expenses))} ₽</div>
+                              <div className="text-xs text-muted-foreground">себес. {formatNumber(Math.round(row.costRub))} · лог. {formatNumber(Math.round(row.logisticsTotalRub))}</div>
+                            </td>
+                            <td className={`px-3 py-2 text-right font-semibold ${row.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                              <div>{formatNumber(Math.round(row.profitWithAdsRub))} ₽</div>
+                              <div className="text-xs font-normal text-muted-foreground">после ДРР {formatAutoNumber(row.drrPct * 100, '%')}</div>
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">{formatAutoNumber(row.profitabilityPct, '%')}</td>
                             <td className="px-3 py-2">{unitStatus(row)}</td>
                             <td className="px-3 py-2 text-right">
                               <div className="flex justify-end gap-1">
-                                <Button variant="ghost" size="sm" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
+                                <Button variant="ghost" size="icon" title="Редактировать товар" onClick={() => setEditingRow(applyClientAutomaticWbFields(row))}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="sm" onClick={() => deleteRow(row)} disabled={saving}>
+                                <Button variant="ghost" size="icon" title="Удалить товар" onClick={() => deleteRow(row)} disabled={saving}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -6260,6 +6292,47 @@ function UnitEconomicsTab() {
       </Card>
       )}
 
+      <Dialog open={!!pendingImport} onOpenChange={(open) => !open && !saving && setPendingImport(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Проверка импорта Excel</DialogTitle>
+            <DialogDescription>
+              После подтверждения текущие строки юнитки и справочник себестоимости будут заменены данными файла.
+            </DialogDescription>
+          </DialogHeader>
+          {pendingImport && (
+            <div className="space-y-4">
+              <div className="rounded-md border px-4 py-3">
+                <div className="truncate text-sm font-medium">{pendingImport.preview.fileName}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {formatNumber(pendingImport.preview.entrepreneurs)} ИП · FBS {formatNumber(pendingImport.preview.fbs)} · FBO {formatNumber(pendingImport.preview.fbo)}
+                </div>
+              </div>
+              <div className="grid gap-px overflow-hidden rounded-md border bg-border grid-cols-2 sm:grid-cols-4">
+                <div className="bg-background p-3"><div className="text-xs text-muted-foreground">Строки</div><div className="mt-1 text-lg font-semibold">{formatNumber(pendingImport.preview.rows)}</div></div>
+                <div className="bg-background p-3"><div className="text-xs text-muted-foreground">Себестоимость</div><div className="mt-1 text-lg font-semibold">{formatNumber(pendingImport.preview.costs)}</div></div>
+                <div className="bg-background p-3"><div className="text-xs text-muted-foreground">Связи сохранены</div><div className="mt-1 text-lg font-semibold">{formatNumber(pendingImport.preview.retainedLinks)}</div></div>
+                <div className="bg-background p-3"><div className="text-xs text-muted-foreground">Неполные</div><div className="mt-1 text-lg font-semibold">{formatNumber(pendingImport.preview.incomplete)}</div></div>
+              </div>
+              {pendingImport.preview.warnings.length > 0 && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Проверьте файл</AlertTitle>
+                  <AlertDescription>{pendingImport.preview.warnings.join(' · ')}</AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingImport(null)} disabled={saving}>Отмена</Button>
+            <Button onClick={commitExcelImport} disabled={saving} className="gap-2">
+              <Upload className="h-4 w-4" />
+              Заменить данные
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!editingRow} onOpenChange={(open) => !open && setEditingRow(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
@@ -6339,6 +6412,28 @@ function UnitEconomicsTab() {
                   {tariffOptions ? `Список WB от ${tariffOptions.date}. Показаны первые ${formatNumber(filteredWbCategories.length)} совпадений.` : 'Список WB тарифов не загружен'}
                 </div>
               </div>
+              {editingPreview && (
+                <div className="grid gap-px overflow-hidden rounded-md border bg-border sm:col-span-2 sm:grid-cols-4">
+                  <div className="bg-background p-3">
+                    <div className="text-xs text-muted-foreground">Цена продажи</div>
+                    <div className="mt-1 font-semibold">{formatNumber(Math.round(editingPreview.priceAfterDiscountRub))} ₽</div>
+                  </div>
+                  <div className="bg-background p-3">
+                    <div className="text-xs text-muted-foreground">Все расходы</div>
+                    <div className="mt-1 font-semibold">{formatNumber(Math.round(editingPreview.expenseTotalRub))} ₽</div>
+                  </div>
+                  <div className="bg-background p-3">
+                    <div className="text-xs text-muted-foreground">Прибыль после рекламы</div>
+                    <div className={`mt-1 font-semibold ${editingPreview.profitWithAdsRub < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                      {formatNumber(Math.round(editingPreview.profitWithAdsRub))} ₽
+                    </div>
+                  </div>
+                  <div className="bg-background p-3">
+                    <div className="text-xs text-muted-foreground">Маржа</div>
+                    <div className="mt-1 font-semibold">{formatAutoNumber(editingPreview.profitabilityPct, '%')}</div>
+                  </div>
+                </div>
+              )}
               <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:col-span-2 sm:grid-cols-4">
                 <div className="space-y-1">
                   <Label>Цена до скидки, ₽</Label>
@@ -6358,7 +6453,7 @@ function UnitEconomicsTab() {
                 </div>
                 <div className="space-y-1">
                   <Label>Цена после скидки, ₽</Label>
-                  <Input value={formatAutoNumber(getPriceAfterDiscountPreview(editingRow))} disabled />
+                  <Input value={formatAutoNumber(editingPreview?.priceAfterDiscountRub || 0)} disabled />
                 </div>
                 <div className="space-y-1">
                   <Label>Налог, %</Label>
@@ -6376,6 +6471,7 @@ function UnitEconomicsTab() {
                 ['drrPct', 'ДРР, %', true],
                 ['minProfitRub', 'Минимальная прибыль, ₽'],
                 ['avgDeliveryDays', 'Среднее время доставки'],
+                ['fixedWarehouseCoeff', 'Коэффициент склада'],
                 ['buyoutPct', '% выкупа', true],
                 ['localizationIndex', 'Индекс локализации'],
                 ['lengthCm', 'Длина, см'],
@@ -6429,7 +6525,7 @@ function UnitEconomicsTab() {
                   </div>
                   <div className="space-y-1">
                     <Label>Логистика всего, ₽</Label>
-                    <Input value={formatAutoNumber(Number(editingRow.logisticsTotalRub || 0))} disabled />
+                    <Input value={formatAutoNumber(Number(editingPreview?.logisticsTotalRub || 0))} disabled />
                   </div>
                   <div className="space-y-1">
                     <Label>Обновлено WB</Label>
@@ -6441,7 +6537,7 @@ function UnitEconomicsTab() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingRow(null)}>Отмена</Button>
-            <Button onClick={saveRow} disabled={saving || !editingRow?.wbSubject} className="gap-2">
+            <Button onClick={saveRow} disabled={saving || !editingRow?.productName || !editingRow?.entrepreneurName} className="gap-2">
               <Save className="h-4 w-4" />
               Сохранить
             </Button>

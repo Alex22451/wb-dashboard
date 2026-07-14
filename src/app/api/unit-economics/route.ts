@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
-import { redisCommand } from '@/lib/redis-cache'
+import { hasRedisConfig, redisCommand } from '@/lib/redis-cache'
 import seedRowsRaw from '@/data/unit-economics-seed.json'
 import seedCostsRaw from '@/data/unit-economics-cost-seed.json'
 import { getVercelWbTargets, type WbTarget } from '@/lib/user-store'
 import { mapWbOrderToProductKey } from '@/lib/wb-mapping'
 import {
+  calculateUnitLogistics,
   calculateUnitEconomics,
+  clampUnitRatio,
   normalizeUnitProductKey,
   summarizeUnitCosts,
   summarizeUnitEconomics,
@@ -20,6 +22,8 @@ import {
 } from '@/lib/unit-economics'
 
 const STORE_KEY = 'wb:unit-economics:v1'
+const STORE_HISTORY_KEY = 'wb:unit-economics:history:v1'
+const MAX_IMPORT_BYTES = 15 * 1024 * 1024
 const CONTENT_CARDS_URL = 'https://content-api.wildberries.ru/content/v2/get/cards/list'
 const PRICES_URL = 'https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter'
 const COMMON_API_BASE = 'https://common-api.wildberries.ru'
@@ -35,6 +39,7 @@ const WB_MANAGED_ROW_FIELDS: Array<keyof UnitEconomicsRow> = [
   'deliveryLogisticsRub',
   'logisticsTotalRub',
 ]
+let localStore: UnitEconomicsStore | null = null
 
 interface WbCard {
   nmId: number
@@ -77,6 +82,10 @@ function seedStore(): UnitEconomicsStore {
 }
 
 async function readStore(): Promise<UnitEconomicsStore> {
+  if (!hasRedisConfig()) {
+    localStore ||= seedStore()
+    return localStore
+  }
   const raw = await redisCommand<string>(['GET', STORE_KEY])
   if (!raw) return seedStore()
   try {
@@ -100,6 +109,15 @@ async function writeStore(rows: UnitEconomicsRow[], costsInput?: UnitProductCost
     updatedAt: new Date().toISOString(),
     rows: applyCostCatalog(rows.map((row) => normalizeRow(row)), costs),
     costs,
+  }
+  if (!hasRedisConfig()) {
+    localStore = store
+    return store
+  }
+  const previous = await redisCommand<string>(['GET', STORE_KEY])
+  if (previous) {
+    await redisCommand(['LPUSH', STORE_HISTORY_KEY, previous])
+    await redisCommand(['LTRIM', STORE_HISTORY_KEY, 0, 9])
   }
   const result = await redisCommand<string>(['SET', STORE_KEY, JSON.stringify(store)])
   if (!result) throw new Error('Redis store is not available')
@@ -160,14 +178,14 @@ async function getAuthorizedUser(request: NextRequest) {
 
 function normalizePct(value: unknown) {
   const number = toNumber(value)
-  return Math.abs(number) > 1 ? number / 100 : number
+  return clampUnitRatio(Math.abs(number) > 1 ? number / 100 : number)
 }
 
 function normalizeRow(input: Partial<UnitEconomicsRow>, existing?: UnitEconomicsRow): UnitEconomicsRow {
   const now = new Date().toISOString()
-  return {
+  const row: UnitEconomicsRow = {
     id: String(input.id || existing?.id || randomUUID()),
-    fulfillment: input.fulfillment === 'fbo' ? 'fbo' : 'fbs',
+    fulfillment: (input.fulfillment ?? existing?.fulfillment) === 'fbo' ? 'fbo' : 'fbs',
     productName: String(input.productName ?? existing?.productName ?? '').trim(),
     category: String(input.category ?? existing?.category ?? '').trim(),
     entrepreneurName: String(input.entrepreneurName ?? existing?.entrepreneurName ?? '').trim(),
@@ -177,31 +195,33 @@ function normalizeRow(input: Partial<UnitEconomicsRow>, existing?: UnitEconomics
     wbSubject: input.wbSubject ?? existing?.wbSubject ?? null,
     wbBrand: input.wbBrand ?? existing?.wbBrand ?? null,
     wbSyncedAt: input.wbSyncedAt ?? existing?.wbSyncedAt ?? null,
-    costRub: toNumber(input.costRub, existing?.costRub || 0),
-    priceBeforeDiscountRub: toNumber(input.priceBeforeDiscountRub, existing?.priceBeforeDiscountRub || 0),
+    costRub: Math.max(0, toNumber(input.costRub, existing?.costRub || 0)),
+    priceBeforeDiscountRub: Math.max(0, toNumber(input.priceBeforeDiscountRub, existing?.priceBeforeDiscountRub || 0)),
     discountPct: normalizePct(input.discountPct ?? existing?.discountPct ?? 0),
     sppPct: normalizePct(input.sppPct ?? existing?.sppPct ?? 0),
     walletPct: normalizePct(input.walletPct ?? existing?.walletPct ?? 0),
     commissionPct: normalizePct(input.commissionPct ?? existing?.commissionPct ?? 0),
-    avgDeliveryDays: toNumber(input.avgDeliveryDays, existing?.avgDeliveryDays || 0),
+    avgDeliveryDays: Math.max(0, toNumber(input.avgDeliveryDays, existing?.avgDeliveryDays || 0)),
     warehouse: String(input.warehouse ?? existing?.warehouse ?? '').trim(),
-    fixedWarehouseCoeff: toNumber(input.fixedWarehouseCoeff, existing?.fixedWarehouseCoeff || 1),
+    fixedWarehouseCoeff: Math.max(0, toNumber(input.fixedWarehouseCoeff, existing?.fixedWarehouseCoeff || 1)),
     buyoutPct: normalizePct(input.buyoutPct ?? existing?.buyoutPct ?? 1),
-    localizationIndex: toNumber(input.localizationIndex, existing?.localizationIndex || 1),
-    returnLogisticsRub: toNumber(input.returnLogisticsRub, existing?.returnLogisticsRub || 0),
-    deliveryLogisticsRub: toNumber(input.deliveryLogisticsRub, existing?.deliveryLogisticsRub || 0),
-    logisticsTotalRub: toNumber(input.logisticsTotalRub, existing?.logisticsTotalRub || 0),
+    localizationIndex: Math.max(0, toNumber(input.localizationIndex, existing?.localizationIndex || 1)),
+    returnLogisticsRub: Math.max(0, toNumber(input.returnLogisticsRub, existing?.returnLogisticsRub || 0)),
+    deliveryLogisticsRub: Math.max(0, toNumber(input.deliveryLogisticsRub, existing?.deliveryLogisticsRub || 0)),
+    logisticsTotalRub: 0,
     taxAcquiringPct: normalizePct(input.taxAcquiringPct ?? existing?.taxAcquiringPct ?? 0),
     drrPct: normalizePct(input.drrPct ?? existing?.drrPct ?? 0),
-    minProfitRub: toNumber(input.minProfitRub, existing?.minProfitRub || 0),
-    lengthCm: toNumber(input.lengthCm, existing?.lengthCm || 0),
-    widthCm: toNumber(input.widthCm, existing?.widthCm || 0),
-    heightCm: toNumber(input.heightCm, existing?.heightCm || 0),
-    weightKg: toNumber(input.weightKg, existing?.weightKg || 0),
-    boxQty: toNumber(input.boxQty, existing?.boxQty || 0),
+    minProfitRub: Math.max(0, toNumber(input.minProfitRub, existing?.minProfitRub || 0)),
+    lengthCm: Math.max(0, toNumber(input.lengthCm, existing?.lengthCm || 0)),
+    widthCm: Math.max(0, toNumber(input.widthCm, existing?.widthCm || 0)),
+    heightCm: Math.max(0, toNumber(input.heightCm, existing?.heightCm || 0)),
+    weightKg: Math.max(0, toNumber(input.weightKg, existing?.weightKg || 0)),
+    boxQty: Math.max(0, toNumber(input.boxQty, existing?.boxQty || 0)),
     source: input.source || existing?.source || 'manual',
     updatedAt: input.updatedAt || existing?.updatedAt || now,
   }
+  row.logisticsTotalRub = calculateUnitLogistics(row)
+  return row
 }
 
 function normalizeCost(input: Partial<UnitProductCost>, existing?: UnitProductCost): UnitProductCost {
@@ -212,16 +232,16 @@ function normalizeCost(input: Partial<UnitProductCost>, existing?: UnitProductCo
     key: String(component.key || '').trim(),
     name: String(component.name || '').trim(),
     unit: component.unit ? String(component.unit).trim() : '',
-    unitCostRub: toNumber(component.unitCostRub),
-    quantity: toNumber(component.quantity),
-    costRub: toNumber(component.costRub),
+    unitCostRub: Math.max(0, toNumber(component.unitCostRub)),
+    quantity: Math.max(0, toNumber(component.quantity)),
+    costRub: Math.max(0, toNumber(component.costRub)),
   })).filter((component) => component.name)
 
   return {
     id: String(input.id || existing?.id || randomUUID()),
     productName,
     productKey: normalizeUnitProductKey(input.productKey || existing?.productKey || productName),
-    totalCostRub: toNumber(input.totalCostRub, existing?.totalCostRub || 0),
+    totalCostRub: Math.max(0, toNumber(input.totalCostRub, existing?.totalCostRub || 0)),
     components: normalizedComponents,
     lengthCm: toNumber(input.lengthCm, existing?.lengthCm || 0),
     widthCm: toNumber(input.widthCm, existing?.widthCm || 0),
@@ -392,6 +412,65 @@ async function parseWorkbook(file: File): Promise<{ rows: UnitEconomicsRow[]; co
     ...readSheet('Юнитка 2.0 ФБО', 'fbo'),
     ],
     costs: readWorkbookCosts(workbook, XLSX),
+  }
+}
+
+function importedRowMatchKey(row: UnitEconomicsRow) {
+  return [
+    row.fulfillment,
+    normalizeUnitProductKey(row.entrepreneurName),
+    normalizeUnitProductKey(row.excelProductKey || row.productName),
+  ].join('|')
+}
+
+function mergeImportedRows(importedRows: UnitEconomicsRow[], existingRows: UnitEconomicsRow[]) {
+  const existingByKey = new Map<string, UnitEconomicsRow[]>()
+  for (const row of existingRows) {
+    const key = importedRowMatchKey(row)
+    existingByKey.set(key, [...(existingByKey.get(key) || []), row])
+  }
+
+  let retainedLinks = 0
+  const rows = importedRows.map((importedRow) => {
+    const matches = existingByKey.get(importedRowMatchKey(importedRow)) || []
+    const existing = matches.shift()
+    if (!existing) return importedRow
+    if (existing.nmId || existing.wbSubject) retainedLinks += 1
+    return normalizeRow({
+      ...preserveWbManagedFields({ ...importedRow, id: existing.id }, existing),
+      wbSubject: existing.wbSubject || importedRow.wbSubject,
+    }, existing)
+  })
+
+  return { rows, retainedLinks }
+}
+
+function buildImportPreview(fileName: string, rows: UnitEconomicsRow[], costs: UnitProductCost[], retainedLinks: number) {
+  const calculated = rows.map(calculateUnitEconomics)
+  const duplicateKeys = new Set<string>()
+  const seenKeys = new Set<string>()
+  for (const row of rows) {
+    const key = importedRowMatchKey(row)
+    if (seenKeys.has(key)) duplicateKeys.add(key)
+    seenKeys.add(key)
+  }
+  const warnings: string[] = []
+  const withoutEntrepreneur = rows.filter((row) => !row.entrepreneurName).length
+  const incomplete = calculated.filter((row) => row.status === 'incomplete').length
+  if (duplicateKeys.size) warnings.push(`Найдено дубликатов: ${duplicateKeys.size}`)
+  if (withoutEntrepreneur) warnings.push(`Без предпринимателя: ${withoutEntrepreneur}`)
+  if (incomplete) warnings.push(`Неполных строк: ${incomplete}`)
+
+  return {
+    fileName,
+    rows: rows.length,
+    costs: costs.length,
+    fbs: rows.filter((row) => row.fulfillment === 'fbs').length,
+    fbo: rows.filter((row) => row.fulfillment === 'fbo').length,
+    entrepreneurs: new Set(rows.map((row) => row.entrepreneurName).filter(Boolean)).size,
+    retainedLinks,
+    incomplete,
+    warnings,
   }
 }
 
@@ -739,12 +818,6 @@ function calculateReturnFromTariff(row: UnitEconomicsRow, returnWarehouses: Reco
   return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
 }
 
-function calculateLogisticsTotal(row: UnitEconomicsRow) {
-  const buyout = row.buyoutPct > 0 ? row.buyoutPct : 1
-  const returnPart = row.returnLogisticsRub * Math.max(0, (1 - buyout) / buyout)
-  return Math.round((row.deliveryLogisticsRub + returnPart) * Math.max(1, row.localizationIndex || 1) * 100) / 100
-}
-
 function findTulaWarehouse(warehouses: Record<string, unknown>[]) {
   return warehouses.find((warehouse) => normalizeTariffName(warehouse.warehouseName) === 'тула') || null
 }
@@ -872,7 +945,7 @@ async function applyAutomaticWbTariffs(row: UnitEconomicsRow, targets: WbTarget[
     const volume = Math.max(1, (next.lengthCm * next.widthCm * next.heightCm) / 1000)
     next.deliveryLogisticsRub = calculateTariffDelivery(volume, next.fulfillment, pickLogisticsWarehouses(payload.boxWarehouses, next.fulfillment))
     next.returnLogisticsRub = calculateTariffReturn(pickLogisticsWarehouses(payload.returnWarehouses, next.fulfillment))
-    next.logisticsTotalRub = calculateLogisticsTotal(next)
+    next.logisticsTotalRub = calculateUnitLogistics(next)
     return next
   } catch {
     return row
@@ -976,7 +1049,11 @@ async function syncWithWb(store: UnitEconomicsStore, targets: WbTarget[]) {
           row.wbBrand = card.brand
           row.wbSyncedAt = now
           if (!row.category && card.subject) row.category = card.subject
-          if (price && Number.isFinite(price.clubDiscountPct)) row.walletPct = price.clubDiscountPct
+          if (price) {
+            row.priceBeforeDiscountRub = Math.max(0, price.priceBeforeDiscountRub)
+            row.discountPct = normalizePct(price.discountPct)
+            row.walletPct = normalizePct(price.clubDiscountPct)
+          }
         }
         if (JSON.stringify(row) !== before) {
           row.updatedAt = now
@@ -1066,7 +1143,7 @@ async function syncWbTariffs(store: UnitEconomicsStore, targets: WbTarget[], for
       const returnLogistics = calculateReturnFromTariff(row, payload.returnWarehouses)
       if (returnLogistics !== null) row.returnLogisticsRub = returnLogistics
 
-      if (delivery !== null || returnLogistics !== null) row.logisticsTotalRub = calculateLogisticsTotal(row)
+      if (delivery !== null || returnLogistics !== null) row.logisticsTotalRub = calculateUnitLogistics(row)
 
       if (JSON.stringify(row) !== before) {
         row.source = 'wb'
@@ -1110,8 +1187,31 @@ export async function POST(request: NextRequest) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'XLSX файл не найден' }, { status: 400 })
     }
-    const { rows, costs } = await parseWorkbook(file)
-    const nextStore = await writeStore(rows, costs.length ? costs : store.costs)
+    if (!/\.xlsx?$/i.test(file.name)) {
+      return NextResponse.json({ error: 'Поддерживаются только файлы XLSX и XLS' }, { status: 400 })
+    }
+    if (file.size <= 0 || file.size > MAX_IMPORT_BYTES) {
+      return NextResponse.json({ error: 'Размер файла должен быть от 1 байта до 15 МБ' }, { status: 400 })
+    }
+
+    let parsed: Awaited<ReturnType<typeof parseWorkbook>>
+    try {
+      parsed = await parseWorkbook(file)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось прочитать Excel файл'
+      return NextResponse.json({ error: `Ошибка Excel: ${message}` }, { status: 400 })
+    }
+    if (parsed.rows.length === 0) {
+      return NextResponse.json({ error: 'В файле нет строк на листах «Юнитка 2.0 ФБС/ФБО»' }, { status: 400 })
+    }
+
+    const merged = mergeImportedRows(parsed.rows, store.rows)
+    const preview = buildImportPreview(file.name, merged.rows, parsed.costs, merged.retainedLinks)
+    if (request.nextUrl.searchParams.get('commit') !== '1') {
+      return NextResponse.json({ preview })
+    }
+
+    const nextStore = await writeStore(merged.rows, parsed.costs.length ? parsed.costs : store.costs)
     return jsonResponse(nextStore)
   }
 
@@ -1220,10 +1320,13 @@ export async function POST(request: NextRequest) {
     preserveWbManagedFields({ ...(body.row || {}), updatedAt: new Date().toISOString() }, existing),
     existing,
   )
-  if (!nextRowBase.wbSubject) {
-    return NextResponse.json({ error: 'Выберите WB категорию из списка тарифов' }, { status: 400 })
+  if (!nextRowBase.productName) {
+    return NextResponse.json({ error: 'Укажите название товара' }, { status: 400 })
   }
-  if (tariffOptions && !tariffOptions.categories.some((category) => category.subjectName === nextRowBase.wbSubject)) {
+  if (!nextRowBase.entrepreneurName) {
+    return NextResponse.json({ error: 'Выберите предпринимателя' }, { status: 400 })
+  }
+  if (nextRowBase.wbSubject && tariffOptions && !tariffOptions.categories.some((category) => category.subjectName === nextRowBase.wbSubject)) {
     return NextResponse.json({ error: 'WB категория должна быть выбрана из актуального списка WB' }, { status: 400 })
   }
   const nextRow = await applyAutomaticWbTariffs(nextRowBase, targets)
