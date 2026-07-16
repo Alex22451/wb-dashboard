@@ -24,3 +24,14 @@ Date: 2026-07-16
 
 - Target branch: `main`.
 - Vercel deployment is triggered automatically by the repository push.
+
+## Post-deployment warmup
+
+- Confirmed that commit `c85080f` completed its production deployment.
+- Warmed the new daily orders cache for `2026-07-09` through `2026-07-15`
+  across nine configured WB cabinets, using 61-second spacing between dates.
+- Burago and the other available cabinets completed without mapping errors.
+- WB continued to rate-limit the Altukhova cabinet; its missing daily data was not
+  replaced with stale values or zeroes.
+- Confirmed that the warmup path applies category mapping to configured admin
+  entrepreneurs and writes the same cache variant read by the daily report.
