@@ -102,8 +102,8 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
 function redisDailyKey(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
   const variantSuffix = variant === 'default' ? '' : `:${variant}`
-  if (metric === 'orders') return `wb:daily:v7:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
-  return `wb:daily:sales:v2:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  if (metric === 'orders') return `wb:daily:v8:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  return `wb:daily:sales:v3:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
 }
 
 function dailyCacheVariant(target: { useCategoryMapping?: boolean }) {
@@ -138,7 +138,7 @@ async function writeRedisDailyPayload(apiKey: string, date: string, daily: any, 
     JSON.stringify({
       date,
       fetchedAt: new Date().toISOString(),
-      source: metric === 'orders' ? 'wb-daily-payload-v3' : 'wb-daily-sales-payload-v1',
+      source: metric === 'orders' ? 'wb-daily-payload-v4' : 'wb-daily-sales-payload-v2',
       metric,
       complete: true,
       daily,
@@ -168,7 +168,7 @@ function redisReportKey(
     .sort()
     .join('|')
   const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
-  return `wb:report:${section}:${metric}:v3:${scopeHash}:${from}:${to}`
+  return `wb:report:${section}:${metric}:v4:${scopeHash}:${from}:${to}`
 }
 
 async function readRedisReportResponse(
