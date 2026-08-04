@@ -4,6 +4,26 @@ This file is the persistent operating agreement for work in this repository.
 Read it before analyzing or changing the project. The user's newest explicit
 instruction for a task may refine these rules.
 
+## 0. Orchestra Pilot
+
+- Use the global `orchestrate-project-work` skill for substantial changes.
+- The root agent owns decisions, integration, release, and final claims.
+- Classify every implementation task as `R0` through `R4` before editing.
+- R2 changes require an independent verifier that did not implement the change.
+- R3 changes also require a security/database/production risk review and a real
+  post-deployment smoke check tied to the intended commit.
+- R4 actions always require the user's exact confirmation. In this repository,
+  R4 includes destructive data or Redis operations, API-key access or mutation,
+  permission changes, billing, disabling safeguards, force-push, and changes to
+  orchestration governance in `AGENTS.md`, `.codex/**`, `.github/workflows/**`,
+  `.github/codex/**`, or `.github/CODEOWNERS`.
+- Prefer read-only parallel exploration. Use one writer per file or isolated
+  worktrees with disjoint ownership.
+- A subagent conclusion is not evidence. The root agent must inspect raw diffs,
+  command results, API completeness, remote SHA, and deployment status itself.
+- Material final claims use `VERIFIED`, `OBSERVED`, `INFERRED`, `UNVERIFIED`, or
+  `FAILED`. Do not say "done" while a required claim is unverified.
+
 ## 1. Permission And Scope
 
 - Do not change any project section without explicit permission from the user.
@@ -100,23 +120,29 @@ instruction for a task may refine these rules.
 
 - After the user authorizes a task, commits, pushes, and deployments may be made
   without requesting additional approval.
-- Choose direct `main` delivery or a branch and pull request according to risk and
-  repository context. Prefer a reviewable branch for high-risk or broad changes.
+- R0-R1 may use direct `main` delivery when the diff is narrow and reversible.
+- R2-R3 should use a branch and pull request, required CI, independent review,
+  and automatic merge after all gates pass. The root agent may merge and deploy
+  without another routine approval.
 - Before risky work, identify a known good commit that can serve as the rollback
   point. Normal Git history is sufficient for routine changes; use a branch or tag
   when the risk warrants a stronger marker.
 - Commit only intended task files. Do not include unrelated reports or local files.
 - Vercel does not need to be checked after every push. Check it when requested or
-  when deployment risk, production impact, or a previous failure makes it useful.
+  for every R3 production change. Verify the deployment belongs to the intended
+  commit and run the affected production scenario, not only an HTTP health check.
 - If a production deployment fails, diagnose, fix, and redeploy. Do not default to
   rollback unless the failure causes an outage, data risk, or cannot be fixed safely.
 
 ## 9. Reporting
 
 - After a completed implementation task, provide a short report containing the
-  changed behavior, important files, logic verification, tests run, commit, and
+  objective, acceptance criteria, risk tier, assigned roles, changed behavior,
+  important files, exact verification commands, verifier verdict, commit, and
   deployment status when applicable.
 - Store durable reports under `docs/`. Use a clear dated filename and avoid
   duplicating a report when an existing task report can be updated.
 - Reports must describe known limitations and unresolved discrepancies.
+- Reports for R2-R4 include a compact claims ledger mapping material claims to
+  evidence and status. Use `docs/reports/TEMPLATE.md` as the starting structure.
 - Never include API keys, credentials, access tokens, or other secrets in reports.

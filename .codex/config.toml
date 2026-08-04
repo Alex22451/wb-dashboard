@@ -1,0 +1,3 @@
+[agents.wb_data_verifier]
+description = "Independent verifier for WB API completeness, category mapping, calculations, and cache behavior."
+config_file = "./agents/wb_data_verifier.toml"

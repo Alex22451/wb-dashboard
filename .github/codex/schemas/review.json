@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings", "claims", "missing_gates"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "PASS_WITH_RISKS", "FAIL"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "title", "details", "location"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+          },
+          "title": { "type": "string" },
+          "details": { "type": "string" },
+          "location": { "type": "string" }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "status", "evidence"],
+        "properties": {
+          "claim": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["VERIFIED", "OBSERVED", "INFERRED", "UNVERIFIED", "FAILED"]
+          },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "missing_gates": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
