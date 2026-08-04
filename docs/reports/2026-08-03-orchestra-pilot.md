@@ -2,7 +2,7 @@
 
 Date: 2026-08-03
 Risk: R4 for credential containment and governance; R3 for release automation
-Status: BLOCKED
+Status: PARTIAL RELEASE; NAMED-AGENT RUNTIME BLOCKED
 
 Release exception (2026-08-04): the user explicitly directed that existing
 credentials must not be revoked, replaced, or reconnected and that deployments
@@ -32,7 +32,7 @@ remote CI and cloud review claims remain `UNVERIFIED`.
 - Architecture and truth controls: independent architecture and evidence agents.
 - Independent verifier: `orchestra_verifier_final`.
 - Security reviewer: `orchestra_security_final`.
-- Release operator: not started because release gates are not satisfied.
+- Release operator: root thread using the user-approved legacy Git workflow.
 
 ## Changes
 
@@ -40,8 +40,9 @@ remote CI and cloud review claims remain `UNVERIFIED`.
   skill, and execpolicy controls.
 - Added project-specific WB data verifier configuration and persistent project
   rules.
-- Added deterministic GitHub quality gates and a schema-constrained Codex review
-  whose check fails unless the exact verdict is `PASS`.
+- The full local branch adds deterministic GitHub quality gates and a
+  schema-constrained Codex review. The legacy-compatible remote release omits
+  both workflow files because the existing PAT lacks `workflow` scope.
 - Added PR/report templates, governance `CODEOWNERS`, and the operating runbook.
 - Removed a legacy local rules file that contained plaintext credentials after
   the user's explicit R4 confirmation. No secret value was copied into this report.
@@ -64,7 +65,7 @@ Data or schema impact: none.
 | Basic Codex runtime | isolated `codex exec` response | OBSERVED: exit 0 |
 | Named child runtime | isolated explorer delegation | FAILED: no child thread was created |
 | Remote CI | GitHub Actions run | UNVERIFIED: workflow not published |
-| Production | deployment-to-SHA and affected smoke | UNVERIFIED: not released |
+| Production | deployment `5744454102` for SHA `971ec2c` plus smoke | VERIFIED: success, page and auth endpoint respond |
 
 Initial verifier verdict: FAIL. Final local remediation verdict: PASS.
 
@@ -98,17 +99,18 @@ review gate now requires every claim in a `PASS` result to be `VERIFIED`.
 | R4 command policy has no bypass | UNVERIFIED | Reviewed bypasses fixed; prefix policy is not a complete security boundary |
 | Exposed credentials are invalid | UNVERIFIED | User retained the existing credentials; no rotation evidence |
 | GitHub CI and branch protection work | UNVERIFIED | No remote workflow run or protection evidence |
-| Remote contains the pilot | UNVERIFIED | Working tree only |
-| Production serves the pilot commit | UNVERIFIED | No deployment performed |
+| Remote contains the compatible pilot | VERIFIED | Remote `main` equals `971ec2c29d9112eb4098c7f1581f0d32a788a377` |
+| Production serves the compatible pilot commit | VERIFIED | Deployment `5744454102`, status `success`, SHA `971ec2c`; production smoke passed |
 
 ## Delivery
 
-- Branch: `codex/orchestra-pilot` (local until release blockers are closed).
-- Pull request: pending.
-- Commit SHA: recorded in Git history and the final task response; it is not
-  embedded here because changing this file changes that SHA.
-- CI run: pending.
-- Deployment ID: pending.
+- Delivery: direct fast-forward to `main` under the user-approved legacy scheme.
+- Full local branch: `codex/orchestra-pilot` (contains the two unpublished workflows).
+- Compatible release commit: `971ec2c29d9112eb4098c7f1581f0d32a788a377`.
+- Pull request: not used by explicit legacy-scheme instruction.
+- CI run: none; workflow files were not accepted by the existing PAT.
+- Deployment ID: `5744454102`; status ID `16336414714`; state `success`.
+- Production URL: `https://svodkasobag.vercel.app`.
 - Rollback point: `35f5de50591e5cbd9165d28ba6f6f932a92e481f`.
 
 ## Limitations And Blockers
@@ -117,7 +119,7 @@ review gate now requires every claim in a `PASS` result to be `VERIFIED`.
   2026-08-04 instruction to preserve the old deployment mechanism.
 - Resolve or obtain a verified Codex child-thread runtime before describing named
   model routing as active.
-- Connect a safe GitHub credential or GitHub Connector, publish through a PR, and
-  verify real checks, branch protection, auto-merge, deployment SHA, and smoke.
+- The two workflow files remain only on `codex/orchestra-pilot`; publishing them
+  would require a credential with GitHub `workflow` scope, which the user declined.
 - Configure a separate `OPENAI_API_KEY` and `CODEX_REVIEW_ENABLED=true` before
   treating cloud Codex review as active.
