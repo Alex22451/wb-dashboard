@@ -102,8 +102,8 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
 function redisDailyKey(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
   const variantSuffix = variant === 'default' ? '' : `:${variant}`
-  if (metric === 'orders') return `wb:daily:v9:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
-  return `wb:daily:sales:v4:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  if (metric === 'orders') return `wb:daily:v10:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
+  return `wb:daily:sales:v5:${apiKeyFingerprint(apiKey)}:${date}${variantSuffix}`
 }
 
 function dailyCacheVariant(target: { useCategoryMapping?: boolean }) {
@@ -168,7 +168,7 @@ function redisReportKey(
     .sort()
     .join('|')
   const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
-  return `wb:report:${section}:${metric}:v5:${scopeHash}:${from}:${to}`
+  return `wb:report:${section}:${metric}:v6:${scopeHash}:${from}:${to}`
 }
 
 async function readRedisReportResponse(

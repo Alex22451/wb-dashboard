@@ -32,17 +32,17 @@ test('regular blankets map identically for any entrepreneur brand', () => {
   assert.deepEqual(findSubjectTypes('Пледы'), ['плед', 'пледы', 'плед флисовый'])
 })
 
-test('Burago photo-session accessory subjects map to photo backgrounds', () => {
-  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессий'), ['фотофоны'])
-  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессии'), ['фотофоны'])
+test('Burago photo-session accessory subjects keep their own report category', () => {
+  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессий'), ['аксессуары для фотосессии'])
+  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессии'), ['аксессуары для фотосессии'])
   assert.equal(
     mapWbOrderToProductKey('Аксессуары для фотосессий', 'Фотофон_150х100', 'Бренд Бураго'),
-    'фотофоны 150х100',
+    'аксессуары для фотосессии 150х100',
   )
 })
 
-test('poster and photo-background subjects map to the existing photo-background type', () => {
-  assert.equal(mapWbOrderToType('Постеры', 'Постер_60х90', 'Бренд Бураго'), 'фотофоны')
+test('posters and photo backgrounds remain separate report categories', () => {
+  assert.equal(mapWbOrderToType('Постеры', 'Постер_60х90', 'Бренд Бураго'), 'постеры')
   assert.equal(mapWbOrderToType('Фотофон', 'Фотофон_100х150', 'Бренд Бураго'), 'фотофоны')
   assert.equal(mapWbOrderToType('Фотофоны', 'Фотофон_100х150', 'Бренд Бураго'), 'фотофоны')
   assert.equal(mapWbOrderToType('Неизвестная категория', 'Фотофон_100х150', 'Бренд Бураго'), null)
