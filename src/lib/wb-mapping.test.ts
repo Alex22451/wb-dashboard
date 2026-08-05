@@ -31,3 +31,19 @@ test('regular blankets map identically for any entrepreneur brand', () => {
   assert.equal(mapWbOrderToType('Пледы', 'Плед_150х200', 'Бренд другого ИП'), 'плед')
   assert.deepEqual(findSubjectTypes('Пледы'), ['плед', 'пледы', 'плед флисовый'])
 })
+
+test('Burago photo-session accessory subjects map to photo backgrounds', () => {
+  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессий'), ['фотофоны'])
+  assert.deepEqual(findSubjectTypes('Аксессуары для фотосессии'), ['фотофоны'])
+  assert.equal(
+    mapWbOrderToProductKey('Аксессуары для фотосессий', 'Фотофон_150х100', 'Бренд Бураго'),
+    'фотофоны 150х100',
+  )
+})
+
+test('poster and photo-background subjects map to the existing photo-background type', () => {
+  assert.equal(mapWbOrderToType('Постеры', 'Постер_60х90', 'Бренд Бураго'), 'фотофоны')
+  assert.equal(mapWbOrderToType('Фотофон', 'Фотофон_100х150', 'Бренд Бураго'), 'фотофоны')
+  assert.equal(mapWbOrderToType('Фотофоны', 'Фотофон_100х150', 'Бренд Бураго'), 'фотофоны')
+  assert.equal(mapWbOrderToType('Неизвестная категория', 'Фотофон_100х150', 'Бренд Бураго'), null)
+})
