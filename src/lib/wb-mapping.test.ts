@@ -47,3 +47,12 @@ test('posters and photo backgrounds remain separate report categories', () => {
   assert.equal(mapWbOrderToType('Фотофоны', 'Фотофон_100х150', 'Бренд Бураго'), 'фотофоны')
   assert.equal(mapWbOrderToType('Неизвестная категория', 'Фотофон_100х150', 'Бренд Бураго'), null)
 })
+
+test('pencil cases keep their own report category', () => {
+  assert.deepEqual(findSubjectTypes('Пеналы'), ['пеналы'])
+  assert.equal(mapWbOrderToType('Пеналы', 'Пенал_20х5', 'Бренд Бураго'), 'пеналы')
+  assert.equal(
+    mapWbOrderToProductKey('Пеналы школьные', 'Пенал_20х5', 'Бренд Бураго'),
+    'пеналы 20х5',
+  )
+})

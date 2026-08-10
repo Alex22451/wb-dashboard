@@ -337,8 +337,8 @@ function sleep(ms: number) {
 const DAILY_REQUEST_BATCH_SIZE = 3
 const DAILY_REQUEST_BATCH_PAUSE_MS = 61000
 const DAILY_REQUEST_RETRY_PAUSE_MS = 61000
-const DAILY_BROWSER_CACHE_VERSION = 'v13'
-const REPORT_BROWSER_CACHE_VERSION = 'v5'
+const DAILY_BROWSER_CACHE_VERSION = 'v14'
+const REPORT_BROWSER_CACHE_VERSION = 'v6'
 const DAILY_TABLE_ROW_HOVER = 'transition-colors hover:bg-sky-50/70 hover:[&>td]:shadow-[inset_0_0_0_9999px_rgba(14,165,233,0.10)] dark:hover:bg-sky-950/20 dark:hover:[&>td]:shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.10)]'
 
 function nextMoscowWarmupIso() {

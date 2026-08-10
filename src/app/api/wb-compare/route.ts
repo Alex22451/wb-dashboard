@@ -129,6 +129,7 @@ const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
   { subject: 'Колышки для палаток', types: ['колышки для пляжных ковриков'] },
   // "Брелоки" → mostly ремувки in this business, but also actual брелоки possible
   { subject: 'Брелоки', types: ['ремувки', 'брелоки'] },
+  { subject: 'Пеналы', types: ['пеналы'] },
   { subject: 'Гобелены', types: ['гобелен', 'фотофоны'] },
   { subject: 'Аксессуары для фотосессий', types: ['аксессуары для фотосессии'] },
   { subject: 'Аксессуары для фотосессии', types: ['аксессуары для фотосессии'] },
