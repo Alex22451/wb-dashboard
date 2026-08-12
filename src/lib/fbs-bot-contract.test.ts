@@ -12,9 +12,17 @@ import {
 import {
   DASHBOARD_TABS_PREFERENCES_VERSION,
   normalizeDashboardTabPreferences,
+  OPTIONAL_DASHBOARD_TAB_IDS,
+  updateDashboardTabPreferences,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './dashboard-tab-preferences.ts'
+import {
+  FbsBotStatusClientError,
+  toSafeFbsBotStatusErrorMessage,
+// Node's native TypeScript runner requires the explicit extension.
+// @ts-expect-error TS5097 is intentional for this standalone test command.
+} from './fbs-bot-status-client.ts'
 
 const classifyItem = {
   requestId: 'order-123',
@@ -205,4 +213,31 @@ test('non-admin preferences strip every admin-only tab', () => {
     visibleTabs: ['daily'],
     visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
   })
+})
+
+test('non-admin tab updates normalize the full current list before persistence', () => {
+  assert.deepEqual(updateDashboardTabPreferences(
+    OPTIONAL_DASHBOARD_TAB_IDS,
+    'daily',
+    true,
+    false,
+  ), {
+    visibleTabs: ['daily', 'production', 'supply', 'monthly', 'ads', 'growth'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
+})
+
+test('client status errors expose only fixed localized messages', () => {
+  assert.equal(
+    toSafeFbsBotStatusErrorMessage(new FbsBotStatusClientError('forbidden')),
+    'Недостаточно прав для просмотра статуса FBS-бота.',
+  )
+  assert.equal(
+    toSafeFbsBotStatusErrorMessage(new FbsBotStatusClientError('invalid_response')),
+    'Сервер вернул некорректный статус FBS-бота.',
+  )
+  assert.equal(
+    toSafeFbsBotStatusErrorMessage(new SyntaxError('Unexpected token: sensitive response body')),
+    'Не удалось обновить статус FBS-бота.',
+  )
 })

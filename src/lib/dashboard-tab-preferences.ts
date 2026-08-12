@@ -59,3 +59,19 @@ export function normalizeDashboardTabPreferences(
     visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
   }
 }
+
+export function updateDashboardTabPreferences(
+  currentTabs: readonly OptionalDashboardTabId[],
+  tabId: OptionalDashboardTabId,
+  enabled: boolean,
+  isAdmin: boolean,
+): DashboardTabPreferences {
+  const next = enabled
+    ? [...new Set([...currentTabs, tabId])]
+    : currentTabs.filter(tab => tab !== tabId)
+
+  return normalizeDashboardTabPreferences({
+    visibleTabs: next,
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  }, isAdmin)
+}

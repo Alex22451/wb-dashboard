@@ -65,10 +65,10 @@ import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { calculateUnitEconomics, calculateUnitLogistics } from '@/lib/unit-economics'
 import {
-  DASHBOARD_TABS_PREFERENCES_VERSION,
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
   type OptionalDashboardTabId,
+  updateDashboardTabPreferences,
 } from '@/lib/dashboard-tab-preferences'
 
 // Types
@@ -6783,16 +6783,13 @@ export default function Home() {
   }, [activeTab, authUser, isAdmin, visibleOptionalTabs])
 
   const updateVisibleTab = useCallback((tabId: OptionalTabId, enabled: boolean) => {
-    if ((tabId === 'compare' || tabId === 'unit' || tabId === 'fbsbot') && !isAdmin) return
-    const next = enabled
-      ? ([...new Set([...visibleOptionalTabs, tabId])] as OptionalTabId[])
-      : visibleOptionalTabs.filter((tab) => tab !== tabId)
-
-    setVisibleOptionalTabs(next)
-    const preferences = {
-      visibleTabs: next,
-      visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
-    }
+    const preferences = updateDashboardTabPreferences(
+      visibleOptionalTabs,
+      tabId,
+      enabled,
+      Boolean(isAdmin),
+    )
+    setVisibleOptionalTabs(preferences.visibleTabs)
     if (authUser) {
       window.localStorage.setItem(`wb-visible-tabs-${authUser.id}`, JSON.stringify(preferences))
     }

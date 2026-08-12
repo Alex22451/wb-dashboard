@@ -21,6 +21,10 @@ import {
   type FbsBotSnapshot,
   type FbsBotStatus,
 } from '@/lib/fbs-bot-contract'
+import {
+  FbsBotStatusClientError,
+  toSafeFbsBotStatusErrorMessage,
+} from '@/lib/fbs-bot-status-client'
 
 const MOSCOW_DATE_TIME = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow',
@@ -57,11 +61,6 @@ function formatMoscowTime(value: string) {
   return MOSCOW_TIME.format(new Date(value))
 }
 
-function getRequestError(status: number) {
-  if (status === 403) return 'Недостаточно прав для просмотра статуса FBS-бота.'
-  return 'Не удалось обновить статус FBS-бота.'
-}
-
 export function FbsBotTab({ active }: { active: boolean }) {
   const [snapshot, setSnapshot] = useState<FbsBotSnapshot | null | undefined>(undefined)
   const [loading, setLoading] = useState(false)
@@ -79,16 +78,20 @@ export function FbsBotTab({ active }: { active: boolean }) {
         cache: 'no-store',
         signal: controller.signal,
       })
-      if (!response.ok) throw new Error(getRequestError(response.status))
+      if (!response.ok) {
+        throw response.status === 403
+          ? new FbsBotStatusClientError('forbidden')
+          : new Error('status request failed')
+      }
 
       const parsed = FbsBotStatusResponseSchema.safeParse(await response.json())
-      if (!parsed.success) throw new Error('Сервер вернул некорректный статус FBS-бота.')
+      if (!parsed.success) throw new FbsBotStatusClientError('invalid_response')
 
       setSnapshot(parsed.data.snapshot)
       setRequestError(null)
     } catch (error) {
       if (controller.signal.aborted) return
-      setRequestError(error instanceof Error ? error.message : 'Не удалось обновить статус FBS-бота.')
+      setRequestError(toSafeFbsBotStatusErrorMessage(error))
     } finally {
       if (requestRef.current === controller) {
         requestRef.current = null
