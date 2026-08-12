@@ -1,7 +1,7 @@
 # ИП Зубахина: автономный FBS-бот
 
-Дата: 2026-08-12  
-Статус: утверждено пользователем  
+Дата: 2026-08-12
+Статус: утверждено пользователем
 Проекты: новый `wb-fbs-bot-zubakhina` и ограниченная интеграция с `wb-dashboard`
 
 ## 1. Цель
@@ -305,4 +305,3 @@ WB API не предоставляет универсальный idempotency ke
 - QStash поддерживает cron-расписание, timezone и подпись сообщений: https://upstash.com/docs/qstash/features/schedules
 - Бесплатный QStash допускает 1000 сообщений в сутки, текущая схема требует около 96 плюс ограниченные ретраи: https://upstash.com/pricing/qstash
 - Официальный FBS API WB: https://dev.wildberries.ru/openapi/orders-fbs/
-
