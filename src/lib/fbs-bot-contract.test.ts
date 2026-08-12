@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  deriveFbsBotStatus,
+  FbsBotStatusResponseSchema,
   FbsBotSnapshotSchema,
   FbsClassifyRequestSchema,
   FbsClassifyResponseSchema,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-contract.ts'
+import {
+  DASHBOARD_TABS_PREFERENCES_VERSION,
+  normalizeDashboardTabPreferences,
+// Node's native TypeScript runner requires the explicit extension.
+// @ts-expect-error TS5097 is intentional for this standalone test command.
+} from './dashboard-tab-preferences.ts'
 
 const classifyItem = {
   requestId: 'order-123',
@@ -109,4 +117,92 @@ test('snapshot schema enforces collection and string bounds', () => {
     ...snapshot,
     errors: [{ ...snapshot.errors[0], reason: 'x'.repeat(501) }],
   }).success, false)
+})
+
+test('status response schema accepts only a nullable snapshot envelope', () => {
+  assert.deepEqual(FbsBotStatusResponseSchema.parse({ snapshot }), { snapshot })
+  assert.deepEqual(FbsBotStatusResponseSchema.parse({ snapshot: null }), { snapshot: null })
+  assert.equal(FbsBotStatusResponseSchema.safeParse(snapshot).success, false)
+  assert.equal(FbsBotStatusResponseSchema.safeParse({ snapshot, extra: true }).success, false)
+})
+
+test('status derivation follows operational precedence and the heartbeat boundary', () => {
+  const now = Date.parse('2026-08-12T12:30:00.000Z')
+
+  assert.equal(deriveFbsBotStatus(undefined, now, true), 'загрузка данных')
+  assert.equal(deriveFbsBotStatus(undefined, now, false), 'остановлен')
+  assert.equal(deriveFbsBotStatus(null, now), 'остановлен')
+  assert.equal(deriveFbsBotStatus({ ...snapshot, phase: 'stopped' }, now), 'остановлен')
+  assert.equal(deriveFbsBotStatus({ ...snapshot, phase: 'error' }, now), 'ошибка')
+  assert.equal(deriveFbsBotStatus({
+    ...snapshot,
+    errors: [{ ...snapshot.errors[0], blocking: true }],
+  }, now), 'ошибка')
+  assert.equal(deriveFbsBotStatus({
+    ...snapshot,
+    generatedAt: '2026-08-12T11:59:59.999Z',
+    phase: 'loading',
+    errors: [],
+  }, now), 'задержка')
+  assert.equal(deriveFbsBotStatus({
+    ...snapshot,
+    generatedAt: '2026-08-12T12:00:00.000Z',
+    phase: 'loading',
+    errors: [],
+  }, now), 'загрузка данных')
+  assert.equal(deriveFbsBotStatus({
+    ...snapshot,
+    generatedAt: '2026-08-12T12:00:00.000Z',
+    phase: 'idle',
+    errors: [],
+  }, now, true), 'загрузка данных')
+  assert.equal(deriveFbsBotStatus({
+    ...snapshot,
+    generatedAt: '2026-08-12T12:00:00.001Z',
+    phase: 'idle',
+    errors: [],
+  }, now), 'работает')
+})
+
+test('legacy admin preferences receive the FBS bot tab once', () => {
+  assert.deepEqual(normalizeDashboardTabPreferences({
+    visibleTabs: ['daily'],
+  }, true), {
+    visibleTabs: ['daily', 'unit', 'fbsbot'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
+})
+
+test('legacy browser tab arrays retain customization during migration', () => {
+  assert.deepEqual(normalizeDashboardTabPreferences(['daily'], true), {
+    visibleTabs: ['daily', 'unit', 'fbsbot'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
+})
+
+test('legacy non-admin browser arrays retain choices and drop admin tabs', () => {
+  assert.deepEqual(normalizeDashboardTabPreferences(['daily', 'unit', 'compare', 'fbsbot'], false), {
+    visibleTabs: ['daily'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
+})
+
+test('current admin preferences preserve an FBS bot opt-out', () => {
+  assert.deepEqual(normalizeDashboardTabPreferences({
+    visibleTabs: ['daily'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  }, true), {
+    visibleTabs: ['daily', 'unit'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
+})
+
+test('non-admin preferences strip every admin-only tab', () => {
+  assert.deepEqual(normalizeDashboardTabPreferences({
+    visibleTabs: ['daily', 'unit', 'compare', 'fbsbot'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  }, false), {
+    visibleTabs: ['daily'],
+    visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+  })
 })

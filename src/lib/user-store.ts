@@ -18,6 +18,7 @@ export interface UserApiKeys {
 
 export interface UserPreferences {
   visibleTabs: string[]
+  visibleTabsVersion?: number
 }
 
 export interface WbTarget {

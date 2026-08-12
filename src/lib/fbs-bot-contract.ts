@@ -85,7 +85,29 @@ export const FbsBotSnapshotSchema = z.object({
   errors: z.array(FbsBotErrorSchema).max(200),
 }).strict()
 
+export const FbsBotStatusResponseSchema = z.object({
+  snapshot: FbsBotSnapshotSchema.nullable(),
+}).strict()
+
+export type FbsBotStatus = 'работает' | 'загрузка данных' | 'задержка' | 'ошибка' | 'остановлен'
+
+const FBS_BOT_HEARTBEAT_TIMEOUT_MS = 30 * 60 * 1000
+
+export function deriveFbsBotStatus(
+  snapshot: FbsBotSnapshot | null | undefined,
+  now = Date.now(),
+  loading = false,
+): FbsBotStatus {
+  if (snapshot === undefined) return loading ? 'загрузка данных' : 'остановлен'
+  if (!snapshot || snapshot.phase === 'stopped') return 'остановлен'
+  if (snapshot.phase === 'error' || snapshot.errors.some(error => error.blocking)) return 'ошибка'
+  if (now - Date.parse(snapshot.generatedAt) > FBS_BOT_HEARTBEAT_TIMEOUT_MS) return 'задержка'
+  if (loading || snapshot.phase === 'loading') return 'загрузка данных'
+  return 'работает'
+}
+
 export type FbsClassification = z.infer<typeof FbsClassificationSchema>
 export type FbsClassifyRequest = z.infer<typeof FbsClassifyRequestSchema>
 export type FbsClassifyResponse = z.infer<typeof FbsClassifyResponseSchema>
 export type FbsBotSnapshot = z.infer<typeof FbsBotSnapshotSchema>
+export type FbsBotStatusResponse = z.infer<typeof FbsBotStatusResponseSchema>

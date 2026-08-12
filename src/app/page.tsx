@@ -30,7 +30,9 @@ import {
   User,
   Lock,
   Settings2,
+  Bot,
 } from 'lucide-react'
+import { FbsBotTab } from '@/components/fbs-bot-tab'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +64,12 @@ import {
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { calculateUnitEconomics, calculateUnitLogistics } from '@/lib/unit-economics'
+import {
+  DASHBOARD_TABS_PREFERENCES_VERSION,
+  normalizeDashboardTabPreferences,
+  OPTIONAL_DASHBOARD_TAB_IDS,
+  type OptionalDashboardTabId,
+} from '@/lib/dashboard-tab-preferences'
 
 // Types
 interface DashboardData {
@@ -677,8 +685,8 @@ function createDashboardShell(selectedIds: string[], entrepreneurs: Entrepreneur
   }
 }
 
-const OPTIONAL_TAB_IDS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'unit', 'compare'] as const
-type OptionalTabId = typeof OPTIONAL_TAB_IDS[number]
+const OPTIONAL_TAB_IDS = OPTIONAL_DASHBOARD_TAB_IDS
+type OptionalTabId = OptionalDashboardTabId
 
 const DEFAULT_VISIBLE_OPTIONAL_TABS: OptionalTabId[] = [...OPTIONAL_TAB_IDS]
 
@@ -691,6 +699,7 @@ const OPTIONAL_TAB_LABELS: Record<OptionalTabId, string> = {
   growth: 'Рост',
   unit: 'Юнит экономика',
   compare: 'API vs Excel',
+  fbsbot: 'FBS-бот',
 }
 
 interface MonthlyData {
@@ -6704,7 +6713,7 @@ export default function Home() {
   const [includeAngelina, setIncludeAngelina] = useState(false)
   const isAdmin = authUser?.role === 'admin'
   const tabEnabled = useCallback((tabId: OptionalTabId) => {
-    if ((tabId === 'compare' || tabId === 'unit') && !isAdmin) return false
+    if ((tabId === 'compare' || tabId === 'unit' || tabId === 'fbsbot') && !isAdmin) return false
     return visibleOptionalTabs.includes(tabId)
   }, [isAdmin, visibleOptionalTabs])
 
@@ -6742,59 +6751,55 @@ export default function Home() {
     if (!authUser) return
 
     const storageKey = `wb-visible-tabs-${authUser.id}`
-    const normalizeTabs = (tabs: unknown): OptionalTabId[] => {
-      if (!Array.isArray(tabs)) return DEFAULT_VISIBLE_OPTIONAL_TABS.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
-      const allowed = new Set<OptionalTabId>(OPTIONAL_TAB_IDS)
-      const normalized = [...new Set(tabs)]
-        .filter((tab): tab is OptionalTabId => typeof tab === 'string' && allowed.has(tab as OptionalTabId))
-        .filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
-      if (isAdmin && !normalized.includes('unit')) normalized.push('unit')
-      return normalized
-    }
+    const normalizeTabs = (value: unknown) => normalizeDashboardTabPreferences(value, isAdmin)
     const readLocalTabs = () => {
       try {
         const localTabs = window.localStorage.getItem(storageKey)
-        return localTabs ? normalizeTabs(JSON.parse(localTabs)) : normalizeTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
+        return normalizeTabs(localTabs ? JSON.parse(localTabs) : undefined)
       } catch {
-        return normalizeTabs(DEFAULT_VISIBLE_OPTIONAL_TABS)
+        return normalizeTabs(undefined)
       }
     }
 
     fetch('/api/user-preferences')
       .then((r) => r.ok ? r.json() : null)
       .then((json) => {
-        const serverTabs = json?.preferences?.visibleTabs
-        if (serverTabs) {
-          setVisibleOptionalTabs(normalizeTabs(serverTabs))
+        const serverPreferences = json?.preferences
+        if (serverPreferences) {
+          setVisibleOptionalTabs(normalizeTabs(serverPreferences).visibleTabs)
           return
         }
-        setVisibleOptionalTabs(readLocalTabs())
+        setVisibleOptionalTabs(readLocalTabs().visibleTabs)
       })
       .catch(() => {
-        setVisibleOptionalTabs(readLocalTabs())
+        setVisibleOptionalTabs(readLocalTabs().visibleTabs)
       })
   }, [authUser, isAdmin])
 
   useEffect(() => {
     if (!authUser) return
-    const visibleTabs = new Set(['dashboard', 'apikeys', ...visibleOptionalTabs.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))])
+    const visibleTabs = new Set(['dashboard', 'apikeys', ...visibleOptionalTabs.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit' && tab !== 'fbsbot'))])
     if (!visibleTabs.has(activeTab)) setActiveTab('dashboard')
   }, [activeTab, authUser, isAdmin, visibleOptionalTabs])
 
   const updateVisibleTab = useCallback((tabId: OptionalTabId, enabled: boolean) => {
-    if ((tabId === 'compare' || tabId === 'unit') && !isAdmin) return
+    if ((tabId === 'compare' || tabId === 'unit' || tabId === 'fbsbot') && !isAdmin) return
     const next = enabled
       ? ([...new Set([...visibleOptionalTabs, tabId])] as OptionalTabId[])
       : visibleOptionalTabs.filter((tab) => tab !== tabId)
 
     setVisibleOptionalTabs(next)
+    const preferences = {
+      visibleTabs: next,
+      visibleTabsVersion: DASHBOARD_TABS_PREFERENCES_VERSION,
+    }
     if (authUser) {
-      window.localStorage.setItem(`wb-visible-tabs-${authUser.id}`, JSON.stringify(next))
+      window.localStorage.setItem(`wb-visible-tabs-${authUser.id}`, JSON.stringify(preferences))
     }
     fetch('/api/user-preferences', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visibleTabs: next }),
+      body: JSON.stringify(preferences),
     }).catch(console.error)
   }, [authUser, isAdmin, visibleOptionalTabs])
 
@@ -7169,7 +7174,7 @@ export default function Home() {
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
-                  {OPTIONAL_TAB_IDS.filter((tabId) => isAdmin || (tabId !== 'compare' && tabId !== 'unit')).map((tabId) => (
+                  {OPTIONAL_TAB_IDS.filter((tabId) => isAdmin || (tabId !== 'compare' && tabId !== 'unit' && tabId !== 'fbsbot')).map((tabId) => (
                     <label key={tabId} className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
                       <span className="text-sm font-medium">{OPTIONAL_TAB_LABELS[tabId]}</span>
                       <Switch
@@ -7245,6 +7250,12 @@ export default function Home() {
                 <span className="hidden sm:inline">API vs Excel</span>
               </TabsTrigger>
             )}
+            {isAdmin && tabEnabled('fbsbot') && (
+              <TabsTrigger value="fbsbot" className="h-9 gap-2 px-3">
+                <Bot className="h-4 w-4" />
+                <span className="hidden sm:inline">FBS-бот</span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="apikeys" className="h-9 gap-2 px-3">
               <Key className="h-4 w-4" />
               <span className="hidden sm:inline">API Ключи</span>
@@ -7312,6 +7323,11 @@ export default function Home() {
           {tabEnabled('compare') && (
             <TabsContent value="compare">
               <WbCompareTab entrepreneurs={entrepreneurs} />
+            </TabsContent>
+          )}
+          {isAdmin && tabEnabled('fbsbot') && (
+            <TabsContent value="fbsbot">
+              <FbsBotTab active={activeTab === 'fbsbot'} />
             </TabsContent>
           )}
           <TabsContent value="apikeys">

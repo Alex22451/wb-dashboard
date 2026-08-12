@@ -1,35 +1,20 @@
 import { getCurrentUser, unauthorized } from '@/lib/auth'
+import { normalizeDashboardTabPreferences } from '@/lib/dashboard-tab-preferences'
 import { getUserPreferences, hasUserStore, saveUserPreferences } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
-
-const OPTIONAL_TABS = ['daily', 'production', 'supply', 'monthly', 'ads', 'growth', 'unit', 'compare'] as const
-const DEFAULT_VISIBLE_TABS = [...OPTIONAL_TABS]
-
-function normalizeVisibleTabs(value: unknown, isAdmin: boolean): string[] {
-  if (!Array.isArray(value)) return DEFAULT_VISIBLE_TABS.filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
-
-  const allowed = new Set<string>(OPTIONAL_TABS)
-  const result = value
-    .filter((tab): tab is string => typeof tab === 'string' && allowed.has(tab))
-    .filter((tab) => isAdmin || (tab !== 'compare' && tab !== 'unit'))
-
-  const unique = [...new Set(result)]
-  if (isAdmin && !unique.includes('unit')) unique.push('unit')
-  return unique
-}
 
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return unauthorized()
 
-  const defaults = normalizeVisibleTabs(DEFAULT_VISIBLE_TABS, user.role === 'admin')
-  if (!hasUserStore()) return NextResponse.json({ preferences: { visibleTabs: defaults } })
+  const isAdmin = user.role === 'admin'
+  if (!hasUserStore()) {
+    return NextResponse.json({ preferences: normalizeDashboardTabPreferences(undefined, isAdmin) })
+  }
 
   const stored = await getUserPreferences(user.id).catch(() => null)
   return NextResponse.json({
-    preferences: {
-      visibleTabs: normalizeVisibleTabs(stored?.visibleTabs || defaults, user.role === 'admin'),
-    },
+    preferences: normalizeDashboardTabPreferences(stored, isAdmin),
   })
 }
 
@@ -42,9 +27,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const preferences = {
-    visibleTabs: normalizeVisibleTabs(body.visibleTabs, user.role === 'admin'),
-  }
+  const preferences = normalizeDashboardTabPreferences(body, user.role === 'admin')
 
   await saveUserPreferences(user.id, preferences)
   return NextResponse.json({ preferences })
