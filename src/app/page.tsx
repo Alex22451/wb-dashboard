@@ -7248,7 +7248,7 @@ export default function Home() {
               </TabsTrigger>
             )}
             {isAdmin && tabEnabled('fbsbot') && (
-              <TabsTrigger value="fbsbot" className="h-9 gap-2 px-3">
+              <TabsTrigger value="fbsbot" aria-label="FBS-бот" className="h-9 gap-2 px-3">
                 <Bot className="h-4 w-4" />
                 <span className="hidden sm:inline">FBS-бот</span>
               </TabsTrigger>
