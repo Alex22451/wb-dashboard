@@ -1,12 +1,58 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  ARTICLE_OVERRIDES,
+  classifyFbsProduct,
   findSubjectTypes,
+  getWbMappingVersion,
   mapWbOrderToProductKey,
   mapWbOrderToType,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-mapping.ts'
+
+const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
+  ['Подушки внутренние', 'подушка внутренняя'],
+  ['Подушки декоративные', 'подушка декоративная'],
+  ['Подушки', 'подушка декоративная'],
+  ['Наволочки декоративные', 'наволочка декоративная'],
+  ['Наволочки', 'наволочка декоративная'],
+  ['Карнавальные маски', 'маски'],
+  ['Чехлы для бутылей', 'чехлы для бутылей'],
+  ['Чехлы для чемоданов', 'чехлы на чемодан'],
+  ['Фартуки кухонные', 'фартуки'],
+  ['Флаги', 'флаги'],
+  ['Коврики пляжные', 'пляжные коврики'],
+  ['Декор для одежды', 'шевроны'],
+  ['Мешки для обуви', 'мешки для обуви'],
+  ['Коврики для мыши', 'коврики для мыши'],
+  ['Колышки и скобы садовые', 'колышки для пляжных ковриков'],
+  ['Колышки для палаток', 'колышки для пляжных ковриков'],
+  ['Брелоки', 'ремувки'],
+  ['Пеналы', 'пеналы'],
+  ['Гобелены', 'гобелен'],
+  ['Аксессуары для фотосессий', 'аксессуары для фотосессии'],
+  ['Аксессуары для фотосессии', 'аксессуары для фотосессии'],
+  ['Постеры', 'постеры'],
+  ['Фотофоны', 'фотофоны'],
+  ['Фотофон', 'фотофоны'],
+  ['Коврики для намаза', 'коврики для намаза'],
+  ['Сумки пляжные', 'сумки пляжные'],
+  ['Сумки хозяйственные', 'сумки хозяйственные (шоппер)'],
+  ['Сумки-шопперы', 'сумки хозяйственные (шоппер)'],
+  ['Сумки', 'сумки пляжные'],
+  ['Скатерти', 'скатерти'],
+  ['Салфетки', 'салфетки'],
+  ['Дорожки кухонные', 'дорожки'],
+  ['Снуды', 'снуды'],
+  ['Пледы для животных', 'пледы для животных'],
+  ['Пледы', 'плед'],
+  ['Мягкие игрушки', 'мягкие игрушки'],
+  ['Игрушки антистресс', 'игрушки антистресс'],
+  ['Кольца для салфеток', 'кольца для салфеток'],
+  ['Ткань', 'ткань'],
+  ['Ткани для рукоделия', 'ткань'],
+]
 
 test('animal blankets use their specific WB category mapping', () => {
   assert.deepEqual(findSubjectTypes('Пледы для животных'), [
@@ -55,4 +101,59 @@ test('pencil cases keep their own report category', () => {
     mapWbOrderToProductKey('Пеналы школьные', 'Пенал_20х5', 'Бренд Бураго'),
     'пеналы 20х5',
   )
+})
+
+test('FBS classification preserves every current primary subject mapping', () => {
+  for (const [subject, productType] of CURRENT_PRIMARY_MAPPINGS) {
+    const result = classifyFbsProduct({ subject, article: 'обычный артикул', brand: '' })
+    assert.equal(result.kind, 'eligible', subject)
+    if (result.kind === 'eligible') assert.equal(result.productType, productType, subject)
+  }
+})
+
+test('FBS classification ignores blacklist subjects before category mapping', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Картины', article: 'Постер_60х90', brand: '' }),
+    { kind: 'ignored_blacklist' },
+  )
+})
+
+test('FBS classification blocks unknown subjects', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Совершенно новая категория', article: 'Артикул', brand: '' }),
+    { kind: 'blocked_unknown_category' },
+  )
+})
+
+test('FBS classification uses a readable default label and the approved tapestry label', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Пледы', article: 'Плед_150х200', brand: '' }),
+    { kind: 'eligible', productType: 'плед', productDisplayName: 'Плед' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Гобелены', article: 'Гобелен_100х150', brand: '' }),
+    { kind: 'eligible', productType: 'гобелен', productDisplayName: 'Гобелены' },
+  )
+})
+
+test('mapping version is a stable SHA-256 digest for unchanged mapping tables', () => {
+  const first = getWbMappingVersion()
+  assert.match(first, /^[a-f0-9]{64}$/)
+  assert.equal(getWbMappingVersion(), first)
+})
+
+test('mapping version is sensitive to the actual article override order', () => {
+  const before = getWbMappingVersion()
+  const first = ARTICLE_OVERRIDES[0]
+  const second = ARTICLE_OVERRIDES[1]
+
+  try {
+    ARTICLE_OVERRIDES[0] = second
+    ARTICLE_OVERRIDES[1] = first
+    assert.notEqual(getWbMappingVersion(), before)
+    assert.equal(getWbMappingVersion(), getWbMappingVersion())
+  } finally {
+    ARTICLE_OVERRIDES[0] = first
+    ARTICLE_OVERRIDES[1] = second
+  }
 })
