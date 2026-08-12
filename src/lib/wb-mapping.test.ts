@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  ARTICLE_OVERRIDES,
   classifyFbsProduct,
   findSubjectTypes,
   getWbMappingVersion,
@@ -139,4 +140,20 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
   const first = getWbMappingVersion()
   assert.match(first, /^[a-f0-9]{64}$/)
   assert.equal(getWbMappingVersion(), first)
+})
+
+test('mapping version is sensitive to the actual article override order', () => {
+  const before = getWbMappingVersion()
+  const first = ARTICLE_OVERRIDES[0]
+  const second = ARTICLE_OVERRIDES[1]
+
+  try {
+    ARTICLE_OVERRIDES[0] = second
+    ARTICLE_OVERRIDES[1] = first
+    assert.notEqual(getWbMappingVersion(), before)
+    assert.equal(getWbMappingVersion(), getWbMappingVersion())
+  } finally {
+    ARTICLE_OVERRIDES[0] = first
+    ARTICLE_OVERRIDES[1] = second
+  }
 })

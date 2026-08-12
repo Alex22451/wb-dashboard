@@ -382,7 +382,8 @@ function sortedMappingVersionInput() {
     .sort((a, b) => compare(a.subject, b.subject))
   const excludedSubjects = [...EXCLUDED_WB_SUBJECTS].sort(compare)
   const articleOverrides = ARTICLE_OVERRIDES
-    .map(rule => ({
+    .map((rule, index) => ({
+      index,
       subjectContains: rule.subjectContains,
       articlePattern: { source: rule.articlePattern.source, flags: rule.articlePattern.flags },
       brandPattern: rule.brandPattern
@@ -392,7 +393,6 @@ function sortedMappingVersionInput() {
       excelType: rule.excelType,
       priority: rule.priority,
     }))
-    .sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)))
   const displayOverrides = Object.entries(PRODUCT_DISPLAY_OVERRIDES)
     .sort(([a], [b]) => compare(a, b))
 
