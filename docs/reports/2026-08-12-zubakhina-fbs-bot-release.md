@@ -46,7 +46,7 @@ flowchart LR
 
 | Проверка | Команда или сценарий | Результат |
 |---|---|---|
-| Bot logic | `npm test` | VERIFIED: 299/299 |
+| Bot logic | `npm test` | VERIFIED: 300/300 |
 | Bot types/lint/build | `npx tsc --noEmit && npm run lint && npm run build` | VERIFIED |
 | Dashboard logic | `npm run test:unit` | VERIFIED: 55/55 |
 | Dashboard lint/build | `npm run lint && npm run build` | VERIFIED |
@@ -54,32 +54,52 @@ flowchart LR
 | Pilot stale mapping | planned/retry order becomes blacklisted | VERIFIED: zero WB writes |
 | Active delivery retry | attempt-2 inside active window | VERIFIED |
 | Retry crash boundary | failure on second `verified` write | VERIFIED: no third WB mutation |
-| Production smoke | admin/auth/classifier/heartbeat and one pilot order | UNVERIFIED: deployment not completed |
+| Bot production smoke | `/`, `/api/health`, unsigned `/api/qstash/cycle` | VERIFIED: `200`, `200`, `403` |
+| Signed shadow cycle | QStash -> Bot -> WB/Redis/Dashboard | VERIFIED: QStash `DELIVERED`, WB mutations `0` |
+| Scheduler | one active schedule, Moscow time | VERIFIED: `CRON_TZ=Europe/Moscow */15 * * * *` |
 
-Независимый вердикт на bot commit `d363772`: PASS от двух проверяющих, блокирующих находок нет.
+Независимый вердикт на bot commit `d363772`: PASS от двух проверяющих, блокирующих находок нет. Интеграционный патч Vercel Upstash проверен полным набором из 300 тестов.
+
+## Результат первого shadow-цикла
+
+| Состояние | Количество |
+|---|---:|
+| Новые заказы WB | 84 |
+| Пригодны для группировки | 64 |
+| Исключены blacklist | 15 |
+| Заблокированы из-за ткани | 5 |
+| Созданные поставки | 0 |
+| WB-мутации | 0 |
+
+Heartbeat опубликован на Dashboard. Пять ошибок `blocked_unknown_fabric` выведены как блокирующие; скрытого продолжения обработки таких заказов нет. Среди свежих данных найдено 55 гобеленов, из них 45 имеют подтверждённую совместимость с СЦ Курск (`officeId=210`).
 
 ## Реестр утверждений
 
 | Утверждение | Статус | Доказательство |
 |---|---|---|
-| Логика бота соответствует согласованным ограничениям | VERIFIED | 299 тестов и два независимых PASS |
+| Логика бота соответствует согласованным ограничениям | VERIFIED | 300 тестов и два независимых PASS |
 | Dashboard-контракт и admin-only UI работают локально | VERIFIED | 55 тестов, build и предыдущий desktop/mobile smoke |
-| Dashboard feature-ветка находится на GitHub | VERIFIED | remote branch `feature/zubakhina-fbs-bot` |
-| Bot repository находится на GitHub | UNVERIFIED | приватный repository ещё не создан |
-| Production обслуживает нужный commit | UNVERIFIED | Vercel deployment ещё не создан |
+| Dashboard feature доставлена в `main` | VERIFIED | PR #1, merge commit `f8c10df` |
+| Bot repository находится на GitHub | VERIFIED | private `Alex22451/wb-fbs-bot-zubakhina` |
+| Production обслуживает нужный bot commit | VERIFIED | `772d70c`, deployment `dpl_HRfqe5zYvuMzh8BRXn8UHux1ZN9E` |
+| Dashboard и bot используют один rotating shared secret | VERIFIED | signed status publication без `dashboard_status_failed` |
 | Реальная WB-поставка создана ботом | UNVERIFIED | мутации намеренно выключены |
 
 ## Доставка
 
-- Dashboard branch: `feature/zubakhina-fbs-bot`.
-- Dashboard commit: `9d933a4`.
-- Bot commit: `d363772`.
+- Dashboard PR: `https://github.com/Alex22451/wb-dashboard/pull/1`.
+- Dashboard production commit: `f8c10df`.
+- Dashboard deployment: `dpl_93KCBHtGmgrmqt7MYxFM74VQzinL`, alias `https://svodkasobag.vercel.app`.
+- Bot repository: `https://github.com/Alex22451/wb-fbs-bot-zubakhina`.
+- Bot production commit: `772d70c` (`f67223c` содержит функциональный Upstash-патч).
+- Bot deployment: `dpl_HRfqe5zYvuMzh8BRXn8UHux1ZN9E`, alias `https://wb-fbs-bot-zubakhina.vercel.app`.
+- Upstash resources: `zubakhina-fbs-redis` и `zubakhina-fbs-qstash`, оба `Available`, free plan.
+- Scheduler ID: `zubakhina-fbs-cycle-v1`, один активный экземпляр без дублей.
 - Rollback Dashboard: `dafd88ab53cd50074c939656bbc6c8920e931620`.
-- PR, CI, Vercel deployment ID и production smoke будут добавлены только после получения фактических подтверждений.
 
 ## Ограничения и блокеры
 
-- Физический маршрут сдачи нельзя вывести из `warehouseId`, `officeId` или недокументированных числовых `deliveryType`. Нужен подтверждённый склад/СЦ и список допустимых `officeId`; ПВЗ требует отдельной логики коробов.
-- GitHub push доступен по существующей схеме, но для создания приватного bot repository и PR требуется отдельно разрешённое использование сохранённых credentials либо ручное создание этих объектов.
-- До настройки Redis, QStash, одинакового shared secret и production env бот не может пройти read-only preflight.
-- До успешных shadow preflight/smoke и выбора точного гобеленового `orderId` включение WB-мутаций запрещено.
+- Подтверждённый маршрут пилота: склад продавца `776735` -> СЦ Курск `officeId=210`. Другие office ID автоматически не разрешаются.
+- Локальный `preflight` не может скачать из Vercel значения типа `Sensitive`; поэтому production-конфигурация проверена через подписанный QStash-вызов в реальной среде.
+- Кандидат пилота: заказ `5469938841`, `Гобелены`, артикул содержит `ДЮСПО`, склад `776735`, СЦ `210`, свежий статус `new/waiting`.
+- До отдельного точного подтверждения на заказ `5469938841` режим остаётся `shadow`, `FBS_MUTATIONS_ENABLED=false`, `FBS_ASSEMBLY_SCOPE=disabled`.
