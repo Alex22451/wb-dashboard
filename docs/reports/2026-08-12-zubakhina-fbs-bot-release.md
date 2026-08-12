@@ -46,7 +46,7 @@ flowchart LR
 
 | Проверка | Команда или сценарий | Результат |
 |---|---|---|
-| Bot logic | `npm test` | VERIFIED: 300/300 |
+| Bot logic | `npm test` | VERIFIED: 302/302 |
 | Bot types/lint/build | `npx tsc --noEmit && npm run lint && npm run build` | VERIFIED |
 | Dashboard logic | `npm run test:unit` | VERIFIED: 55/55 |
 | Dashboard lint/build | `npm run lint && npm run build` | VERIFIED |
@@ -58,7 +58,7 @@ flowchart LR
 | Signed shadow cycle | QStash -> Bot -> WB/Redis/Dashboard | VERIFIED: QStash `DELIVERED`, WB mutations `0` |
 | Scheduler | one active schedule, Moscow time | VERIFIED: `CRON_TZ=Europe/Moscow */15 * * * *` |
 
-Независимый вердикт на bot commit `d363772`: PASS от двух проверяющих, блокирующих находок нет. Интеграционный патч Vercel Upstash проверен полным набором из 300 тестов.
+Независимый вердикт на bot commit `d363772`: PASS от двух проверяющих, блокирующих находок нет. Production-патчи проверены полным набором из 302 тестов.
 
 ## Результат первого shadow-цикла
 
@@ -73,17 +73,29 @@ flowchart LR
 
 Heartbeat опубликован на Dashboard. Пять ошибок `blocked_unknown_fabric` выведены как блокирующие; скрытого продолжения обработки таких заказов нет. Среди свежих данных найдено 55 гобеленов, из них 45 имеют подтверждённую совместимость с СЦ Курск (`officeId=210`).
 
+## Результат single-gobelin пилота
+
+- Создана одна поставка `WB-GI-264226447`; повторная поставка не создавалась.
+- В существующую поставку добавлен только заказ `5469938841`.
+- Свежая проверка WB: `supplierStatus=confirm`, состав поставки `[5469938841]`, `done=false`, `destinationOfficeId=210`, `cargoType=1`.
+- Create и assignment journal имеют состояние `verified`; поставка `open_verified`, заказ `assigned_verified`.
+- Передача в доставку не выполнялась.
+- После пилота production возвращён в `shadow`, mutations выключены, pilot ID удалён; контрольный shadow-цикл не создал новых журналов.
+
+Первый вызов выявил реальный WB-контракт: новая пустая поставка возвращает `cargoType=0` до добавления первого заказа. Бот безопасно остановился, не создал дубль и оставил заказ новым. Коммит `74e5816` трактует ноль как незаполненное значение только при доказанной пустой поставке; настоящее несовпадающее значение, например `cargoType=2`, по-прежнему блокирует операцию.
+
 ## Реестр утверждений
 
 | Утверждение | Статус | Доказательство |
 |---|---|---|
-| Логика бота соответствует согласованным ограничениям | VERIFIED | 300 тестов и два независимых PASS |
+| Логика бота соответствует согласованным ограничениям | VERIFIED | 302 теста и два независимых PASS |
 | Dashboard-контракт и admin-only UI работают локально | VERIFIED | 55 тестов, build и предыдущий desktop/mobile smoke |
 | Dashboard feature доставлена в `main` | VERIFIED | PR #1, merge commit `f8c10df` |
 | Bot repository находится на GitHub | VERIFIED | private `Alex22451/wb-fbs-bot-zubakhina` |
-| Production обслуживает нужный bot commit | VERIFIED | `772d70c`, deployment `dpl_HRfqe5zYvuMzh8BRXn8UHux1ZN9E` |
+| Production обслуживает нужный bot commit | VERIFIED | `74e5816`, deployment `dpl_E2SdAsJaf2NEjBLGQgt3v5SLyvdQ` |
 | Dashboard и bot используют один rotating shared secret | VERIFIED | signed status publication без `dashboard_status_failed` |
-| Реальная WB-поставка создана ботом | UNVERIFIED | мутации намеренно выключены |
+| Реальная WB-поставка создана ботом | VERIFIED | `WB-GI-264226447`, один подтверждённый заказ |
+| Реальная передача в доставку выполнена | UNVERIFIED | не входила в пилот и осталась выключена |
 
 ## Доставка
 
@@ -91,8 +103,8 @@ Heartbeat опубликован на Dashboard. Пять ошибок `blocked_
 - Dashboard production commit: `f8c10df`.
 - Dashboard deployment: `dpl_93KCBHtGmgrmqt7MYxFM74VQzinL`, alias `https://svodkasobag.vercel.app`.
 - Bot repository: `https://github.com/Alex22451/wb-fbs-bot-zubakhina`.
-- Bot production commit: `772d70c` (`f67223c` содержит функциональный Upstash-патч).
-- Bot deployment: `dpl_HRfqe5zYvuMzh8BRXn8UHux1ZN9E`, alias `https://wb-fbs-bot-zubakhina.vercel.app`.
+- Bot production commit: `74e5816`.
+- Bot deployment после возврата в shadow: `dpl_E2SdAsJaf2NEjBLGQgt3v5SLyvdQ`, alias `https://wb-fbs-bot-zubakhina.vercel.app`.
 - Upstash resources: `zubakhina-fbs-redis` и `zubakhina-fbs-qstash`, оба `Available`, free plan.
 - Scheduler ID: `zubakhina-fbs-cycle-v1`, один активный экземпляр без дублей.
 - Rollback Dashboard: `dafd88ab53cd50074c939656bbc6c8920e931620`.
@@ -101,5 +113,5 @@ Heartbeat опубликован на Dashboard. Пять ошибок `blocked_
 
 - Подтверждённый маршрут пилота: склад продавца `776735` -> СЦ Курск `officeId=210`. Другие office ID автоматически не разрешаются.
 - Локальный `preflight` не может скачать из Vercel значения типа `Sensitive`; поэтому production-конфигурация проверена через подписанный QStash-вызов в реальной среде.
-- Кандидат пилота: заказ `5469938841`, `Гобелены`, артикул содержит `ДЮСПО`, склад `776735`, СЦ `210`, свежий статус `new/waiting`.
-- До отдельного точного подтверждения на заказ `5469938841` режим остаётся `shadow`, `FBS_MUTATIONS_ENABLED=false`, `FBS_ASSEMBLY_SCOPE=disabled`.
+- Пилотный заказ `5469938841` успешно поставлен на сборку в `WB-GI-264226447`; его повторная обработка запрещена состоянием и журналом.
+- Текущий режим: `shadow`, `FBS_MUTATIONS_ENABLED=false`, `FBS_ASSEMBLY_SCOPE=disabled`.
