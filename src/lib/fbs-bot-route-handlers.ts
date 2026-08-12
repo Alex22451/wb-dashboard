@@ -111,8 +111,7 @@ export async function handleFbsBotStatusGet(
     return json({ error: 'Internal server error' }, 500)
   }
 
-  if (!user) return json({ error: 'Требуется вход в аккаунт' }, 401)
-  if (user.role !== 'admin') return json({ error: 'Недостаточно прав' }, 403)
+  if (user?.role !== 'admin') return json({ error: 'Недостаточно прав' }, 403)
 
   try {
     return json({ snapshot: await dependencies.loadSnapshot() })

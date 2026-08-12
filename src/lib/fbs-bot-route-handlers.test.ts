@@ -128,12 +128,12 @@ test('status ingest acknowledges a stored sanitized snapshot with no-store', asy
   assert.deepEqual(await response.json(), { ok: true })
 })
 
-test('public status handler enforces anonymous and non-admin boundaries', async () => {
+test('public status handler returns 403 for every non-admin result', async () => {
   const anonymous = await handleFbsBotStatusGet({
     getCurrentUser: async () => null,
     loadSnapshot: async () => snapshot,
   })
-  await assertStatus(anonymous, 401)
+  await assertStatus(anonymous, 403)
 
   const nonAdmin = await handleFbsBotStatusGet({
     getCurrentUser: async () => ({ role: 'user' }),

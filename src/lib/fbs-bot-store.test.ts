@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { FbsBotSnapshot } from './fbs-bot-contract.ts'
 import {
   createFbsBotStore,
+  FBS_BOT_SNAPSHOT_KEY,
   FbsBotFutureSnapshotError,
   FbsBotStaleSnapshotError,
   FbsBotStoreError,
@@ -44,25 +45,46 @@ test('load rejects missing Redis configuration without issuing a command', async
   assert.equal(commandCalled, false)
 })
 
-test('load returns null only when GET misses and Redis answers PING', async () => {
-  const calls: string[] = []
+test('load returns null only for the single-EVAL missing sentinel', async () => {
+  let calls = 0
   const store = createFbsBotStore({
     hasConfig: () => true,
     command: async (command) => {
-      calls.push(String(command[0]))
-      return command[0] === 'PING' ? 'PONG' : null
+      calls += 1
+      assert.equal(command[0], 'EVAL')
+      assert.equal(typeof command[1], 'string')
+      assert.equal(command[2], 1)
+      assert.equal(command[3], FBS_BOT_SNAPSHOT_KEY)
+      assert.equal(command.length, 4)
+      return '__FBS_SNAPSHOT_MISSING__'
     },
   })
 
   assert.equal(await store.load(), null)
-  assert.deepEqual(calls, ['GET', 'PING'])
+  assert.equal(calls, 1)
 })
 
-test('load distinguishes an unreachable Redis from a missing key', async () => {
-  const store = createFbsBotStore({ hasConfig: () => true, command: async () => null })
-  await assert.rejects(store.load(), (error: unknown) => (
-    error instanceof FbsBotStoreError && error.code === 'unavailable'
-  ))
+test('load maps null and unexpected Redis responses to unavailable', async () => {
+  for (const result of [null, 42]) {
+    const store = createFbsBotStore({ hasConfig: () => true, command: async () => result })
+    await assert.rejects(store.load(), (error: unknown) => (
+      error instanceof FbsBotStoreError && error.code === 'unavailable'
+    ))
+  }
+})
+
+test('load returns a valid snapshot from the single EVAL response', async () => {
+  const snapshot = makeSnapshot()
+  const store = createFbsBotStore({
+    hasConfig: () => true,
+    command: async (command) => {
+      assert.equal(command[0], 'EVAL')
+      assert.equal(command[3], FBS_BOT_SNAPSHOT_KEY)
+      return JSON.stringify(snapshot)
+    },
+  })
+
+  assert.deepEqual(await store.load(), snapshot)
 })
 
 test('load surfaces invalid JSON and invalid stored schemas as corruption', async () => {

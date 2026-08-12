@@ -4,6 +4,7 @@ import { FbsBotSnapshotSchema, type FbsBotSnapshot } from './fbs-bot-contract.ts
 import { hasRedisConfig, redisCommand } from './redis-cache.ts'
 
 export const FBS_BOT_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:latest'
+const FBS_BOT_SNAPSHOT_MISSING = '__FBS_SNAPSHOT_MISSING__'
 
 type StoreErrorCode = 'unconfigured' | 'unavailable' | 'corrupt' | 'unexpected_result'
 type StoreCommand = (command: unknown[]) => Promise<unknown>
@@ -174,6 +175,12 @@ redis.call('SET', KEYS[1], ARGV[1])
 return 1
 `
 
+const LOAD_SNAPSHOT_SCRIPT = `
+local value = redis.call('GET', KEYS[1])
+if not value then return '${FBS_BOT_SNAPSHOT_MISSING}' end
+return value
+`
+
 function canonicalizeSnapshot(input: unknown): FbsBotSnapshot {
   const snapshot = FbsBotSnapshotSchema.parse(input)
   const iso = (value: string) => new Date(value).toISOString()
@@ -215,13 +222,9 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
 
   async function load(): Promise<FbsBotSnapshot | null> {
     if (!configured()) throw new FbsBotStoreError('unconfigured')
-    const raw = await run(['GET', FBS_BOT_SNAPSHOT_KEY])
-    if (raw === null) {
-      const pong = await run(['PING'])
-      if (pong === 'PONG') return null
-      throw new FbsBotStoreError('unavailable')
-    }
-    if (typeof raw !== 'string') throw new FbsBotStoreError('corrupt')
+    const raw = await run(['EVAL', LOAD_SNAPSHOT_SCRIPT, 1, FBS_BOT_SNAPSHOT_KEY])
+    if (raw === null || typeof raw !== 'string') throw new FbsBotStoreError('unavailable')
+    if (raw === FBS_BOT_SNAPSHOT_MISSING) return null
 
     try {
       const snapshot = FbsBotSnapshotSchema.parse(JSON.parse(raw))
