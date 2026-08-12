@@ -45,7 +45,7 @@ test('load rejects missing Redis configuration without issuing a command', async
   assert.equal(commandCalled, false)
 })
 
-test('load returns null only for the single-EVAL missing sentinel', async () => {
+test('load returns null only for the single-EVAL numeric zero result', async () => {
   let calls = 0
   const store = createFbsBotStore({
     hasConfig: () => true,
@@ -56,7 +56,7 @@ test('load returns null only for the single-EVAL missing sentinel', async () => 
       assert.equal(command[2], 1)
       assert.equal(command[3], FBS_BOT_SNAPSHOT_KEY)
       assert.equal(command.length, 4)
-      return '__FBS_SNAPSHOT_MISSING__'
+      return 0
     },
   })
 
@@ -64,8 +64,8 @@ test('load returns null only for the single-EVAL missing sentinel', async () => 
   assert.equal(calls, 1)
 })
 
-test('load maps null and unexpected Redis responses to unavailable', async () => {
-  for (const result of [null, 42]) {
+test('load maps null and unexpected Redis response types to unavailable', async () => {
+  for (const result of [null, 42, ['unexpected']]) {
     const store = createFbsBotStore({ hasConfig: () => true, command: async () => result })
     await assert.rejects(store.load(), (error: unknown) => (
       error instanceof FbsBotStoreError && error.code === 'unavailable'
@@ -88,7 +88,11 @@ test('load returns a valid snapshot from the single EVAL response', async () => 
 })
 
 test('load surfaces invalid JSON and invalid stored schemas as corruption', async () => {
-  for (const stored of ['{', JSON.stringify({ ...makeSnapshot(), wbToken: 'forbidden' })]) {
+  for (const stored of [
+    '__FBS_SNAPSHOT_MISSING__',
+    '{',
+    JSON.stringify({ ...makeSnapshot(), wbToken: 'forbidden' }),
+  ]) {
     const store = createFbsBotStore({ hasConfig: () => true, command: async () => stored })
     await assert.rejects(store.load(), (error: unknown) => (
       error instanceof FbsBotStoreError && error.code === 'corrupt'

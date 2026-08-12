@@ -4,7 +4,6 @@ import { FbsBotSnapshotSchema, type FbsBotSnapshot } from './fbs-bot-contract.ts
 import { hasRedisConfig, redisCommand } from './redis-cache.ts'
 
 export const FBS_BOT_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:latest'
-const FBS_BOT_SNAPSHOT_MISSING = '__FBS_SNAPSHOT_MISSING__'
 
 type StoreErrorCode = 'unconfigured' | 'unavailable' | 'corrupt' | 'unexpected_result'
 type StoreCommand = (command: unknown[]) => Promise<unknown>
@@ -177,7 +176,7 @@ return 1
 
 const LOAD_SNAPSHOT_SCRIPT = `
 local value = redis.call('GET', KEYS[1])
-if not value then return '${FBS_BOT_SNAPSHOT_MISSING}' end
+if not value then return 0 end
 return value
 `
 
@@ -223,8 +222,8 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
   async function load(): Promise<FbsBotSnapshot | null> {
     if (!configured()) throw new FbsBotStoreError('unconfigured')
     const raw = await run(['EVAL', LOAD_SNAPSHOT_SCRIPT, 1, FBS_BOT_SNAPSHOT_KEY])
+    if (raw === 0) return null
     if (raw === null || typeof raw !== 'string') throw new FbsBotStoreError('unavailable')
-    if (raw === FBS_BOT_SNAPSHOT_MISSING) return null
 
     try {
       const snapshot = FbsBotSnapshotSchema.parse(JSON.parse(raw))
