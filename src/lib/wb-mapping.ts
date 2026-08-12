@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 // ─── Shared WB Mapping Module ──────────────────────────────────────────
 // Extracted from wb-compare/route.ts for reuse across all WB data endpoints
 
@@ -76,6 +78,21 @@ interface ArticleOverride {
   exactSubject?: boolean
   excelType: string
   priority: number
+}
+
+export type FbsClassification =
+  | { kind: 'eligible'; productType: string; productDisplayName: string }
+  | { kind: 'ignored_blacklist' }
+  | { kind: 'blocked_unknown_category' }
+
+export interface FbsProductInput {
+  subject: string
+  article: string
+  brand: string
+}
+
+const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
+  гобелен: 'Гобелены',
 }
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
@@ -341,6 +358,49 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
 
   // 4. Return the first (primary) type from subject mapping
   return possibleTypes[0]
+}
+
+export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
+  const subject = input.subject.trim()
+  const isExcluded = EXCLUDED_WB_SUBJECTS.some(
+    excluded => excluded.toLocaleLowerCase('ru-RU') === subject.toLocaleLowerCase('ru-RU'),
+  )
+  if (isExcluded) return { kind: 'ignored_blacklist' }
+
+  const productType = mapWbOrderToType(subject, input.article, input.brand)
+  if (!productType) return { kind: 'blocked_unknown_category' }
+
+  const productDisplayName = PRODUCT_DISPLAY_OVERRIDES[productType]
+    || productType.charAt(0).toLocaleUpperCase('ru-RU') + productType.slice(1)
+  return { kind: 'eligible', productType, productDisplayName }
+}
+
+function sortedMappingVersionInput() {
+  const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
+  const subjects = SUBJECT_TO_EXCEL_TYPES
+    .map(({ subject, types }) => ({ subject, types: [...types] }))
+    .sort((a, b) => compare(a.subject, b.subject))
+  const excludedSubjects = [...EXCLUDED_WB_SUBJECTS].sort(compare)
+  const articleOverrides = ARTICLE_OVERRIDES
+    .map(rule => ({
+      subjectContains: rule.subjectContains,
+      articlePattern: { source: rule.articlePattern.source, flags: rule.articlePattern.flags },
+      brandPattern: rule.brandPattern
+        ? { source: rule.brandPattern.source, flags: rule.brandPattern.flags }
+        : null,
+      exactSubject: rule.exactSubject || false,
+      excelType: rule.excelType,
+      priority: rule.priority,
+    }))
+    .sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)))
+  const displayOverrides = Object.entries(PRODUCT_DISPLAY_OVERRIDES)
+    .sort(([a], [b]) => compare(a, b))
+
+  return { subjects, excludedSubjects, articleOverrides, displayOverrides }
+}
+
+export function getWbMappingVersion(): string {
+  return createHash('sha256').update(JSON.stringify(sortedMappingVersionInput())).digest('hex')
 }
 
 // ─── Full mapping: WB order → product key with size ──────────────
