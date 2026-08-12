@@ -54,3 +54,4 @@ db/*.db
 upload/
 # Skills directory
 /skills/
+/.worktrees/
