@@ -96,7 +96,7 @@ const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
   гобелен: 'Гобелены',
 }
 
-export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'sized-pillows-v1'
+export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'sized-pillows-v2'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
@@ -397,6 +397,11 @@ export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
     excluded => subjectLower.includes(excluded.toLocaleLowerCase('ru-RU')),
   )
   if (isExcluded) return { kind: 'ignored_blacklist' }
+
+  const hasFullKnownSubject = SUBJECT_TO_EXCEL_TYPES.some(
+    entry => subjectLower.includes(entry.subject.toLocaleLowerCase('ru-RU')),
+  )
+  if (!hasFullKnownSubject) return { kind: 'blocked_unknown_category' }
 
   let productType = mapWbOrderToType(subject, input.article, input.brand)
   if (!productType) return { kind: 'blocked_unknown_category' }

@@ -12,7 +12,7 @@ import {
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-mapping.ts'
 
-const LEGACY_UNSIZED_PILLOW_MAPPING_VERSION = 'ec945d7e2f076023643242ef35f2a0b666e7419db072e77c954ba24cf0a7553f'
+const REVERSE_CONTAINMENT_MAPPING_VERSION = 'c40ed2344d4317a6bfbdc523e3533236bc1aaeddf3c53a550acde1b3a8239dad'
 
 const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
   ['Подушки внутренние', 'подушка внутренняя'],
@@ -194,6 +194,10 @@ test('FBS classification fails closed for empty and implausibly short subjects',
     classifyFbsProduct({ subject: 'По', article: 'Постер_60х90', brand: '' }),
     { kind: 'blocked_unknown_category' },
   )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Под', article: 'ДЮСПО_40х40', brand: '' }),
+    { kind: 'blocked_unknown_category' },
+  )
 })
 
 test('FBS classification blocks unknown subjects', () => {
@@ -221,8 +225,8 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
 })
 
 test('mapping version covers the sized-pillow FBS classification semantics', () => {
-  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'sized-pillows-v1')
-  assert.notEqual(getWbMappingVersion(), LEGACY_UNSIZED_PILLOW_MAPPING_VERSION)
+  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'sized-pillows-v2')
+  assert.notEqual(getWbMappingVersion(), REVERSE_CONTAINMENT_MAPPING_VERSION)
 })
 
 test('mapping version is sensitive to the actual article override order', () => {
