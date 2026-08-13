@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   ARTICLE_OVERRIDES,
   classifyFbsProduct,
+  EXCLUDED_WB_SUBJECTS,
   FBS_CLASSIFICATION_SEMANTICS_VERSION,
   findSubjectTypes,
   getWbMappingVersion,
@@ -178,11 +179,18 @@ test('FBS classification blocks pillows with ambiguous or missing sizes', () => 
   )
 })
 
-test('FBS classification ignores normalized blacklist containment before category mapping', () => {
-  assert.deepEqual(
-    classifyFbsProduct({ subject: '  КАРТИНЫ ПО НОМЕРАМ большие  ', article: 'Постер_60х90', brand: '' }),
-    { kind: 'ignored_blacklist' },
-  )
+test('FBS classification ignores every normalized blacklist subject before category mapping', () => {
+  for (const subject of EXCLUDED_WB_SUBJECTS) {
+    assert.deepEqual(
+      classifyFbsProduct({
+        subject: `  ${subject.toLocaleUpperCase('ru-RU')} большие  `,
+        article: 'Постер_60х90',
+        brand: '',
+      }),
+      { kind: 'ignored_blacklist' },
+      subject,
+    )
+  }
 })
 
 test('FBS classification fails closed for empty and implausibly short subjects', () => {
