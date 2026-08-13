@@ -70,9 +70,8 @@ const FbsBotErrorSchema = z.object({
   supplyId: BoundedStringSchema.optional(),
 }).strict()
 
-export const FbsBotSnapshotSchema = z.object({
+const FbsBotSnapshotShape = {
   contractVersion: z.literal(FBS_BOT_CONTRACT_VERSION),
-  sellerId: z.literal('zubakhina'),
   generatedAt: IsoDateSchema,
   phase: z.enum(['idle', 'loading', 'mutating', 'error', 'stopped']),
   lastRunAt: IsoDateSchema.nullable(),
@@ -84,6 +83,35 @@ export const FbsBotSnapshotSchema = z.object({
   openSupplies: z.array(FbsOpenSupplySchema).max(200),
   deliveredSupplies: z.array(FbsDeliveredSupplySchema).max(200),
   errors: z.array(FbsBotErrorSchema).max(200),
+}
+
+export const FbsBotSnapshotSchema = z.discriminatedUnion('sellerId', [
+  z.object({
+    ...FbsBotSnapshotShape,
+    sellerId: z.literal('zubakhina'),
+    sellerDisplayName: z.literal('Зубахина'),
+  }).strict(),
+  z.object({
+    ...FbsBotSnapshotShape,
+    sellerId: z.literal('zubakhin-andrey'),
+    sellerDisplayName: z.literal('Зубахин Андрей'),
+  }).strict(),
+])
+
+export const FbsBotFleetStatusResponseSchema = z.object({
+  snapshots: z.array(FbsBotSnapshotSchema).max(2).superRefine((snapshots, context) => {
+    const seenSellerIds = new Set<string>()
+    for (const [index, snapshot] of snapshots.entries()) {
+      if (seenSellerIds.has(snapshot.sellerId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Duplicate seller snapshot',
+          path: [index, 'sellerId'],
+        })
+      }
+      seenSellerIds.add(snapshot.sellerId)
+    }
+  }),
 }).strict()
 
 export const FbsBotStatusResponseSchema = z.object({
@@ -111,4 +139,5 @@ export type FbsClassification = z.infer<typeof FbsClassificationSchema>
 export type FbsClassifyRequest = z.infer<typeof FbsClassifyRequestSchema>
 export type FbsClassifyResponse = z.infer<typeof FbsClassifyResponseSchema>
 export type FbsBotSnapshot = z.infer<typeof FbsBotSnapshotSchema>
+export type FbsBotFleetStatusResponse = z.infer<typeof FbsBotFleetStatusResponseSchema>
 export type FbsBotStatusResponse = z.infer<typeof FbsBotStatusResponseSchema>

@@ -1,5 +1,6 @@
 import {
   FBS_BOT_CONTRACT_VERSION,
+  FbsBotFleetStatusResponseSchema,
   FbsBotSnapshotSchema,
   FbsClassifyRequestSchema,
   FbsClassifyResponseSchema,
@@ -34,12 +35,12 @@ interface ClassifyDependencies {
 
 interface StatusPostDependencies {
   expectedSecret: string | undefined
-  saveSnapshot: (input: unknown) => Promise<FbsBotSnapshot>
+  saveSnapshot: (input: FbsBotSnapshot) => Promise<FbsBotSnapshot>
 }
 
 interface StatusGetDependencies {
   getCurrentUser: () => Promise<{ role: string } | null>
-  loadSnapshot: () => Promise<FbsBotSnapshot | null>
+  loadSnapshots: () => Promise<FbsBotSnapshot[]>
 }
 
 export async function handleFbsClassifyPost(
@@ -114,7 +115,9 @@ export async function handleFbsBotStatusGet(
   if (user?.role !== 'admin') return json({ error: 'Недостаточно прав' }, 403)
 
   try {
-    return json({ snapshot: await dependencies.loadSnapshot() })
+    return json(FbsBotFleetStatusResponseSchema.parse({
+      snapshots: await dependencies.loadSnapshots(),
+    }))
   } catch (error) {
     if (error instanceof FbsBotStoreError) {
       return json({ error: 'Status storage is unavailable' }, 503)

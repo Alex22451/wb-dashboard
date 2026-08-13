@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   deriveFbsBotStatus,
-  FbsBotStatusResponseSchema,
+  FbsBotFleetStatusResponseSchema,
   FbsBotSnapshotSchema,
   FbsClassifyRequestSchema,
   FbsClassifyResponseSchema,
+  type FbsBotSnapshot,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-contract.ts'
@@ -32,9 +33,10 @@ const classifyItem = {
   brand: '',
 }
 
-const snapshot = {
+const snapshot: FbsBotSnapshot = {
   contractVersion: 1,
   sellerId: 'zubakhina',
+  sellerDisplayName: 'Зубахина',
   generatedAt: '2026-08-12T12:00:00.000Z',
   phase: 'idle',
   lastRunAt: '2026-08-12T11:45:00.000Z',
@@ -101,8 +103,31 @@ test('classification response accepts every category outcome and rejects extra f
   assert.equal(FbsClassifyResponseSchema.safeParse({ ...response, wbToken: 'forbidden' }).success, false)
 })
 
-test('snapshot schema accepts the complete sanitized v1 shape', () => {
+test('snapshot schema accepts both exact seller identity pairs', () => {
   assert.deepEqual(FbsBotSnapshotSchema.parse(snapshot), snapshot)
+  assert.equal(FbsBotSnapshotSchema.safeParse({
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахин Андрей',
+  }).success, true)
+})
+
+test('snapshot schema rejects mismatched labels and unknown sellers', () => {
+  assert.equal(FbsBotSnapshotSchema.safeParse({
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахина',
+  }).success, false)
+  assert.equal(FbsBotSnapshotSchema.safeParse({
+    ...snapshot,
+    sellerId: 'zubakhina',
+    sellerDisplayName: 'Зубахин Андрей',
+  }).success, false)
+  assert.equal(FbsBotSnapshotSchema.safeParse({
+    ...snapshot,
+    sellerId: 'unknown-seller',
+    sellerDisplayName: 'Неизвестный продавец',
+  }).success, false)
 })
 
 test('snapshot schema rejects PII, credentials, and unknown nested fields', () => {
@@ -128,11 +153,38 @@ test('snapshot schema enforces collection and string bounds', () => {
   }).success, false)
 })
 
-test('status response schema accepts only a nullable snapshot envelope', () => {
-  assert.deepEqual(FbsBotStatusResponseSchema.parse({ snapshot }), { snapshot })
-  assert.deepEqual(FbsBotStatusResponseSchema.parse({ snapshot: null }), { snapshot: null })
-  assert.equal(FbsBotStatusResponseSchema.safeParse(snapshot).success, false)
-  assert.equal(FbsBotStatusResponseSchema.safeParse({ snapshot, extra: true }).success, false)
+test('fleet status response accepts missing sellers and one snapshot per known seller', () => {
+  const andreySnapshot = {
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахин Андрей',
+  }
+
+  assert.deepEqual(FbsBotFleetStatusResponseSchema.parse({ snapshots: [] }), { snapshots: [] })
+  assert.deepEqual(FbsBotFleetStatusResponseSchema.parse({ snapshots: [snapshot] }), { snapshots: [snapshot] })
+  assert.deepEqual(
+    FbsBotFleetStatusResponseSchema.parse({ snapshots: [snapshot, andreySnapshot] }),
+    { snapshots: [snapshot, andreySnapshot] },
+  )
+  assert.equal(FbsBotFleetStatusResponseSchema.safeParse({
+    snapshots: [snapshot, snapshot],
+  }).success, false)
+})
+
+test('fleet status response rejects secrets and unknown fields at every level', () => {
+  assert.equal(FbsBotFleetStatusResponseSchema.safeParse({
+    snapshots: [{ ...snapshot, wbToken: 'forbidden' }],
+  }).success, false)
+  assert.equal(FbsBotFleetStatusResponseSchema.safeParse({
+    snapshots: [{
+      ...snapshot,
+      openSupplies: [{ ...snapshot.openSupplies[0], rawWbResponse: { private: true } }],
+    }],
+  }).success, false)
+  assert.equal(FbsBotFleetStatusResponseSchema.safeParse({
+    snapshots: [snapshot],
+    redisKey: 'must-not-cross-boundary',
+  }).success, false)
 })
 
 test('status derivation follows operational precedence and the heartbeat boundary', () => {

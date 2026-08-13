@@ -4,6 +4,12 @@ import { FbsBotSnapshotSchema, type FbsBotSnapshot } from './fbs-bot-contract.ts
 import { hasRedisConfig, redisCommand } from './redis-cache.ts'
 
 export const FBS_BOT_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:latest'
+const FBS_BOT_ANDREY_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:zubakhin-andrey:latest'
+const FBS_BOT_SELLER_IDS = ['zubakhina', 'zubakhin-andrey'] as const satisfies readonly FbsBotSnapshot['sellerId'][]
+
+export function snapshotKey(sellerId: FbsBotSnapshot['sellerId']): string {
+  return sellerId === 'zubakhina' ? FBS_BOT_SNAPSHOT_KEY : FBS_BOT_ANDREY_SNAPSHOT_KEY
+}
 
 type StoreErrorCode = 'unconfigured' | 'unavailable' | 'corrupt' | 'unexpected_result'
 type StoreCommand = (command: unknown[]) => Promise<unknown>
@@ -89,9 +95,9 @@ local function valid_array(value, max_length)
   return true
 end
 
-local function valid_current(value)
+local function valid_current(value, expected_seller, allow_legacy_zubakhina)
   local top_allowed = {
-    contractVersion=true, sellerId=true, generatedAt=true, phase=true,
+    contractVersion=true, sellerId=true, sellerDisplayName=true, generatedAt=true, phase=true,
     lastRunAt=true, lastSuccessfulRunAt=true, nextDeliveryWindowAt=true,
     mappingVersion=true, mappingCacheUpdatedAt=true, counts=true,
     openSupplies=true, deliveredSupplies=true, errors=true
@@ -102,7 +108,17 @@ local function valid_current(value)
     'mappingCacheUpdatedAt', 'counts', 'openSupplies', 'deliveredSupplies', 'errors'
   }
   if not only_keys(value, top_allowed, top_required) then return false end
-  if value.contractVersion ~= 1 or value.sellerId ~= 'zubakhina' then return false end
+  if value.contractVersion ~= 1 or value.sellerId ~= expected_seller then return false end
+  local is_legacy_zubakhina = allow_legacy_zubakhina
+    and expected_seller == 'zubakhina'
+    and value.sellerDisplayName == nil
+  local seller_names = {
+    zubakhina='Зубахина',
+    ['zubakhin-andrey']='Зубахин Андрей'
+  }
+  local expected_name = seller_names[value.sellerId]
+  if expected_name == nil then return false end
+  if not is_legacy_zubakhina and expected_name ~= value.sellerDisplayName then return false end
   if not valid_iso(value.generatedAt) or not valid_iso(value.nextDeliveryWindowAt) then return false end
   if not valid_nullable_iso(value.lastRunAt) or not valid_nullable_iso(value.lastSuccessfulRunAt) then return false end
   if not valid_nullable_iso(value.mappingCacheUpdatedAt) then return false end
@@ -160,13 +176,14 @@ local function valid_current(value)
   return true
 end
 
+local expected_seller = ARGV[2]
 local incoming_ok, incoming = pcall(cjson.decode, ARGV[1])
-if not incoming_ok or not valid_current(incoming) then return -1 end
+if not incoming_ok or not valid_current(incoming, expected_seller, false) then return -1 end
 
 local current_raw = redis.call('GET', KEYS[1])
 if current_raw then
   local current_ok, current = pcall(cjson.decode, current_raw)
-  if not current_ok or not valid_current(current) then return -1 end
+  if not current_ok or not valid_current(current, expected_seller, true) then return -1 end
   if current.generatedAt >= incoming.generatedAt then return 0 end
 end
 
@@ -206,6 +223,23 @@ function canonicalizeSnapshot(input: unknown): FbsBotSnapshot {
   }
 }
 
+function migrateLegacySnapshot(
+  input: unknown,
+  sellerId: FbsBotSnapshot['sellerId'],
+): unknown {
+  if (
+    sellerId !== 'zubakhina'
+    || typeof input !== 'object'
+    || input === null
+    || Array.isArray(input)
+    || 'sellerDisplayName' in input
+  ) {
+    return input
+  }
+
+  return { ...input, sellerDisplayName: 'Зубахина' }
+}
+
 export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
   const command = options.command || (redisCommand as StoreCommand)
   const configured = options.hasConfig || hasRedisConfig
@@ -219,14 +253,14 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
     }
   }
 
-  async function load(): Promise<FbsBotSnapshot | null> {
-    if (!configured()) throw new FbsBotStoreError('unconfigured')
-    const raw = await run(['EVAL', LOAD_SNAPSHOT_SCRIPT, 1, FBS_BOT_SNAPSHOT_KEY])
+  async function loadOne(sellerId: FbsBotSnapshot['sellerId']): Promise<FbsBotSnapshot | null> {
+    const raw = await run(['EVAL', LOAD_SNAPSHOT_SCRIPT, 1, snapshotKey(sellerId)])
     if (raw === 0) return null
     if (raw === null || typeof raw !== 'string') throw new FbsBotStoreError('unavailable')
 
     try {
-      const snapshot = FbsBotSnapshotSchema.parse(JSON.parse(raw))
+      const snapshot = FbsBotSnapshotSchema.parse(migrateLegacySnapshot(JSON.parse(raw), sellerId))
+      if (snapshot.sellerId !== sellerId) throw new FbsBotStoreError('corrupt')
       if (new Date(snapshot.generatedAt).toISOString() !== snapshot.generatedAt) {
         throw new FbsBotStoreError('corrupt')
       }
@@ -235,6 +269,12 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
       if (error instanceof FbsBotStoreError) throw error
       throw new FbsBotStoreError('corrupt')
     }
+  }
+
+  async function loadAll(): Promise<FbsBotSnapshot[]> {
+    if (!configured()) throw new FbsBotStoreError('unconfigured')
+    const snapshots = await Promise.all(FBS_BOT_SELLER_IDS.map(loadOne))
+    return snapshots.filter((snapshot): snapshot is FbsBotSnapshot => snapshot !== null)
   }
 
   async function save(input: unknown): Promise<FbsBotSnapshot> {
@@ -248,8 +288,9 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
       'EVAL',
       STORE_NEWER_SNAPSHOT_SCRIPT,
       1,
-      FBS_BOT_SNAPSHOT_KEY,
+      snapshotKey(snapshot.sellerId),
       JSON.stringify(snapshot),
+      snapshot.sellerId,
     ])
     if (result === 1) return snapshot
     if (result === 0) throw new FbsBotStaleSnapshotError()
@@ -258,13 +299,13 @@ export function createFbsBotStore(options: FbsBotStoreOptions = {}) {
     throw new FbsBotStoreError('unexpected_result')
   }
 
-  return { load, save }
+  return { loadAll, save }
 }
 
 const defaultStore = createFbsBotStore()
 
-export function loadFbsBotSnapshot(): Promise<FbsBotSnapshot | null> {
-  return defaultStore.load()
+export function loadFbsBotSnapshots(): Promise<FbsBotSnapshot[]> {
+  return defaultStore.loadAll()
 }
 
 export function saveFbsBotSnapshot(input: unknown): Promise<FbsBotSnapshot> {

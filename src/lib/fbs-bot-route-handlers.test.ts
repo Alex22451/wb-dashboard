@@ -19,6 +19,7 @@ import {
 const snapshot: FbsBotSnapshot = {
   contractVersion: 1,
   sellerId: 'zubakhina',
+  sellerDisplayName: 'Зубахина',
   generatedAt: '2026-08-12T10:00:00.000Z',
   phase: 'idle',
   lastRunAt: null,
@@ -128,51 +129,94 @@ test('status ingest validates auth and snapshot before storage', async () => {
   }
   await assertStatus(await handleFbsStatusPost(request(snapshot, 'wrong'), dependencies), 401)
   await assertStatus(await handleFbsStatusPost(request({ ...snapshot, wbToken: 'forbidden' }), dependencies), 400)
+  await assertStatus(await handleFbsStatusPost(request({
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахина',
+  }), dependencies), 400)
   assert.equal(saveCalled, false)
 })
 
-test('status ingest acknowledges a stored sanitized snapshot with no-store', async () => {
-  const response = await handleFbsStatusPost(request(snapshot), {
+test('status ingest routes the validated seller snapshot to storage', async () => {
+  const andreySnapshot: FbsBotSnapshot = {
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахин Андрей',
+  }
+  let stored: FbsBotSnapshot | null = null
+  const response = await handleFbsStatusPost(request(andreySnapshot), {
     expectedSecret: 'correct',
-    saveSnapshot: async () => snapshot,
+    saveSnapshot: async input => {
+      stored = input
+      return input
+    },
   })
   await assertStatus(response, 200)
   assert.deepEqual(await response.json(), { ok: true })
+  assert.deepEqual(stored, andreySnapshot)
 })
 
 test('public status handler returns 403 for every non-admin result', async () => {
   const anonymous = await handleFbsBotStatusGet({
     getCurrentUser: async () => null,
-    loadSnapshot: async () => snapshot,
+    loadSnapshots: async () => [snapshot],
   })
   await assertStatus(anonymous, 403)
 
   const nonAdmin = await handleFbsBotStatusGet({
     getCurrentUser: async () => ({ role: 'user' }),
-    loadSnapshot: async () => snapshot,
+    loadSnapshots: async () => [snapshot],
   })
   await assertStatus(nonAdmin, 403)
 
   const admin = await handleFbsBotStatusGet({
     getCurrentUser: async () => ({ role: 'admin' }),
-    loadSnapshot: async () => snapshot,
+    loadSnapshots: async () => [snapshot],
   })
   await assertStatus(admin, 200)
-  assert.deepEqual(await admin.json(), { snapshot })
+  assert.deepEqual(await admin.json(), { snapshots: [snapshot] })
+})
+
+test('public status handler returns both seller snapshots in one strict envelope', async () => {
+  const andreySnapshot: FbsBotSnapshot = {
+    ...snapshot,
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахин Андрей',
+  }
+  const response = await handleFbsBotStatusGet({
+    getCurrentUser: async () => ({ role: 'admin' }),
+    loadSnapshots: async () => [snapshot, andreySnapshot],
+  })
+
+  await assertStatus(response, 200)
+  assert.deepEqual(await response.json(), { snapshots: [snapshot, andreySnapshot] })
 })
 
 test('public status handler sanitizes authentication and storage failures', async () => {
   const authFailure = await handleFbsBotStatusGet({
     getCurrentUser: async () => { throw new Error('database connection detail') },
-    loadSnapshot: async () => snapshot,
+    loadSnapshots: async () => [snapshot],
   })
   await assertStatus(authFailure, 500)
   assert.deepEqual(await authFailure.json(), { error: 'Internal server error' })
 
   const storageFailure = await handleFbsBotStatusGet({
     getCurrentUser: async () => ({ role: 'admin' }),
-    loadSnapshot: async () => { throw new FbsBotStoreError('corrupt') },
+    loadSnapshots: async () => { throw new FbsBotStoreError('corrupt') },
   })
   await assertStatus(storageFailure, 503)
   assert.deepEqual(await storageFailure.json(), { error: 'Status storage is unavailable' })
+})
+
+test('public status handler never exposes invalid storage fields', async () => {
+  const response = await handleFbsBotStatusGet({
+    getCurrentUser: async () => ({ role: 'admin' }),
+    loadSnapshots: async () => [{
+      ...snapshot,
+      redisKey: 'dashboard:fbs-bot:v1:latest',
+    }] as unknown as FbsBotSnapshot[],
+  })
+
+  await assertStatus(response, 500)
+  assert.deepEqual(await response.json(), { error: 'Internal server error' })
 })

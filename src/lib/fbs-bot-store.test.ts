@@ -7,16 +7,19 @@ import {
   FbsBotFutureSnapshotError,
   FbsBotStaleSnapshotError,
   FbsBotStoreError,
+  snapshotKey,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-store.ts'
 
-function makeSnapshot(generatedAt = '2026-08-12T10:00:00.000Z'): FbsBotSnapshot {
-  return {
-    contractVersion: 1,
-    sellerId: 'zubakhina',
+function makeSnapshot(
+  generatedAt = '2026-08-12T10:00:00.000Z',
+  sellerId: FbsBotSnapshot['sellerId'] = 'zubakhina',
+): FbsBotSnapshot {
+  const snapshotFields = {
+    contractVersion: 1 as const,
     generatedAt,
-    phase: 'idle',
+    phase: 'idle' as const,
     lastRunAt: null,
     lastSuccessfulRunAt: null,
     nextDeliveryWindowAt: '2026-08-12T12:00:00.000Z',
@@ -27,9 +30,19 @@ function makeSnapshot(generatedAt = '2026-08-12T10:00:00.000Z'): FbsBotSnapshot 
     deliveredSupplies: [],
     errors: [],
   }
+
+  return sellerId === 'zubakhina'
+    ? { ...snapshotFields, sellerId, sellerDisplayName: 'Зубахина' }
+    : { ...snapshotFields, sellerId, sellerDisplayName: 'Зубахин Андрей' }
 }
 
-test('load rejects missing Redis configuration without issuing a command', async () => {
+test('snapshot keys preserve the legacy cabinet key and isolate the new cabinet', () => {
+  assert.equal(snapshotKey('zubakhina'), 'dashboard:fbs-bot:v1:latest')
+  assert.equal(FBS_BOT_SNAPSHOT_KEY, 'dashboard:fbs-bot:v1:latest')
+  assert.equal(snapshotKey('zubakhin-andrey'), 'dashboard:fbs-bot:v1:zubakhin-andrey:latest')
+})
+
+test('loadAll rejects missing Redis configuration without issuing a command', async () => {
   let commandCalled = false
   const store = createFbsBotStore({
     hasConfig: () => false,
@@ -39,82 +52,120 @@ test('load rejects missing Redis configuration without issuing a command', async
     },
   })
 
-  await assert.rejects(store.load(), (error: unknown) => (
+  await assert.rejects(store.loadAll(), (error: unknown) => (
     error instanceof FbsBotStoreError && error.code === 'unconfigured'
   ))
   assert.equal(commandCalled, false)
 })
 
-test('load returns null only for the single-EVAL numeric zero result', async () => {
-  let calls = 0
+test('loadAll reads both seller keys in registry order and omits missing snapshots', async () => {
+  const calls: unknown[][] = []
+  const andreySnapshot = makeSnapshot('2026-08-12T10:00:00.000Z', 'zubakhin-andrey')
   const store = createFbsBotStore({
     hasConfig: () => true,
     command: async (command) => {
-      calls += 1
+      calls.push(command)
       assert.equal(command[0], 'EVAL')
       assert.equal(typeof command[1], 'string')
       assert.equal(command[2], 1)
-      assert.equal(command[3], FBS_BOT_SNAPSHOT_KEY)
       assert.equal(command.length, 4)
-      return 0
+      return command[3] === snapshotKey('zubakhina') ? 0 : JSON.stringify(andreySnapshot)
     },
   })
 
-  assert.equal(await store.load(), null)
-  assert.equal(calls, 1)
+  assert.deepEqual(await store.loadAll(), [andreySnapshot])
+  assert.deepEqual(calls.map(command => command[3]), [
+    'dashboard:fbs-bot:v1:latest',
+    'dashboard:fbs-bot:v1:zubakhin-andrey:latest',
+  ])
 })
 
-test('load maps null and unexpected Redis response types to unavailable', async () => {
+test('loadAll maps null and unexpected Redis response types to unavailable', async () => {
   for (const result of [null, 42, ['unexpected']]) {
     const store = createFbsBotStore({ hasConfig: () => true, command: async () => result })
-    await assert.rejects(store.load(), (error: unknown) => (
+    await assert.rejects(store.loadAll(), (error: unknown) => (
       error instanceof FbsBotStoreError && error.code === 'unavailable'
     ))
   }
 })
 
-test('load returns a valid snapshot from the single EVAL response', async () => {
-  const snapshot = makeSnapshot()
+test('loadAll returns both valid snapshots in registry order', async () => {
+  const zubakhinaSnapshot = makeSnapshot()
+  const andreySnapshot = makeSnapshot('2026-08-12T11:00:00.000Z', 'zubakhin-andrey')
   const store = createFbsBotStore({
     hasConfig: () => true,
     command: async (command) => {
       assert.equal(command[0], 'EVAL')
-      assert.equal(command[3], FBS_BOT_SNAPSHOT_KEY)
-      return JSON.stringify(snapshot)
+      return command[3] === snapshotKey('zubakhina')
+        ? JSON.stringify(zubakhinaSnapshot)
+        : JSON.stringify(andreySnapshot)
     },
   })
 
-  assert.deepEqual(await store.load(), snapshot)
+  assert.deepEqual(await store.loadAll(), [zubakhinaSnapshot, andreySnapshot])
 })
 
-test('load surfaces invalid JSON and invalid stored schemas as corruption', async () => {
+test('loadAll migrates only the exact pre-display-name Zubakhina snapshot', async () => {
+  const zubakhinaSnapshot = makeSnapshot()
+  const legacySnapshot = { ...zubakhinaSnapshot } as Record<string, unknown>
+  delete legacySnapshot.sellerDisplayName
+  const store = createFbsBotStore({
+    hasConfig: () => true,
+    command: async command => command[3] === snapshotKey('zubakhina')
+      ? JSON.stringify(legacySnapshot)
+      : 0,
+  })
+
+  assert.deepEqual(await store.loadAll(), [zubakhinaSnapshot])
+
+  const andreySnapshot = makeSnapshot('2026-08-12T11:00:00.000Z', 'zubakhin-andrey')
+  const incompleteAndreySnapshot = { ...andreySnapshot } as Record<string, unknown>
+  delete incompleteAndreySnapshot.sellerDisplayName
+  const corruptStore = createFbsBotStore({
+    hasConfig: () => true,
+    command: async command => command[3] === snapshotKey('zubakhina')
+      ? 0
+      : JSON.stringify(incompleteAndreySnapshot),
+  })
+
+  await assert.rejects(corruptStore.loadAll(), (error: unknown) => (
+    error instanceof FbsBotStoreError && error.code === 'corrupt'
+  ))
+})
+
+test('loadAll surfaces corruption from either seller key', async () => {
   for (const stored of [
     '__FBS_SNAPSHOT_MISSING__',
     '{',
     JSON.stringify({ ...makeSnapshot(), wbToken: 'forbidden' }),
   ]) {
-    const store = createFbsBotStore({ hasConfig: () => true, command: async () => stored })
-    await assert.rejects(store.load(), (error: unknown) => (
+    const store = createFbsBotStore({
+      hasConfig: () => true,
+      command: async command => command[3] === snapshotKey('zubakhina') ? 0 : stored,
+    })
+    await assert.rejects(store.loadAll(), (error: unknown) => (
       error instanceof FbsBotStoreError && error.code === 'corrupt'
     ))
   }
 })
 
 test('save canonicalizes generatedAt before the atomic write', async () => {
-  let written: FbsBotSnapshot | null = null
+  let writtenGeneratedAt: string | undefined
   const store = createFbsBotStore({
     hasConfig: () => true,
     now: () => new Date('2026-08-12T10:00:00.000Z'),
     command: async (command) => {
       assert.equal(command[0], 'EVAL')
-      written = JSON.parse(String(command[4]))
+      writtenGeneratedAt = (JSON.parse(String(command[4])) as FbsBotSnapshot).generatedAt
+      assert.equal(command[3], snapshotKey('zubakhina'))
+      assert.equal(command[5], 'zubakhina')
       return 1
     },
   })
 
   const saved = await store.save(makeSnapshot('2026-08-12T12:30:00.000+03:00'))
   assert.equal(saved.generatedAt, '2026-08-12T09:30:00.000Z')
-  assert.equal(written?.generatedAt, '2026-08-12T09:30:00.000Z')
+  assert.equal(writtenGeneratedAt, '2026-08-12T09:30:00.000Z')
 })
 
 test('save rejects snapshots more than five minutes in the future without Redis access', async () => {
@@ -133,6 +184,44 @@ test('save rejects snapshots more than five minutes in the future without Redis 
     FbsBotFutureSnapshotError,
   )
   assert.equal(commandCalled, false)
+})
+
+test('save validates seller identity before selecting a Redis key', async () => {
+  let commandCalled = false
+  const store = createFbsBotStore({
+    hasConfig: () => true,
+    command: async () => {
+      commandCalled = true
+      return 1
+    },
+  })
+
+  await assert.rejects(store.save({
+    ...makeSnapshot(),
+    sellerId: 'zubakhin-andrey',
+    sellerDisplayName: 'Зубахина',
+  }))
+  assert.equal(commandCalled, false)
+})
+
+test('save writes only the key derived from the validated seller', async () => {
+  const calls: unknown[][] = []
+  const store = createFbsBotStore({
+    hasConfig: () => true,
+    now: () => new Date('2026-08-12T12:00:00.000Z'),
+    command: async command => {
+      calls.push(command)
+      return 1
+    },
+  })
+
+  await store.save(makeSnapshot('2026-08-12T10:00:00.000Z'))
+  await store.save(makeSnapshot('2026-08-12T11:00:00.000Z', 'zubakhin-andrey'))
+
+  assert.deepEqual(calls.map(command => [command[3], command[5]]), [
+    ['dashboard:fbs-bot:v1:latest', 'zubakhina'],
+    ['dashboard:fbs-bot:v1:zubakhin-andrey:latest', 'zubakhin-andrey'],
+  ])
 })
 
 test('save maps stale, corrupt, unavailable, and unexpected EVAL results to typed errors', async () => {
@@ -155,20 +244,22 @@ test('save maps stale, corrupt, unavailable, and unexpected EVAL results to type
   }
 })
 
-test('concurrent out-of-order saves retain only the strictly newest snapshot', async () => {
-  let stored: string | null = null
+test('out-of-order protection is isolated per seller', async () => {
+  const stored = new Map<string, string>()
   const command = async (parts: unknown[]) => {
     assert.equal(parts[0], 'EVAL')
+    const key = String(parts[3])
     const candidateRaw = String(parts[4])
     const candidate = JSON.parse(candidateRaw) as FbsBotSnapshot
     if (candidate.generatedAt.includes('T10:00:00.000Z')) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    if (stored) {
-      const current = JSON.parse(stored) as FbsBotSnapshot
+    const currentRaw = stored.get(key)
+    if (currentRaw) {
+      const current = JSON.parse(currentRaw) as FbsBotSnapshot
       if (current.generatedAt >= candidate.generatedAt) return 0
     }
-    stored = candidateRaw
+    stored.set(key, candidateRaw)
     return 1
   }
   const store = createFbsBotStore({
@@ -180,13 +271,25 @@ test('concurrent out-of-order saves retain only the strictly newest snapshot', a
   const results = await Promise.allSettled([
     store.save(makeSnapshot('2026-08-12T10:00:00.000Z')),
     store.save(makeSnapshot('2026-08-12T11:00:00.000Z')),
+    store.save(makeSnapshot('2026-08-12T11:30:00.000Z', 'zubakhin-andrey')),
   ])
 
   assert.equal(results[0].status, 'rejected')
   assert.equal(results[1].status, 'fulfilled')
-  assert.equal((JSON.parse(stored!) as FbsBotSnapshot).generatedAt, '2026-08-12T11:00:00.000Z')
+  assert.equal(results[2].status, 'fulfilled')
+  assert.equal(
+    (JSON.parse(stored.get(snapshotKey('zubakhina'))!) as FbsBotSnapshot).generatedAt,
+    '2026-08-12T11:00:00.000Z',
+  )
+  assert.equal(
+    (JSON.parse(stored.get(snapshotKey('zubakhin-andrey'))!) as FbsBotSnapshot).generatedAt,
+    '2026-08-12T11:30:00.000Z',
+  )
   await assert.rejects(
     store.save(makeSnapshot('2026-08-12T11:00:00.000Z')),
     FbsBotStaleSnapshotError,
+  )
+  await assert.doesNotReject(
+    store.save(makeSnapshot('2026-08-12T11:15:00.000Z')),
   )
 })
