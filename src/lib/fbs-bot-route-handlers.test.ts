@@ -88,6 +88,18 @@ test('classification handler returns a validated ordered response with no-store'
   assert.equal(body.items[0].classification.productType, 'плед')
 })
 
+test('classification handler returns blocked unknown pillow size as a validated outcome', async () => {
+  const response = await handleFbsClassifyPost(request(classifyRequest), {
+    expectedSecret: 'correct',
+    getMappingVersion: () => 'a'.repeat(64),
+    classify: () => ({ kind: 'blocked_unknown_size' }),
+  })
+
+  await assertStatus(response, 200)
+  const body = await response.json()
+  assert.deepEqual(body.items[0].classification, { kind: 'blocked_unknown_size' })
+})
+
 test('status ingest maps stale, future, and storage errors without leaking details', async () => {
   const cases: Array<[Error, number, string]> = [
     [new FbsBotStaleSnapshotError(), 409, 'Stale status snapshot'],

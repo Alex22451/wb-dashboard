@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   ARTICLE_OVERRIDES,
   classifyFbsProduct,
+  FBS_CLASSIFICATION_SEMANTICS_VERSION,
   findSubjectTypes,
   getWbMappingVersion,
   mapWbOrderToProductKey,
@@ -10,6 +11,8 @@ import {
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-mapping.ts'
+
+const LEGACY_UNSIZED_PILLOW_MAPPING_VERSION = 'ec945d7e2f076023643242ef35f2a0b666e7419db072e77c954ba24cf0a7553f'
 
 const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
   ['Подушки внутренние', 'подушка внутренняя'],
@@ -103,18 +106,93 @@ test('pencil cases keep their own report category', () => {
   )
 })
 
-test('FBS classification preserves every current primary subject mapping', () => {
+test('FBS classification preserves every non-pillow primary subject mapping', () => {
   for (const [subject, productType] of CURRENT_PRIMARY_MAPPINGS) {
+    if (productType.startsWith('подушка ')) continue
     const result = classifyFbsProduct({ subject, article: 'обычный артикул', brand: '' })
     assert.equal(result.kind, 'eligible', subject)
     if (result.kind === 'eligible') assert.equal(result.productType, productType, subject)
   }
 })
 
-test('FBS classification ignores blacklist subjects before category mapping', () => {
+test('FBS classification normalizes decorative pillow size separators', () => {
+  for (const article of ['ДЮСПО_40х40', 'ДЮСПО_40x40', 'ДЮСПО_40*40']) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject: 'Подушки декоративные', article, brand: '' }),
+      {
+        kind: 'eligible',
+        productType: 'подушка декоративная 40х40',
+        productDisplayName: 'Подушка декоративная 40х40',
+      },
+      article,
+    )
+  }
+})
+
+test('FBS classification keeps inner and decorative pillow keys distinct', () => {
   assert.deepEqual(
-    classifyFbsProduct({ subject: 'Картины', article: 'Постер_60х90', brand: '' }),
+    classifyFbsProduct({ subject: 'Подушки внутренние', article: 'ДЮСПО_45х45', brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'подушка внутренняя 45х45',
+      productDisplayName: 'Подушка внутренняя 45х45',
+    },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Подушки декоративные', article: 'ДЮСПО_45х45', brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'подушка декоративная 45х45',
+      productDisplayName: 'Подушка декоративная 45х45',
+    },
+  )
+})
+
+test('FBS classification converts pillow short codes and deduplicates equal sizes', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Подушки внутренние', article: 'ДЮСПО_150_П_', brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'подушка внутренняя 150х50',
+      productDisplayName: 'Подушка внутренняя 150х50',
+    },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Подушки декоративные', article: 'ДЮСПО_40х40_40x40', brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'подушка декоративная 40х40',
+      productDisplayName: 'Подушка декоративная 40х40',
+    },
+  )
+})
+
+test('FBS classification blocks pillows with ambiguous or missing sizes', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Подушки внутренние', article: 'ДЮСПО_40х40_50х50', brand: '' }),
+    { kind: 'blocked_unknown_size' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Подушки декоративные', article: 'ДЮСПО', brand: '' }),
+    { kind: 'blocked_unknown_size' },
+  )
+})
+
+test('FBS classification ignores normalized blacklist containment before category mapping', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: '  КАРТИНЫ ПО НОМЕРАМ большие  ', article: 'Постер_60х90', brand: '' }),
     { kind: 'ignored_blacklist' },
+  )
+})
+
+test('FBS classification fails closed for empty and implausibly short subjects', () => {
+  assert.deepEqual(
+    classifyFbsProduct({ subject: '   ', article: 'ДЮСПО_40х40', brand: '' }),
+    { kind: 'blocked_unknown_category' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'По', article: 'Постер_60х90', brand: '' }),
+    { kind: 'blocked_unknown_category' },
   )
 })
 
@@ -140,6 +218,11 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
   const first = getWbMappingVersion()
   assert.match(first, /^[a-f0-9]{64}$/)
   assert.equal(getWbMappingVersion(), first)
+})
+
+test('mapping version covers the sized-pillow FBS classification semantics', () => {
+  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'sized-pillows-v1')
+  assert.notEqual(getWbMappingVersion(), LEGACY_UNSIZED_PILLOW_MAPPING_VERSION)
 })
 
 test('mapping version is sensitive to the actual article override order', () => {

@@ -94,9 +94,10 @@ test('classification response accepts every category outcome and rejects extra f
       { requestId: '1', nmId: 1, classification: { kind: 'eligible', productType: 'гобелен', productDisplayName: 'Гобелены' } },
       { requestId: '2', nmId: 2, classification: { kind: 'ignored_blacklist' } },
       { requestId: '3', nmId: 3, classification: { kind: 'blocked_unknown_category' } },
+      { requestId: '4', nmId: 4, classification: { kind: 'blocked_unknown_size' } },
     ],
   }
-  assert.equal(FbsClassifyResponseSchema.parse(response).items.length, 3)
+  assert.equal(FbsClassifyResponseSchema.parse(response).items.length, 4)
   assert.equal(FbsClassifyResponseSchema.safeParse({ ...response, wbToken: 'forbidden' }).success, false)
 })
 
