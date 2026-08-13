@@ -27,6 +27,11 @@ export interface FbsBotFleetView {
   errors: FbsBotFleetError[]
 }
 
+export interface FbsBotFleetRenderState {
+  fleetView: FbsBotFleetView | null
+  status: FbsBotStatus
+}
+
 const SELLERS: readonly SellerIdentity[] = [
   { sellerId: 'zubakhina', sellerDisplayName: 'Зубахина' },
   { sellerId: 'zubakhin-andrey', sellerDisplayName: 'Зубахин Андрей' },
@@ -109,4 +114,26 @@ export function buildFbsBotFleetView(
   ), 'работает')
 
   return { status, counts, accounts, openSupplies, deliveredSupplies, errors }
+}
+
+export function selectFbsBotFleetStatus(
+  fleetStatus: FbsBotStatus | null,
+  loading: boolean,
+): FbsBotStatus {
+  if (!fleetStatus) return loading ? 'загрузка данных' : 'остановлен'
+  return loading && STATUS_SEVERITY[fleetStatus] < STATUS_SEVERITY['загрузка данных']
+    ? 'загрузка данных'
+    : fleetStatus
+}
+
+export function buildFbsBotFleetRenderState(
+  snapshots: readonly FbsBotSnapshot[] | undefined,
+  now: number,
+  loading: boolean,
+): FbsBotFleetRenderState {
+  const fleetView = snapshots === undefined ? null : buildFbsBotFleetView(snapshots, now)
+  return {
+    fleetView,
+    status: selectFbsBotFleetStatus(fleetView?.status ?? null, loading),
+  }
 }

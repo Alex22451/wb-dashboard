@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { FbsBotSnapshot } from './fbs-bot-contract.ts'
 import {
+  buildFbsBotFleetRenderState,
   buildFbsBotFleetView,
+  selectFbsBotFleetStatus,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-fleet.ts'
@@ -197,4 +199,50 @@ test('uses seller and item identity as deterministic tie-breakers', () => {
     'zubakhina:ERROR_A',
     'zubakhina:ERROR_B',
   ])
+})
+
+test('retained snapshot ages from healthy to stale after a failed refresh', () => {
+  const heartbeatAt = '2026-08-12T11:31:00.000Z'
+  const retainedSnapshots: readonly FbsBotSnapshot[] = [{
+    ...zubakhinaSnapshot,
+    generatedAt: heartbeatAt,
+  }, {
+    ...andreySnapshot,
+    generatedAt: heartbeatAt,
+  }]
+
+  const beforeFailure = buildFbsBotFleetRenderState(
+    retainedSnapshots,
+    Date.parse('2026-08-12T11:59:59.999Z'),
+    false,
+  )
+  const afterFailure = buildFbsBotFleetRenderState(
+    retainedSnapshots,
+    Date.parse('2026-08-12T12:01:00.001Z'),
+    false,
+  )
+
+  assert.deepEqual(beforeFailure.fleetView?.accounts.map(account => account.status), ['работает', 'работает'])
+  assert.deepEqual(afterFailure.fleetView?.accounts.map(account => account.status), ['задержка', 'задержка'])
+  assert.equal(afterFailure.status, 'задержка')
+  assert.deepEqual(
+    afterFailure.fleetView?.accounts.map(account => account.sellerId),
+    beforeFailure.fleetView?.accounts.map(account => account.sellerId),
+  )
+})
+
+test('refresh loading yields only to higher-priority fleet health', () => {
+  const cases = [
+    ['ошибка', 'ошибка'],
+    ['остановлен', 'остановлен'],
+    ['задержка', 'задержка'],
+    ['загрузка данных', 'загрузка данных'],
+    ['работает', 'загрузка данных'],
+  ] as const
+
+  for (const [fleetStatus, expected] of cases) {
+    assert.equal(selectFbsBotFleetStatus(fleetStatus, true), expected)
+  }
+  assert.equal(selectFbsBotFleetStatus(null, true), 'загрузка данных')
+  assert.equal(selectFbsBotFleetStatus(null, false), 'остановлен')
 })

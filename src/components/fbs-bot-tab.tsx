@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, CircleAlert, RefreshCw, Truck } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -20,7 +20,7 @@ import {
   type FbsBotSnapshot,
   type FbsBotStatus,
 } from '@/lib/fbs-bot-contract'
-import { buildFbsBotFleetView } from '@/lib/fbs-bot-fleet'
+import { buildFbsBotFleetRenderState } from '@/lib/fbs-bot-fleet'
 import {
   FbsBotStatusClientError,
   toSafeFbsBotStatusErrorMessage,
@@ -118,13 +118,11 @@ export function FbsBotTab({ active }: { active: boolean }) {
   }, [active, loadStatus])
 
   const initialLoading = active && snapshots === undefined && !requestError
-  const fleetView = useMemo(
-    () => snapshots === undefined ? null : buildFbsBotFleetView(snapshots, Date.now()),
-    [snapshots],
+  const { fleetView, status } = buildFbsBotFleetRenderState(
+    snapshots,
+    Date.now(),
+    loading || initialLoading,
   )
-  const status: FbsBotStatus = loading || initialLoading
-    ? 'загрузка данных'
-    : fleetView?.status ?? 'остановлен'
 
   return (
     <section className="space-y-6" aria-labelledby="fbs-bot-heading">
