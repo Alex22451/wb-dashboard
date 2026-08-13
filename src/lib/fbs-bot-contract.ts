@@ -98,6 +98,18 @@ export const FbsBotSnapshotSchema = z.discriminatedUnion('sellerId', [
   }).strict(),
 ])
 
+const LegacyZubakhinaSnapshotSchema = z.object({
+  ...FbsBotSnapshotShape,
+  sellerId: z.literal('zubakhina'),
+}).strict()
+
+export const FbsBotSnapshotIngressSchema = z.union([
+  FbsBotSnapshotSchema,
+  LegacyZubakhinaSnapshotSchema,
+]).transform(snapshot => 'sellerDisplayName' in snapshot
+  ? snapshot
+  : { ...snapshot, sellerDisplayName: 'Зубахина' as const })
+
 export const FbsBotFleetStatusResponseSchema = z.object({
   snapshots: z.array(FbsBotSnapshotSchema).max(2).superRefine((snapshots, context) => {
     const seenSellerIds = new Set<string>()

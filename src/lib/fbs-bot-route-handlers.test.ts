@@ -9,9 +9,11 @@ import {
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-route-handlers.ts'
 import {
+  createFbsBotStore,
   FbsBotFutureSnapshotError,
   FbsBotStaleSnapshotError,
   FbsBotStoreError,
+  snapshotKey,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './fbs-bot-store.ts'
@@ -120,6 +122,8 @@ test('status ingest maps stale, future, and storage errors without leaking detai
 
 test('status ingest validates auth and snapshot before storage', async () => {
   let saveCalled = false
+  const legacySnapshot = { ...snapshot } as Record<string, unknown>
+  delete legacySnapshot.sellerDisplayName
   const dependencies = {
     expectedSecret: 'correct',
     saveSnapshot: async () => {
@@ -130,9 +134,17 @@ test('status ingest validates auth and snapshot before storage', async () => {
   await assertStatus(await handleFbsStatusPost(request(snapshot, 'wrong'), dependencies), 401)
   await assertStatus(await handleFbsStatusPost(request({ ...snapshot, wbToken: 'forbidden' }), dependencies), 400)
   await assertStatus(await handleFbsStatusPost(request({
+    ...legacySnapshot,
+    wbToken: 'forbidden',
+  }), dependencies), 400)
+  await assertStatus(await handleFbsStatusPost(request({
     ...snapshot,
     sellerId: 'zubakhin-andrey',
     sellerDisplayName: 'Зубахина',
+  }), dependencies), 400)
+  await assertStatus(await handleFbsStatusPost(request({
+    ...legacySnapshot,
+    sellerId: 'zubakhin-andrey',
   }), dependencies), 400)
   assert.equal(saveCalled, false)
 })
@@ -154,6 +166,32 @@ test('status ingest routes the validated seller snapshot to storage', async () =
   await assertStatus(response, 200)
   assert.deepEqual(await response.json(), { ok: true })
   assert.deepEqual(stored, andreySnapshot)
+})
+
+test('status ingest normalizes the exact legacy bot payload before selecting its Redis key', async () => {
+  const legacySnapshot = { ...snapshot } as Record<string, unknown>
+  delete legacySnapshot.sellerDisplayName
+  const commands: unknown[][] = []
+  const store = createFbsBotStore({
+    hasConfig: () => true,
+    now: () => new Date('2026-08-12T12:00:00.000Z'),
+    command: async command => {
+      commands.push(command)
+      return 1
+    },
+  })
+
+  const response = await handleFbsStatusPost(request(legacySnapshot), {
+    expectedSecret: 'correct',
+    saveSnapshot: store.save,
+  })
+
+  await assertStatus(response, 200)
+  assert.deepEqual(await response.json(), { ok: true })
+  assert.equal(commands.length, 1)
+  assert.equal(commands[0]?.[3], snapshotKey('zubakhina'))
+  assert.deepEqual(JSON.parse(String(commands[0]?.[4])), snapshot)
+  assert.equal(commands[0]?.[5], 'zubakhina')
 })
 
 test('public status handler returns 403 for every non-admin result', async () => {

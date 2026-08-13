@@ -1,7 +1,7 @@
 import {
   FBS_BOT_CONTRACT_VERSION,
   FbsBotFleetStatusResponseSchema,
-  FbsBotSnapshotSchema,
+  FbsBotSnapshotIngressSchema,
   FbsClassifyRequestSchema,
   FbsClassifyResponseSchema,
   type FbsBotSnapshot,
@@ -88,7 +88,7 @@ export async function handleFbsStatusPost(
     }
 
     const body = await readInternalJsonBody(request)
-    const parsed = FbsBotSnapshotSchema.safeParse(body)
+    const parsed = FbsBotSnapshotIngressSchema.safeParse(body)
     if (!parsed.success) return json({ error: 'Invalid status snapshot' }, 400)
 
     await dependencies.saveSnapshot(parsed.data)

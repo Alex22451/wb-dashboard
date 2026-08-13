@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   deriveFbsBotStatus,
   FbsBotFleetStatusResponseSchema,
+  FbsBotSnapshotIngressSchema,
   FbsBotSnapshotSchema,
   FbsClassifyRequestSchema,
   FbsClassifyResponseSchema,
@@ -127,6 +128,25 @@ test('snapshot schema rejects mismatched labels and unknown sellers', () => {
     ...snapshot,
     sellerId: 'unknown-seller',
     sellerDisplayName: 'Неизвестный продавец',
+  }).success, false)
+})
+
+test('snapshot ingress normalizes only the exact pre-display-name Zubakhina payload', () => {
+  const legacySnapshot = { ...snapshot } as Record<string, unknown>
+  delete legacySnapshot.sellerDisplayName
+
+  assert.deepEqual(FbsBotSnapshotIngressSchema.parse(legacySnapshot), snapshot)
+  assert.equal(FbsBotSnapshotIngressSchema.safeParse({
+    ...legacySnapshot,
+    wbToken: 'forbidden',
+  }).success, false)
+  assert.equal(FbsBotSnapshotIngressSchema.safeParse({
+    ...snapshot,
+    sellerDisplayName: 'Зубахин Андрей',
+  }).success, false)
+  assert.equal(FbsBotSnapshotIngressSchema.safeParse({
+    ...legacySnapshot,
+    sellerId: 'zubakhin-andrey',
   }).success, false)
 })
 
