@@ -84,6 +84,7 @@ export type FbsClassification =
   | { kind: 'eligible'; productType: string; productDisplayName: string }
   | { kind: 'ignored_blacklist' }
   | { kind: 'blocked_unknown_category' }
+  | { kind: 'blocked_unknown_size' }
 
 export interface FbsProductInput {
   subject: string
@@ -94,6 +95,8 @@ export interface FbsProductInput {
 const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
   гобелен: 'Гобелены',
 }
+
+export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'sized-pillows-v2'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
@@ -360,15 +363,54 @@ export function mapWbOrderToType(subject: string, article: string, brand: string
   return possibleTypes[0]
 }
 
+function pillowShortCodeSize(width: string): string {
+  if (width === '150') return '150х50'
+  if (width === '120') return '120х40'
+  if (width === '90') return '90х30'
+  return `${width}х${width}`
+}
+
+function extractUniquePillowSize(article: string): string | null {
+  const sizes = new Set<string>()
+
+  for (const match of article.matchAll(/(\d{1,3})\s*[хx*]\s*(\d{1,3})/gi)) {
+    const first = Number(match[1])
+    const second = Number(match[2])
+    if (first >= 8 || second >= 8 || match[1].length >= 2 || match[2].length >= 2) {
+      sizes.add(`${match[1]}х${match[2]}`)
+    }
+  }
+
+  for (const match of article.matchAll(/_(\d{2,3})_[Пп]_/g)) {
+    sizes.add(pillowShortCodeSize(match[1]))
+  }
+
+  return sizes.size === 1 ? [...sizes][0] : null
+}
+
 export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
   const subject = input.subject.trim()
+  if (subject.length < 3) return { kind: 'blocked_unknown_category' }
+
+  const subjectLower = subject.toLocaleLowerCase('ru-RU')
   const isExcluded = EXCLUDED_WB_SUBJECTS.some(
-    excluded => excluded.toLocaleLowerCase('ru-RU') === subject.toLocaleLowerCase('ru-RU'),
+    excluded => subjectLower.includes(excluded.toLocaleLowerCase('ru-RU')),
   )
   if (isExcluded) return { kind: 'ignored_blacklist' }
 
-  const productType = mapWbOrderToType(subject, input.article, input.brand)
+  const hasFullKnownSubject = SUBJECT_TO_EXCEL_TYPES.some(
+    entry => subjectLower.includes(entry.subject.toLocaleLowerCase('ru-RU')),
+  )
+  if (!hasFullKnownSubject) return { kind: 'blocked_unknown_category' }
+
+  let productType = mapWbOrderToType(subject, input.article, input.brand)
   if (!productType) return { kind: 'blocked_unknown_category' }
+
+  if (productType === 'подушка внутренняя' || productType === 'подушка декоративная') {
+    const size = extractUniquePillowSize(input.article)
+    if (!size) return { kind: 'blocked_unknown_size' }
+    productType = `${productType} ${size}`
+  }
 
   const productDisplayName = PRODUCT_DISPLAY_OVERRIDES[productType]
     || productType.charAt(0).toLocaleUpperCase('ru-RU') + productType.slice(1)
@@ -396,7 +438,13 @@ function sortedMappingVersionInput() {
   const displayOverrides = Object.entries(PRODUCT_DISPLAY_OVERRIDES)
     .sort(([a], [b]) => compare(a, b))
 
-  return { subjects, excludedSubjects, articleOverrides, displayOverrides }
+  return {
+    fbsClassificationSemanticsVersion: FBS_CLASSIFICATION_SEMANTICS_VERSION,
+    subjects,
+    excludedSubjects,
+    articleOverrides,
+    displayOverrides,
+  }
 }
 
 export function getWbMappingVersion(): string {

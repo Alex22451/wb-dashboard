@@ -14,6 +14,7 @@ export const FbsClassificationSchema = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({ kind: z.literal('ignored_blacklist') }).strict(),
   z.object({ kind: z.literal('blocked_unknown_category') }).strict(),
+  z.object({ kind: z.literal('blocked_unknown_size') }).strict(),
 ])
 
 export const FbsClassifyRequestSchema = z.object({
