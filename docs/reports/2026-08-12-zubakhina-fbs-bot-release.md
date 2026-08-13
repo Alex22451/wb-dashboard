@@ -184,3 +184,23 @@ Heartbeat опубликован на Dashboard. Пять ошибок `blocked_
 - Общий бюджет считает логические work-items, а не отдельные WB read calls внутри одной сверки. Одна необычно дорогая create-reconciliation может приблизиться к лимиту функции или seller lock.
 - Неразрешённые delivery-журналы сверяются до отдельного лимита 50 кандидатов окна. Перед unattended delivery необходимо убедиться, что такой хвост мал, и наблюдать длительность цикла.
 - До production smoke утверждения о работающем all-products assembly и первом окне `08:00`/`17:00` остаются `UNVERIFIED`.
+
+### Production evidence расширения
+
+- GitHub `main`: Dashboard `ddfd59ed84ea25ca3ea193720c89bd1d81516ef9`, bot `31d424d069b3154d5c44212fa40b20930ede5fbf`; оба SHA подтверждены через `git ls-remote`.
+- Dashboard deployment `dpl_A4Lb3TYZPypzjVRbGG8bRa2Da5yx` имеет статус Ready, production alias `https://svodkasobag.vercel.app`; build log подтверждает commit `ddfd59e`.
+- Финальный bot delivery deployment `dpl_HEZERJMw3fBpGnanx8rHmJ6fQodK` имеет статус Ready, production alias `https://wb-fbs-bot-zubakhina.vercel.app`; build log подтверждает commit `31d424d`.
+- Production HTTP smoke: Dashboard home `200`, unsigned classifier `401`, bot home/health `200`, unsigned cycle `403`.
+- Единственное расписание QStash активно для `/api/qstash/cycle`; signed shadow cycle `10:45 МСК` завершён `200` без WB-мутаций. Heartbeat обновился, окно изменилось с legacy `05:00` на `17:00`.
+- Первый bounded assembly cycle `11:00 МСК`: QStash `200`, открытых поставок `5 -> 10`, распределённых заказов `64 -> 76`; выполнено ровно пять новых work-items. Появились новые разрешённые типы товаров. Доставка не выполнялась.
+- Второй assembly cycle `11:15 МСК`: QStash `200`, распределённых заказов `76 -> 107`, открытых поставок `10 -> 11`; `mutation_journal_unresolved` исчез, ранее пустые восстановленные поставки получили заказы. Остались только видимые `blocked_unknown_fabric` и `blocked_unknown_category`.
+- После успешного recovery production переключён в `delivery`, mutations включены, scope `all`; расписание продолжает работать каждые 15 минут. Первый необратимый handoff ожидается в окне `17:00–17:59 МСК`.
+
+Обновлённый реестр утверждений:
+
+| Утверждение | Статус | Доказательство |
+|---|---|---|
+| Код опубликован в GitHub `main` | VERIFIED | удалённые SHA `ddfd59e` и `31d424d` |
+| Production обслуживает требуемые SHA | VERIFIED | deployment IDs и build logs выше |
+| Реальный all-products assembly smoke успешен | VERIFIED | два signed production cycle, 107 распределённых заказов, recovery journal закрыт |
+| Реальная передача в доставку в новом окне успешна | UNVERIFIED | до `17:00 МСК` необратимая операция корректно не выполняется |
