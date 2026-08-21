@@ -215,6 +215,55 @@ test('FBS classification blocks unknown subjects', () => {
   )
 })
 
+test('FBS classification falls back to mouse pads for the case-insensitive _коврик_ article token', () => {
+  for (const article of ['ДевочкаАниме_коврик_20178_ЗА', 'ДевочкаАниме_КОВРИК_20178_ЗА']) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject: 'Неизвестный предмет', article, brand: '' }),
+      {
+        kind: 'eligible',
+        productType: 'коврики для мыши',
+        productDisplayName: 'Коврики для мыши',
+      },
+      article,
+    )
+  }
+})
+
+test('FBS mouse-pad article fallback requires the underscore-delimited token', () => {
+  for (const article of ['ДевочкаАниме_суперковрик_20178_ЗА', 'ДевочкаАниме_коврики_20178_ЗА']) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject: 'Неизвестный предмет', article, brand: '' }),
+      { kind: 'blocked_unknown_category' },
+      article,
+    )
+  }
+})
+
+test('FBS mouse-pad article fallback does not override blacklist or known subject mappings', () => {
+  const controls: Array<[string, string, ReturnType<typeof classifyFbsProduct>]> = [
+    ['Коврики пляжные', 'Пляжный_коврик_20178', {
+      kind: 'eligible',
+      productType: 'пляжные коврики',
+      productDisplayName: 'Пляжные коврики',
+    }],
+    ['Коврики для намаза', 'Намаз_коврик_20178', {
+      kind: 'eligible',
+      productType: 'коврики для намаза',
+      productDisplayName: 'Коврики для намаза',
+    }],
+    ['Постеры', 'Постер_коврик_20178', {
+      kind: 'eligible',
+      productType: 'постеры',
+      productDisplayName: 'Постеры',
+    }],
+    ['Картины', 'Картина_коврик_20178', { kind: 'ignored_blacklist' }],
+  ]
+
+  for (const [subject, article, expected] of controls) {
+    assert.deepEqual(classifyFbsProduct({ subject, article, brand: '' }), expected, subject)
+  }
+})
+
 test('FBS classification uses a readable default label and the approved tapestry label', () => {
   assert.deepEqual(
     classifyFbsProduct({ subject: 'Пледы', article: 'Плед_150х200', brand: '' }),
@@ -232,8 +281,8 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
   assert.equal(getWbMappingVersion(), first)
 })
 
-test('mapping version covers the sized-pillow FBS classification semantics', () => {
-  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'sized-pillows-v2')
+test('mapping version covers the mouse-pad article fallback classification semantics', () => {
+  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'article-mouse-pad-v3')
   assert.notEqual(getWbMappingVersion(), REVERSE_CONTAINMENT_MAPPING_VERSION)
 })
 

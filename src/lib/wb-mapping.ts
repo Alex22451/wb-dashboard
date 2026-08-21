@@ -96,7 +96,7 @@ const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
   гобелен: 'Гобелены',
 }
 
-export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'sized-pillows-v2'
+export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'article-mouse-pad-v3'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
@@ -401,9 +401,12 @@ export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
   const hasFullKnownSubject = SUBJECT_TO_EXCEL_TYPES.some(
     entry => subjectLower.includes(entry.subject.toLocaleLowerCase('ru-RU')),
   )
-  if (!hasFullKnownSubject) return { kind: 'blocked_unknown_category' }
 
-  let productType = mapWbOrderToType(subject, input.article, input.brand)
+  let productType = hasFullKnownSubject
+    ? mapWbOrderToType(subject, input.article, input.brand)
+    : /_коврик_/i.test(input.article)
+      ? 'коврики для мыши'
+      : null
   if (!productType) return { kind: 'blocked_unknown_category' }
 
   if (productType === 'подушка внутренняя' || productType === 'подушка декоративная') {
