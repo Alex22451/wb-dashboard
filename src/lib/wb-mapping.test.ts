@@ -134,6 +134,33 @@ test('FBS classification separates decorative pillowcases by normalized article 
   }
 })
 
+test('FBS classification also separates sublimation pillowcases by normalized article size', () => {
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40*40_ПОДСУБЛИМ',
+      brand: '',
+    }),
+    {
+      kind: 'eligible',
+      productType: 'наволочки под сублимацию 40х40',
+      productDisplayName: 'Наволочки под сублимацию 40х40',
+    },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_150_Н_СУБЛИМ',
+      brand: '',
+    }),
+    {
+      kind: 'eligible',
+      productType: 'наволочки под сублимацию 150х50',
+      productDisplayName: 'Наволочки под сублимацию 150х50',
+    },
+  )
+})
+
 test('FBS classification blocks decorative pillowcases with ambiguous or missing sizes', () => {
   assert.deepEqual(
     classifyFbsProduct({
@@ -145,6 +172,14 @@ test('FBS classification blocks decorative pillowcases with ambiguous or missing
   )
   assert.deepEqual(
     classifyFbsProduct({ subject: 'Наволочки', article: 'ДЮСПО_НАВОЛОЧКА', brand: '' }),
+    { kind: 'blocked_unknown_size' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40х40_45х45_СУБЛИМ',
+      brand: '',
+    }),
     { kind: 'blocked_unknown_size' },
   )
 })
@@ -314,8 +349,8 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
   assert.equal(getWbMappingVersion(), first)
 })
 
-test('mapping version covers the mouse-pad article fallback classification semantics', () => {
-  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'article-mouse-pad-v3')
+test('mapping version covers the current classification semantics', () => {
+  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'pillowcase-size-v4')
   assert.notEqual(getWbMappingVersion(), REVERSE_CONTAINMENT_MAPPING_VERSION)
 })
 

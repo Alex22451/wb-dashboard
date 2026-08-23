@@ -96,7 +96,7 @@ const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
   гобелен: 'Гобелены',
 }
 
-export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'article-mouse-pad-v3'
+export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'pillowcase-size-v4'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
@@ -413,6 +413,7 @@ export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
     productType === 'подушка внутренняя'
     || productType === 'подушка декоративная'
     || productType === 'наволочка декоративная'
+    || productType === 'наволочки под сублимацию'
   ) {
     const size = extractUniquePillowSize(input.article)
     if (!size) return { kind: 'blocked_unknown_size' }
