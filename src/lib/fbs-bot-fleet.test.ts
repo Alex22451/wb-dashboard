@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { FbsBotSnapshot } from './fbs-bot-contract.ts'
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLERS } from './fbs-bot-sellers.ts'
 import {
   buildFbsBotFleetRenderState,
   buildFbsBotFleetView,
@@ -79,6 +81,20 @@ const andreySnapshot: FbsBotSnapshot = {
   }],
 }
 
+const additionalSnapshots = FBS_BOT_SELLERS.slice(2).map(identity => ({
+  ...zubakhinaSnapshot,
+  ...identity,
+  counts: { new: 0, assigned: 0, ignored: 0, blocked: 0 },
+  openSupplies: [],
+  deliveredSupplies: [],
+  errors: [],
+})) as FbsBotSnapshot[]
+
+const completeFleet = (...snapshots: FbsBotSnapshot[]) => [
+  ...snapshots,
+  ...additionalSnapshots,
+]
+
 test('aggregates fleet counters and attributes every flattened operational item', () => {
   const view = buildFbsBotFleetView([zubakhinaSnapshot, andreySnapshot], now)
 
@@ -110,6 +126,12 @@ test('keeps a health row for a missing cabinet without inventing snapshot data',
       lastSuccessfulRunAt: null,
       generatedAt: null,
     },
+    ...FBS_BOT_SELLERS.slice(2).map(identity => ({
+      ...identity,
+      status: 'остановлен' as const,
+      lastSuccessfulRunAt: null,
+      generatedAt: null,
+    })),
   ])
 })
 
@@ -118,12 +140,15 @@ test('reports a stale cabinet while preserving the healthy cabinet row', () => {
     ...andreySnapshot,
     generatedAt: '2026-08-12T11:29:59.999Z',
   }
-  const view = buildFbsBotFleetView([staleAndrey, zubakhinaSnapshot], now)
+  const view = buildFbsBotFleetView(completeFleet(staleAndrey, zubakhinaSnapshot), now)
 
   assert.equal(view.status, 'задержка')
   assert.deepEqual(view.accounts.map(account => [account.sellerId, account.status]), [
     ['zubakhina', 'работает'],
     ['zubakhin-andrey', 'задержка'],
+    ['maslyakov-aa', 'работает'],
+    ['burago', 'работает'],
+    ['maslyakov-lev', 'работает'],
   ])
 })
 
@@ -153,12 +178,14 @@ test('uses operational severity for overall status without collapsing account he
     }],
   }
 
-  assert.equal(buildFbsBotFleetView([zubakhinaSnapshot, loadingSnapshot], now).status, 'загрузка данных')
-  assert.equal(buildFbsBotFleetView([zubakhinaSnapshot, staleSnapshot], now).status, 'задержка')
+  assert.equal(buildFbsBotFleetView(completeFleet(zubakhinaSnapshot, loadingSnapshot), now).status, 'загрузка данных')
+  assert.equal(buildFbsBotFleetView(completeFleet(zubakhinaSnapshot, staleSnapshot), now).status, 'задержка')
 
-  const errorView = buildFbsBotFleetView([zubakhinaSnapshot, errorSnapshot], now)
+  const errorView = buildFbsBotFleetView(completeFleet(zubakhinaSnapshot, errorSnapshot), now)
   assert.equal(errorView.status, 'ошибка')
-  assert.deepEqual(errorView.accounts.map(account => account.status), ['работает', 'ошибка'])
+  assert.deepEqual(errorView.accounts.map(account => account.status), [
+    'работает', 'ошибка', 'работает', 'работает', 'работает',
+  ])
 })
 
 test('uses seller and item identity as deterministic tie-breakers', () => {
@@ -203,13 +230,13 @@ test('uses seller and item identity as deterministic tie-breakers', () => {
 
 test('retained snapshot ages from healthy to stale after a failed refresh', () => {
   const heartbeatAt = '2026-08-12T11:31:00.000Z'
-  const retainedSnapshots: readonly FbsBotSnapshot[] = [{
+  const retainedSnapshots: readonly FbsBotSnapshot[] = completeFleet({
     ...zubakhinaSnapshot,
     generatedAt: heartbeatAt,
   }, {
     ...andreySnapshot,
     generatedAt: heartbeatAt,
-  }]
+  }).map(snapshot => ({ ...snapshot, generatedAt: heartbeatAt }))
 
   const beforeFailure = buildFbsBotFleetRenderState(
     retainedSnapshots,
@@ -222,8 +249,12 @@ test('retained snapshot ages from healthy to stale after a failed refresh', () =
     false,
   )
 
-  assert.deepEqual(beforeFailure.fleetView?.accounts.map(account => account.status), ['работает', 'работает'])
-  assert.deepEqual(afterFailure.fleetView?.accounts.map(account => account.status), ['задержка', 'задержка'])
+  assert.deepEqual(beforeFailure.fleetView?.accounts.map(account => account.status), [
+    'работает', 'работает', 'работает', 'работает', 'работает',
+  ])
+  assert.deepEqual(afterFailure.fleetView?.accounts.map(account => account.status), [
+    'задержка', 'задержка', 'задержка', 'задержка', 'задержка',
+  ])
   assert.equal(afterFailure.status, 'задержка')
   assert.deepEqual(
     afterFailure.fleetView?.accounts.map(account => account.sellerId),
