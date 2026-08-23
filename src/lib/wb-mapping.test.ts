@@ -107,13 +107,46 @@ test('pencil cases keep their own report category', () => {
   )
 })
 
-test('FBS classification preserves every non-pillow primary subject mapping', () => {
+test('FBS classification preserves every primary subject mapping that does not require a size', () => {
   for (const [subject, productType] of CURRENT_PRIMARY_MAPPINGS) {
-    if (productType.startsWith('подушка ')) continue
+    if (productType.startsWith('подушка ') || productType.startsWith('наволочка ')) continue
     const result = classifyFbsProduct({ subject, article: 'обычный артикул', brand: '' })
     assert.equal(result.kind, 'eligible', subject)
     if (result.kind === 'eligible') assert.equal(result.productType, productType, subject)
   }
+})
+
+test('FBS classification separates decorative pillowcases by normalized article size', () => {
+  for (const [subject, article, size] of [
+    ['Наволочки декоративные', 'ДЮСПО_40х40_НАВОЛОЧКА', '40х40'],
+    ['Наволочки', 'ДЮСПО_45x45_НАВОЛОЧКА', '45х45'],
+    ['Наволочки декоративные', 'ДЮСПО_150_Н_', '150х50'],
+  ] as const) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject, article, brand: '' }),
+      {
+        kind: 'eligible',
+        productType: `наволочка декоративная ${size}`,
+        productDisplayName: `Наволочка декоративная ${size}`,
+      },
+      article,
+    )
+  }
+})
+
+test('FBS classification blocks decorative pillowcases with ambiguous or missing sizes', () => {
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40х40_45х45_НАВОЛОЧКА',
+      brand: '',
+    }),
+    { kind: 'blocked_unknown_size' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Наволочки', article: 'ДЮСПО_НАВОЛОЧКА', brand: '' }),
+    { kind: 'blocked_unknown_size' },
+  )
 })
 
 test('FBS classification normalizes decorative pillow size separators', () => {

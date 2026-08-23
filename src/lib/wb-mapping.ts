@@ -381,7 +381,7 @@ function extractUniquePillowSize(article: string): string | null {
     }
   }
 
-  for (const match of article.matchAll(/_(\d{2,3})_[Пп]_/g)) {
+  for (const match of article.matchAll(/_(\d{2,3})_[ПпНн]_/g)) {
     sizes.add(pillowShortCodeSize(match[1]))
   }
 
@@ -409,7 +409,11 @@ export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
       : null
   if (!productType) return { kind: 'blocked_unknown_category' }
 
-  if (productType === 'подушка внутренняя' || productType === 'подушка декоративная') {
+  if (
+    productType === 'подушка внутренняя'
+    || productType === 'подушка декоративная'
+    || productType === 'наволочка декоративная'
+  ) {
     const size = extractUniquePillowSize(input.article)
     if (!size) return { kind: 'blocked_unknown_size' }
     productType = `${productType} ${size}`
