@@ -1,10 +1,15 @@
 import { db } from '@/lib/db'
 import { getCurrentUser, unauthorized } from '@/lib/auth'
 import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
-import { getVercelWbTargets, type WbTarget } from '@/lib/user-store'
+import { getAllVercelWbTargets, getVercelWbTargets, type WbTarget } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
+import {
+  canLiveLoadDailyRange,
+  shouldServeDailyCache,
+  sliceDailyPayloadByDate,
+} from '@/lib/wb-cache-performance'
 import {
   mapWbOrderToProductKey,
   filterToDateRange,
@@ -212,77 +217,6 @@ async function writeRedisReportResponse(
     'EX',
     secondsUntilNextMoscowWarmup(),
   ])
-}
-
-function sliceDailyPayloadByDate(daily: any, date: string) {
-  const sourceDateIdx = daily?.dates?.indexOf(date)
-  if (sourceDateIdx === undefined || sourceDateIdx < 0) return null
-
-  const products: Array<{ id: number; name: string }> = []
-  const productMap = new Map<number, number>()
-  const remapProduct = (sourceProductId: number) => {
-    const existing = productMap.get(sourceProductId)
-    if (existing !== undefined) return existing
-    const sourceProduct = daily.products?.find((product: any) => Number(product.id) === sourceProductId)
-    if (!sourceProduct) return null
-    const nextId = products.length
-    productMap.set(sourceProductId, nextId)
-    products.push({ id: nextId, name: sourceProduct.name })
-    return nextId
-  }
-
-  const slicePivot = (source: Record<number, Record<number, number>> | undefined) => {
-    const target: Record<number, Record<number, number>> = {}
-    for (const [sourceProductIdRaw, row] of Object.entries(source || {})) {
-      const value = Number((row as Record<number, number>)[sourceDateIdx] || 0)
-      if (!value) continue
-      const targetProductId = remapProduct(Number(sourceProductIdRaw))
-      if (targetProductId === null) continue
-      target[targetProductId] = { 0: value }
-    }
-    return target
-  }
-
-  const pivot = slicePivot(daily.pivot)
-  const fbsPivot = slicePivot(daily.fbsPivot)
-  const fboPivot = slicePivot(daily.fboPivot)
-  const productTotals: Record<number, number> = {}
-  const fbsProductTotals: Record<number, number> = {}
-  const fboProductTotals: Record<number, number> = {}
-  const fillProductTotals = (source: Record<number, Record<number, number>>, target: Record<number, number>) => {
-    for (const [productIdRaw, row] of Object.entries(source)) {
-      target[Number(productIdRaw)] = Number(row[0] || 0)
-    }
-  }
-  fillProductTotals(pivot, productTotals)
-  fillProductTotals(fbsPivot, fbsProductTotals)
-  fillProductTotals(fboPivot, fboProductTotals)
-
-  return {
-    dates: [date],
-    allDates: [date],
-    products,
-    entrepreneurs: daily.entrepreneurs || [],
-    pivot,
-    previousPivot: {},
-    previousFbsPivot: {},
-    previousFboPivot: {},
-    dateTotals: [Number(daily.dateTotals?.[sourceDateIdx] || 0)],
-    revenueDateTotals: [Number(daily.revenueDateTotals?.[sourceDateIdx] || 0)],
-    previousDateTotals: [0],
-    productTotals,
-    productRevenue: {},
-    entrepreneurDailyData: { [date]: daily.entrepreneurDailyData?.[date] || {} },
-    entrepreneurDailyRevenue: { [date]: daily.entrepreneurDailyRevenue?.[date] || {} },
-    entrepreneurDailyFbs: { [date]: daily.entrepreneurDailyFbs?.[date] || {} },
-    entrepreneurDailyFbo: { [date]: daily.entrepreneurDailyFbo?.[date] || {} },
-    fbsPivot,
-    fbsDateTotals: [Number(daily.fbsDateTotals?.[sourceDateIdx] || 0)],
-    fbsProductTotals,
-    fboPivot,
-    fboDateTotals: [Number(daily.fboDateTotals?.[sourceDateIdx] || 0)],
-    fboProductTotals,
-  }
 }
 
 function mergeDailyPayloads(days: any[], dates: string[]) {
@@ -943,19 +877,19 @@ async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): 
   const orders: any[] = []
   const errors: string[] = []
 
-  for (let i = 0; i < dates.length; i++) {
-    const date = dates[i]
+  for (let index = 0; index < dates.length; index += 1) {
+    const date = dates[index]
     const result = await fetchFunnelProductOrders(apiKey, date, date)
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
-    if (i < dates.length - 1) {
+    if (index < dates.length - 1) {
       await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
     }
   }
 
   return {
     orders,
-    error: errors.slice(0, 3).join('; ') || undefined,
+    error: [...new Set(errors)].slice(0, 3).join('; ') || undefined,
   }
 }
 
@@ -1058,7 +992,9 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
   const dates = getDateRange(from, to)
   if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
   if (dates.length === 1) return fetchFunnelProductOrders(apiKey, from, to)
-
+  if (!canLiveLoadDailyRange(dates, FUNNEL_HISTORY_MAX_DAYS)) {
+    return { orders: [], error: 'Живое восстановление дневных данных ограничено периодом до 7 дней. Дождитесь планового прогрева кэша.' }
+  }
   return fetchFunnelProductOrdersByDate(apiKey, dates)
 }
 
@@ -1088,6 +1024,7 @@ export async function GET(request: NextRequest) {
     const entrepreneurId = searchParams.get('entrepreneurId') || 'all'
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
     const includeAdminAngelina = user.role === 'admin' && searchParams.get('includeAngelina') === '1'
+    const requireCompleteDailyCache = section === 'daily' && searchParams.get('complete') === '1'
     const requestedMetric: DataMetric = searchParams.get('metric') === 'sales' ? 'sales' : 'orders'
     const dataMetric: DataMetric = section === 'production' || section === 'supply' ? 'orders' : requestedMetric
 
@@ -1144,17 +1081,14 @@ export async function GET(request: NextRequest) {
     })()
 
     let targets: WbTarget[]
-    const warmApiKey = internalWarmRequest ? searchParams.get('warmApiKey')?.trim() : null
-    const warmName = internalWarmRequest ? searchParams.get('warmName')?.trim() : null
     const warmId = internalWarmRequest ? Number(searchParams.get('warmId') || 0) : 0
 
-    if (warmApiKey) {
-      targets = [{
-        id: Number.isFinite(warmId) && warmId > 0 ? warmId : 900000,
-        name: warmName || 'Warm API key',
-        wbApiKey: warmApiKey,
-        useCategoryMapping: searchParams.get('warmUseCategoryMapping') === '1',
-      }]
+    if (internalWarmRequest && Number.isFinite(warmId) && warmId > 0) {
+      const warmTargets = await getAllVercelWbTargets()
+      targets = warmTargets.filter((target) => target.id === warmId)
+      if (targets.length === 0) {
+        return NextResponse.json({ error: 'Warm target not found' }, { status: 404 })
+      }
     } else if (isVercel()) {
       targets = await getVercelWbTargets(user, entrepreneurId, { includeAdminAngelina })
     } else {
@@ -1269,7 +1203,10 @@ export async function GET(request: NextRequest) {
     if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, dataMetric)
-      if (cachedDaily.daily) {
+      if (cachedDaily.daily && shouldServeDailyCache({
+        missing: cachedDaily.missing,
+        requireComplete: requireCompleteDailyCache,
+      })) {
         return NextResponse.json({
           rateLimitErrors: cachedDaily.missing === 0
             ? []
@@ -1287,6 +1224,22 @@ export async function GET(request: NextRequest) {
           daily: cachedDaily.daily,
         })
       }
+      if (!canLiveLoadDailyRange(currentDates, FUNNEL_HISTORY_MAX_DAYS)) {
+        return NextResponse.json({
+          rateLimitErrors: [{
+            id: 0,
+            name: 'Redis cache',
+            error: `Для периода больше 7 дней доступны только полностью прогретые данные. Не хватает ${cachedDaily.missing} из ${cachedDaily.total} частей кэша.`,
+          }],
+          cacheSource: 'redis-partial',
+          cacheStats: {
+            present: cachedDaily.present,
+            missing: cachedDaily.missing,
+            total: cachedDaily.total,
+          },
+          daily: cachedDaily.daily || null,
+        })
+      }
     }
 
     if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
@@ -1295,8 +1248,11 @@ export async function GET(request: NextRequest) {
         daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent), dataMetric),
       })))
       const availableDailyRows = cachedDailyRows.filter((row) => row.daily)
-      if (availableDailyRows.length > 0) {
-        const missing = cachedDailyRows.length - availableDailyRows.length
+      const missing = cachedDailyRows.length - availableDailyRows.length
+      if (availableDailyRows.length > 0 && shouldServeDailyCache({
+        missing,
+        requireComplete: requireCompleteDailyCache,
+      })) {
         const dailyByEntrepreneur = Object.fromEntries(availableDailyRows.map((row) => [row.ent.id, row.daily]))
         return NextResponse.json({
           rateLimitErrors: missing === 0

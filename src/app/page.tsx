@@ -64,6 +64,7 @@ import {
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { calculateUnitEconomics, calculateUnitLogistics } from '@/lib/unit-economics'
+import { sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
 import {
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
@@ -6845,7 +6846,6 @@ export default function Home() {
       const cacheScope = getDailyCacheScope(selection, entrepreneurs, authUser, includeAngelina, 'orders')
       const dailyByDate = new Map<string, DailyOrdersData>()
       const adSpendByPeriod = new Map<DashboardPeriod, Record<number, number>>()
-      const failedDates = new Set<string>()
       const collectPeriodDates = (period: { dateFrom: string; dateTo: string } | null | undefined) => (
         period?.dateFrom && period?.dateTo ? getClientDateRange(period.dateFrom, period.dateTo) : []
       )
@@ -7055,52 +7055,42 @@ export default function Home() {
         return
       }
 
-      const requestDay = async (date: string) => {
-        const dayParams = new URLSearchParams()
-        dayParams.set('entrepreneurId', selection)
-        dayParams.set('section', 'daily')
-        dayParams.set('dateFrom', date)
-        dayParams.set('dateTo', date)
-        appendAngelinaParam(dayParams, includeAngelina)
-        const dayRes = await fetch(`/api/wb-data?${dayParams.toString()}`)
-        return { date, json: await dayRes.json() }
-      }
-
       const uncachedDates = requiredDates.filter((date) => !dailyByDate.has(date))
-      for (let offset = 0; offset < uncachedDates.length; offset += DAILY_REQUEST_BATCH_SIZE) {
-        const batch = uncachedDates.slice(offset, offset + DAILY_REQUEST_BATCH_SIZE)
-        const batchResults = await Promise.all(batch.map(requestDay))
-
-        for (const { date, json: dayJson } of batchResults) {
-          const dayErrors = dayJson.rateLimitErrors || []
-          if (dayErrors.length) {
-            setRateLimitErrors((current) => [...current, ...dayErrors])
-            removeDailyCache(cacheScope, date)
-            failedDates.add(date)
+      if (uncachedDates.length > 0) {
+        const rangeParams = new URLSearchParams()
+        rangeParams.set('entrepreneurId', selection)
+        rangeParams.set('section', 'daily')
+        rangeParams.set('dateFrom', uncachedDates[0])
+        rangeParams.set('dateTo', uncachedDates[uncachedDates.length - 1])
+        rangeParams.set('complete', '1')
+        appendAngelinaParam(rangeParams, includeAngelina)
+        const rangeRes = await fetch(`/api/wb-data?${rangeParams.toString()}`)
+        const rangeJson = await rangeRes.json()
+        const rangeErrors = rangeJson.rateLimitErrors || []
+        if (rangeErrors.length) {
+          setRateLimitErrors((current) => [...current, ...rangeErrors])
+        } else if (rangeJson.daily) {
+          for (const date of uncachedDates) {
+            const daily = sliceDailyPayloadByDate(rangeJson.daily, date) as DailyOrdersData | null
+            if (!daily) continue
+            const dailyByEntrepreneur = Object.fromEntries(
+              Object.entries(rangeJson.dailyByEntrepreneur || {}).flatMap(([entId, payload]) => {
+                const sliced = sliceDailyPayloadByDate(payload, date)
+                return sliced ? [[entId, sliced]] : []
+              })
+            )
+            writeDailyResponseCache(
+              cacheScope,
+              selection,
+              entrepreneurs,
+              authUser,
+              date,
+              { daily, dailyByEntrepreneur, rateLimitErrors: [] },
+              includeAngelina,
+              'orders',
+            )
+            dailyByDate.set(date, daily)
           }
-          if (dayJson.daily && dayErrors.length === 0) {
-            writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, 'orders')
-            dailyByDate.set(date, dayJson.daily)
-            applyExactDashboard()
-          }
-        }
-        const batchFromRedis = batchResults.every(({ json: dayJson }) => dayJson.cacheSource === 'redis')
-        if (!batchFromRedis && offset + DAILY_REQUEST_BATCH_SIZE < uncachedDates.length) await sleep(DAILY_REQUEST_BATCH_PAUSE_MS)
-      }
-
-      for (const date of failedDates) {
-        if (dailyByDate.has(date)) continue
-        await sleep(DAILY_REQUEST_RETRY_PAUSE_MS)
-        const { json: dayJson } = await requestDay(date)
-        const dayErrors = dayJson.rateLimitErrors || []
-        if (dayErrors.length) {
-          setRateLimitErrors((current) => [...current, ...dayErrors])
-          removeDailyCache(cacheScope, date)
-          continue
-        }
-        if (dayJson.daily) {
-          writeDailyResponseCache(cacheScope, selection, entrepreneurs, authUser, date, dayJson, includeAngelina, 'orders')
-          dailyByDate.set(date, dayJson.daily)
           applyExactDashboard()
         }
       }

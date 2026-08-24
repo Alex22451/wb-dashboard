@@ -13,6 +13,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Карнавальные маски', types: ['маски'] },
   { subject: 'Чехлы для бутылей', types: ['чехлы для бутылей'] },
   { subject: 'Чехлы для чемоданов', types: ['чехлы на чемодан'] },
+  { subject: 'Чехлы на сиденья', types: ['накидки на сиденье'] },
   { subject: 'Фартуки кухонные', types: ['фартуки'] },
   { subject: 'Флаги', types: ['флаги'] },
   { subject: 'Коврики пляжные', types: ['пляжные коврики'] },

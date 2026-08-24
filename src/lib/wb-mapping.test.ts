@@ -24,6 +24,7 @@ const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
   ['Карнавальные маски', 'маски'],
   ['Чехлы для бутылей', 'чехлы для бутылей'],
   ['Чехлы для чемоданов', 'чехлы на чемодан'],
+  ['Чехлы на сиденья', 'накидки на сиденье'],
   ['Фартуки кухонные', 'фартуки'],
   ['Флаги', 'флаги'],
   ['Коврики пляжные', 'пляжные коврики'],
@@ -80,6 +81,21 @@ test('regular blankets map identically for any entrepreneur brand', () => {
   assert.equal(mapWbOrderToType('Пледы', 'Плед_150х200', 'Бренд Бураго'), 'плед')
   assert.equal(mapWbOrderToType('Пледы', 'Плед_150х200', 'Бренд другого ИП'), 'плед')
   assert.deepEqual(findSubjectTypes('Пледы'), ['плед', 'пледы', 'плед флисовый'])
+})
+
+test('seat-cover WB cards map to a separate FBS supply category', () => {
+  const article = 'ТаблицаУмножения_дляног_ОКСФОРД_33726_ЗА'
+
+  assert.equal(mapWbOrderToType('Чехлы на сиденья', article, ''), 'накидки на сиденье')
+  assert.equal(mapWbOrderToProductKey('Чехлы на сиденья', article, ''), 'накидки на сиденье')
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Чехлы на сиденья', article, brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'накидки на сиденье',
+      productDisplayName: 'Накидки на сиденье',
+    },
+  )
 })
 
 test('Burago photo-session accessory subjects keep their own report category', () => {
