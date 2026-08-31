@@ -24,6 +24,7 @@ const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
   ['Карнавальные маски', 'маски'],
   ['Чехлы для бутылей', 'чехлы для бутылей'],
   ['Чехлы для чемоданов', 'чехлы на чемодан'],
+  ['Чехлы на сиденья', 'накидки на сиденье'],
   ['Фартуки кухонные', 'фартуки'],
   ['Флаги', 'флаги'],
   ['Коврики пляжные', 'пляжные коврики'],
@@ -82,6 +83,21 @@ test('regular blankets map identically for any entrepreneur brand', () => {
   assert.deepEqual(findSubjectTypes('Пледы'), ['плед', 'пледы', 'плед флисовый'])
 })
 
+test('seat-cover WB cards map to a separate FBS supply category', () => {
+  const article = 'ТаблицаУмножения_дляног_ОКСФОРД_33726_ЗА'
+
+  assert.equal(mapWbOrderToType('Чехлы на сиденья', article, ''), 'накидки на сиденье')
+  assert.equal(mapWbOrderToProductKey('Чехлы на сиденья', article, ''), 'накидки на сиденье')
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Чехлы на сиденья', article, brand: '' }),
+    {
+      kind: 'eligible',
+      productType: 'накидки на сиденье',
+      productDisplayName: 'Накидки на сиденье',
+    },
+  )
+})
+
 test('Burago photo-session accessory subjects keep their own report category', () => {
   assert.deepEqual(findSubjectTypes('Аксессуары для фотосессий'), ['аксессуары для фотосессии'])
   assert.deepEqual(findSubjectTypes('Аксессуары для фотосессии'), ['аксессуары для фотосессии'])
@@ -107,13 +123,81 @@ test('pencil cases keep their own report category', () => {
   )
 })
 
-test('FBS classification preserves every non-pillow primary subject mapping', () => {
+test('FBS classification preserves every primary subject mapping that does not require a size', () => {
   for (const [subject, productType] of CURRENT_PRIMARY_MAPPINGS) {
-    if (productType.startsWith('подушка ')) continue
+    if (productType.startsWith('подушка ') || productType.startsWith('наволочка ')) continue
     const result = classifyFbsProduct({ subject, article: 'обычный артикул', brand: '' })
     assert.equal(result.kind, 'eligible', subject)
     if (result.kind === 'eligible') assert.equal(result.productType, productType, subject)
   }
+})
+
+test('FBS classification separates decorative pillowcases by normalized article size', () => {
+  for (const [subject, article, size] of [
+    ['Наволочки декоративные', 'ДЮСПО_40х40_НАВОЛОЧКА', '40х40'],
+    ['Наволочки', 'ДЮСПО_45x45_НАВОЛОЧКА', '45х45'],
+    ['Наволочки декоративные', 'ДЮСПО_150_Н_', '150х50'],
+  ] as const) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject, article, brand: '' }),
+      {
+        kind: 'eligible',
+        productType: `наволочка декоративная ${size}`,
+        productDisplayName: `Наволочка декоративная ${size}`,
+      },
+      article,
+    )
+  }
+})
+
+test('FBS classification also separates sublimation pillowcases by normalized article size', () => {
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40*40_ПОДСУБЛИМ',
+      brand: '',
+    }),
+    {
+      kind: 'eligible',
+      productType: 'наволочки под сублимацию 40х40',
+      productDisplayName: 'Наволочки под сублимацию 40х40',
+    },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_150_Н_СУБЛИМ',
+      brand: '',
+    }),
+    {
+      kind: 'eligible',
+      productType: 'наволочки под сублимацию 150х50',
+      productDisplayName: 'Наволочки под сублимацию 150х50',
+    },
+  )
+})
+
+test('FBS classification blocks decorative pillowcases with ambiguous or missing sizes', () => {
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40х40_45х45_НАВОЛОЧКА',
+      brand: '',
+    }),
+    { kind: 'blocked_unknown_size' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({ subject: 'Наволочки', article: 'ДЮСПО_НАВОЛОЧКА', brand: '' }),
+    { kind: 'blocked_unknown_size' },
+  )
+  assert.deepEqual(
+    classifyFbsProduct({
+      subject: 'Наволочки декоративные',
+      article: 'ДЮСПО_40х40_45х45_СУБЛИМ',
+      brand: '',
+    }),
+    { kind: 'blocked_unknown_size' },
+  )
 })
 
 test('FBS classification normalizes decorative pillow size separators', () => {
@@ -215,6 +299,55 @@ test('FBS classification blocks unknown subjects', () => {
   )
 })
 
+test('FBS classification falls back to mouse pads for the case-insensitive _коврик_ article token', () => {
+  for (const article of ['ДевочкаАниме_коврик_20178_ЗА', 'ДевочкаАниме_КОВРИК_20178_ЗА']) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject: 'Неизвестный предмет', article, brand: '' }),
+      {
+        kind: 'eligible',
+        productType: 'коврики для мыши',
+        productDisplayName: 'Коврики для мыши',
+      },
+      article,
+    )
+  }
+})
+
+test('FBS mouse-pad article fallback requires the underscore-delimited token', () => {
+  for (const article of ['ДевочкаАниме_суперковрик_20178_ЗА', 'ДевочкаАниме_коврики_20178_ЗА']) {
+    assert.deepEqual(
+      classifyFbsProduct({ subject: 'Неизвестный предмет', article, brand: '' }),
+      { kind: 'blocked_unknown_category' },
+      article,
+    )
+  }
+})
+
+test('FBS mouse-pad article fallback does not override blacklist or known subject mappings', () => {
+  const controls: Array<[string, string, ReturnType<typeof classifyFbsProduct>]> = [
+    ['Коврики пляжные', 'Пляжный_коврик_20178', {
+      kind: 'eligible',
+      productType: 'пляжные коврики',
+      productDisplayName: 'Пляжные коврики',
+    }],
+    ['Коврики для намаза', 'Намаз_коврик_20178', {
+      kind: 'eligible',
+      productType: 'коврики для намаза',
+      productDisplayName: 'Коврики для намаза',
+    }],
+    ['Постеры', 'Постер_коврик_20178', {
+      kind: 'eligible',
+      productType: 'постеры',
+      productDisplayName: 'Постеры',
+    }],
+    ['Картины', 'Картина_коврик_20178', { kind: 'ignored_blacklist' }],
+  ]
+
+  for (const [subject, article, expected] of controls) {
+    assert.deepEqual(classifyFbsProduct({ subject, article, brand: '' }), expected, subject)
+  }
+})
+
 test('FBS classification uses a readable default label and the approved tapestry label', () => {
   assert.deepEqual(
     classifyFbsProduct({ subject: 'Пледы', article: 'Плед_150х200', brand: '' }),
@@ -232,8 +365,8 @@ test('mapping version is a stable SHA-256 digest for unchanged mapping tables', 
   assert.equal(getWbMappingVersion(), first)
 })
 
-test('mapping version covers the sized-pillow FBS classification semantics', () => {
-  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'sized-pillows-v2')
+test('mapping version covers the current classification semantics', () => {
+  assert.equal(FBS_CLASSIFICATION_SEMANTICS_VERSION, 'pillowcase-size-v4')
   assert.notEqual(getWbMappingVersion(), REVERSE_CONTAINMENT_MAPPING_VERSION)
 })
 

@@ -4,6 +4,8 @@ import {
   type FbsBotStatus,
 // @ts-expect-error TS5097 is intentional for the standalone unit test command.
 } from './fbs-bot-contract.ts'
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLERS } from './fbs-bot-sellers.ts'
 
 type SellerId = FbsBotSnapshot['sellerId']
 type SellerIdentity = Pick<FbsBotSnapshot, 'sellerId' | 'sellerDisplayName'>
@@ -32,10 +34,7 @@ export interface FbsBotFleetRenderState {
   status: FbsBotStatus
 }
 
-const SELLERS: readonly SellerIdentity[] = [
-  { sellerId: 'zubakhina', sellerDisplayName: 'Зубахина' },
-  { sellerId: 'zubakhin-andrey', sellerDisplayName: 'Зубахин Андрей' },
-]
+const SELLERS: readonly SellerIdentity[] = FBS_BOT_SELLERS
 
 const STATUS_SEVERITY: Record<FbsBotStatus, number> = {
   'работает': 0,

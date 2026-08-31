@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLERS } from './fbs-bot-sellers.ts'
 import {
   deriveFbsBotStatus,
   FbsBotFleetStatusResponseSchema,
@@ -104,13 +106,10 @@ test('classification response accepts every category outcome and rejects extra f
   assert.equal(FbsClassifyResponseSchema.safeParse({ ...response, wbToken: 'forbidden' }).success, false)
 })
 
-test('snapshot schema accepts both exact seller identity pairs', () => {
-  assert.deepEqual(FbsBotSnapshotSchema.parse(snapshot), snapshot)
-  assert.equal(FbsBotSnapshotSchema.safeParse({
-    ...snapshot,
-    sellerId: 'zubakhin-andrey',
-    sellerDisplayName: 'Зубахин Андрей',
-  }).success, true)
+test('snapshot schema accepts all exact seller identity pairs', () => {
+  for (const identity of FBS_BOT_SELLERS) {
+    assert.equal(FbsBotSnapshotSchema.safeParse({ ...snapshot, ...identity }).success, true)
+  }
 })
 
 test('snapshot schema rejects mismatched labels and unknown sellers', () => {
