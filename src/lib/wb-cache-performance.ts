@@ -1,3 +1,5 @@
+export const WB_FUNNEL_REQUEST_INTERVAL_MS = 21000
+
 export function shouldServeDailyCache(input: {
   missing: number
   requireComplete: boolean
@@ -7,6 +9,43 @@ export function shouldServeDailyCache(input: {
 
 export function canLiveLoadDailyRange(dates: string[], maxDays = 7): boolean {
   return dates.length > 0 && dates.length <= maxDays
+}
+
+export function getDailyFunnelLoadStrategy(
+  dates: string[],
+  maxDays = 7,
+  historyWindow: { from: string; to: string },
+): 'single-day' | 'history' | 'daily' | 'unsupported' {
+  if (dates.length === 1) return 'single-day'
+  if (dates.length === 0 || dates.length > maxDays) return 'unsupported'
+  return dates.every((date) => date >= historyWindow.from && date <= historyWindow.to)
+    ? 'history'
+    : 'daily'
+}
+
+export function getFunnelOrderMetrics(source: {
+  orderCount?: unknown
+  orderSum?: unknown
+}): { count: number; orderSum: number; unitRevenue: number } {
+  const rawCount = Number(source.orderCount)
+  const rawOrderSum = Number(source.orderSum)
+  const count = Number.isFinite(rawCount) ? Math.max(Math.trunc(rawCount), 0) : 0
+  const orderSum = Number.isFinite(rawOrderSum) ? rawOrderSum : 0
+  return {
+    count,
+    orderSum,
+    unitRevenue: count > 0 ? orderSum / count : 0,
+  }
+}
+
+export function getCacheableDailyTargetIds(results: Array<{
+  entrepreneurId: number
+  error?: string
+  returnError?: string
+}>): number[] {
+  return results
+    .filter((result) => !result.error && !result.returnError)
+    .map((result) => result.entrepreneurId)
 }
 
 export function shouldLiveLoadDailyRange(input: {
@@ -64,6 +103,24 @@ export function buildDailyRecoveryPlan(input: {
       selection: targetIds.length > 0 ? targetIds.join(',') : input.fallbackSelection,
     }
   })
+}
+
+export function buildDailyRangeRecoverySelection(
+  recoveryPlan: Array<{ date: string; selection: string }>,
+  fallbackSelection: string,
+): string {
+  const targetIds = new Set<number>()
+  for (const item of recoveryPlan) {
+    const ids = item.selection
+      .split(',')
+      .map((id) => Number(id.trim()))
+      .filter((id) => Number.isFinite(id) && id > 0)
+    if (ids.length === 0) return fallbackSelection
+    ids.forEach((id) => targetIds.add(id))
+  }
+  return targetIds.size > 0
+    ? [...targetIds].sort((a, b) => a - b).join(',')
+    : fallbackSelection
 }
 
 export function getMissingDailyTargetIdsByDate(input: {

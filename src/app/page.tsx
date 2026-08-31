@@ -69,7 +69,7 @@ import {
   createDashboardLoadFailure,
   normalizeDashboardLoadErrors,
 } from '@/lib/dashboard-load-errors'
-import { buildDailyRecoveryPlan, getMissingDailyDates, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
+import { buildDailyRangeRecoverySelection, buildDailyRecoveryPlan, canLiveLoadDailyRange, getMissingDailyDates, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
 import {
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
@@ -2362,90 +2362,120 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         }
 
         if (metric === 'orders') {
-          const rangeParams = new URLSearchParams()
-          rangeParams.set('entrepreneurId', selection)
-          rangeParams.set('section', 'daily')
-          rangeParams.set('dateFrom', dates[0])
-          rangeParams.set('dateTo', dates[dates.length - 1])
-          rangeParams.set('cacheOnly', '1')
-          appendAngelinaParam(rangeParams, includeAngelina)
+          const requestRange = async (
+            requestSelection = selection,
+            options: { cacheOnly?: boolean; requireComplete?: boolean } = {},
+          ) => {
+            const params = new URLSearchParams()
+            params.set('entrepreneurId', requestSelection)
+            params.set('section', 'daily')
+            params.set('dateFrom', dates[0])
+            params.set('dateTo', dates[dates.length - 1])
+            if (options.cacheOnly) params.set('cacheOnly', '1')
+            if (options.requireComplete) params.set('complete', '1')
+            appendAngelinaParam(params, includeAngelina)
 
-          const rangeRes = await fetch(`/api/wb-data?${rangeParams.toString()}`)
-          const rangeJson = await rangeRes.json()
-          if (!rangeRes.ok) throw new Error('Daily cache probe failed')
+            const res = await fetch(`/api/wb-data?${params.toString()}`, {
+              signal: AbortSignal.timeout(210000),
+            })
+            return { ok: res.ok, json: await res.json() }
+          }
+          const commitCompleteRange = (json: any) => {
+            const missingDates = getMissingDailyDates(
+              dates,
+              json.daily,
+              Array.isArray(json.cacheStats?.missingDates) ? json.cacheStats.missingDates : [],
+            )
+            if (!json.daily || missingDates.length > 0) return false
 
-          const recoveryPlan = buildDailyRecoveryPlan({
-            requestedDates: dates,
-            daily: rangeJson.daily,
-            incompleteDates: Array.isArray(rangeJson.cacheStats?.missingDates)
-              ? rangeJson.cacheStats.missingDates
-              : [],
-            missingTargetIdsByDate: rangeJson.cacheStats?.missingEntrepreneurIdsByDate,
-            fallbackSelection: selection,
-          })
-          const incompleteDates = new Set(recoveryPlan.map(({ date }) => date))
+            const completeDays = dates
+              .map((date) => sliceDailyPayloadByDate(json.daily, date) as DailyOrdersData | null)
+            if (completeDays.some((daily) => !daily)) return false
 
-          if (rangeJson.daily) {
-            for (const date of dates) {
-              if (incompleteDates.has(date)) continue
-              const daily = sliceDailyPayloadByDate(rangeJson.daily, date) as DailyOrdersData | null
-              if (!daily) continue
-              loadedDays.push(daily)
+            for (let index = 0; index < dates.length; index += 1) {
+              const date = dates[index]
+              const daily = completeDays[index] as DailyOrdersData
+              const dailyByEntrepreneur = Object.fromEntries(
+                Object.entries(json.dailyByEntrepreneur || {}).flatMap(([entId, payload]) => {
+                  const sliced = sliceDailyPayloadByDate(payload, date)
+                  return sliced ? [[entId, sliced]] : []
+                }),
+              )
               writeDailyResponseCache(
                 cacheScope,
                 selection,
                 entrepreneurs,
                 user,
                 date,
-                { daily, rateLimitErrors: [] },
+                { daily, dailyByEntrepreneur, rateLimitErrors: [] },
                 includeAngelina,
                 metric,
               )
             }
-            if (loadedDays.length > 0) updateData(mergeDailyResponses(loadedDays, loadedDates()))
+            updateData(mergeDailyResponses(completeDays as DailyOrdersData[], dates))
+            return true
           }
 
-          for (let index = 0; index < recoveryPlan.length; index += 1) {
-            if (!isActiveLoad()) return
-            const { date, selection: recoverySelection } = recoveryPlan[index]
-            const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
-            const liveErrors = liveResult.json.rateLimitErrors || []
+          const cachedResult = await requestRange(selection, { cacheOnly: true })
+          if (!cachedResult.ok) throw new Error('Daily cache probe failed')
 
+          const recoveryPlan = buildDailyRecoveryPlan({
+            requestedDates: dates,
+            daily: cachedResult.json.daily,
+            incompleteDates: Array.isArray(cachedResult.json.cacheStats?.missingDates)
+              ? cachedResult.json.cacheStats.missingDates
+              : [],
+            missingTargetIdsByDate: cachedResult.json.cacheStats?.missingEntrepreneurIdsByDate,
+            fallbackSelection: selection,
+          })
+
+          if (recoveryPlan.length === 0) {
+            if (!commitCompleteRange(cachedResult.json)) {
+              errors.push(createDashboardDateLoadFailure(dates[0], undefined))
+            }
+            return
+          }
+
+          if (canLiveLoadDailyRange(dates, 7)) {
+            const recoverySelection = buildDailyRangeRecoverySelection(recoveryPlan, selection)
+            const liveResult = await requestRange(recoverySelection, { requireComplete: true })
+            const liveErrors = liveResult.json.rateLimitErrors || []
             if (!liveResult.ok || liveErrors.length || !liveResult.json.daily) {
               errors.push(...(liveErrors.length
                 ? liveErrors
-                : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
-            } else {
-              const completeResult = await requestDay(date, selection, {
-                cacheOnly: true,
-                requireComplete: true,
-              })
-              const completeErrors = completeResult.json.rateLimitErrors || []
-              const daily = sliceDailyPayloadByDate(completeResult.json.daily, date) as DailyOrdersData | null
-
-              if (!completeResult.ok || completeErrors.length || !daily) {
-                errors.push(...(completeErrors.length
-                  ? completeErrors
-                  : [createDashboardDateLoadFailure(date, completeResult.json.error)]))
-              } else {
-                loadedDays.push(daily)
-                writeDailyResponseCache(
-                  cacheScope,
-                  selection,
-                  entrepreneurs,
-                  user,
-                  date,
-                  completeResult.json,
-                  includeAngelina,
-                  metric,
-                )
-                updateData(mergeDailyResponses(loadedDays, loadedDates()))
+                : [createDashboardDateLoadFailure(recoveryPlan[0].date, liveResult.json.error)]))
+              return
+            }
+          } else {
+            let recoveryFailed = false
+            for (let index = 0; index < recoveryPlan.length; index += 1) {
+              if (!isActiveLoad()) return
+              const { date, selection: recoverySelection } = recoveryPlan[index]
+              const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
+              const liveErrors = liveResult.json.rateLimitErrors || []
+              if (!liveResult.ok || liveErrors.length || !liveResult.json.daily) {
+                recoveryFailed = true
+                errors.push(...(liveErrors.length
+                  ? liveErrors
+                  : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
+              }
+              if (liveResult.json.cacheSource !== 'redis' && index < recoveryPlan.length - 1) {
+                await sleep(DASHBOARD_DAILY_RECOVERY_PAUSE_MS)
               }
             }
+            if (recoveryFailed) return
+          }
+          if (!isActiveLoad()) return
 
-            if (liveResult.json.cacheSource !== 'redis' && index < recoveryPlan.length - 1) {
-              await sleep(DASHBOARD_DAILY_RECOVERY_PAUSE_MS)
-            }
+          const completeResult = await requestRange(selection, {
+            cacheOnly: true,
+            requireComplete: true,
+          })
+          const completeErrors = completeResult.json.rateLimitErrors || []
+          if (!completeResult.ok || completeErrors.length || !commitCompleteRange(completeResult.json)) {
+            errors.push(...(completeErrors.length
+              ? completeErrors
+              : [createDashboardDateLoadFailure(recoveryPlan[0].date, completeResult.json.error)]))
           }
           return
         }

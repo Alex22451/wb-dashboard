@@ -7,11 +7,15 @@ import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
 import {
   canLiveLoadDailyRange,
+  getCacheableDailyTargetIds,
+  getDailyFunnelLoadStrategy,
+  getFunnelOrderMetrics,
   getMissingDailyTargetIdsByDate,
   shouldRefreshDailyCache,
   shouldLiveLoadDailyRange,
   shouldServeDailyCache,
   sliceDailyPayloadByDate,
+  WB_FUNNEL_REQUEST_INTERVAL_MS,
 } from '@/lib/wb-cache-performance'
 import {
   mapWbOrderToProductKey,
@@ -662,7 +666,6 @@ const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 r
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
-const FUNNEL_REQUEST_INTERVAL_MS = 21000
 const FUNNEL_PRODUCTS_PAGE_LIMIT = 1000
 const FUNNEL_HISTORY_MAX_DAYS = 7
 
@@ -861,19 +864,22 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
       if (products.length < limit) break
       if (positiveProducts.length < products.length) break
       offset += limit
-      await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
+      await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }
 
     return { products: allProducts }
   })
 }
 
-function addFunnelProductOrders(orders: any[], product: any, count: number, date: string) {
+function addFunnelProductOrders(
+  orders: any[],
+  product: any,
+  metrics: { orderCount?: unknown; orderSum?: unknown },
+  date: string,
+) {
+  const { count, unitRevenue } = getFunnelOrderMetrics(metrics)
   if (count <= 0) return
   const item = product.product || {}
-  const selected = product?.statistic?.selected || {}
-  const orderSum = Number(selected.orderSum) || 0
-  const orderRevenue = count > 0 ? orderSum / count : 0
   for (let i = 0; i < count; i++) {
     orders.push({
       date: `${date}T12:00:00`,
@@ -884,10 +890,10 @@ function addFunnelProductOrders(orders: any[], product: any, count: number, date
       brand: item.brandName || '',
       techSize: '',
       warehouseType: '',
-      finishedPrice: orderRevenue,
-      priceWithDisc: orderRevenue,
-      totalPrice: orderRevenue,
-      forPay: orderRevenue,
+      finishedPrice: unitRevenue,
+      priceWithDisc: unitRevenue,
+      totalPrice: unitRevenue,
+      forPay: unitRevenue,
       odid: `funnel:${item.nmId || item.vendorCode || 'unknown'}:${date}:${i}`,
       isFunnelOrder: true,
     })
@@ -899,7 +905,7 @@ async function fetchFunnelProductOrders(apiKey: string, from: string, to: string
   const orders: any[] = []
 
   for (const product of result.products) {
-    addFunnelProductOrders(orders, product, Number(product?.statistic?.selected?.orderCount) || 0, to)
+    addFunnelProductOrders(orders, product, product?.statistic?.selected || {}, to)
   }
 
   return { orders, error: result.error }
@@ -915,7 +921,7 @@ async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): 
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
     if (index < dates.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, FUNNEL_REQUEST_INTERVAL_MS))
+      await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }
   }
 
@@ -937,7 +943,7 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
       if (result.orders.length > 0) orders.push(...result.orders)
       if (result.error) errors.push(result.error)
       if (offset + FUNNEL_HISTORY_MAX_DAYS < rangeDates.length) {
-        await new Promise(resolve => setTimeout(resolve, 1200))
+        await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
       }
     }
 
@@ -1001,15 +1007,19 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
         const nmId = Number(row?.product?.nmId) || 0
         const product = productByNmId.get(nmId) || row
         for (const day of row?.history || []) {
-          const count = Number(day?.orderCount) || 0
           const date = String(day?.date || '').slice(0, 10)
-          if (date >= from && date <= to) addFunnelProductOrders(orders, product, count, date)
+          if (date >= from && date <= to) {
+            addFunnelProductOrders(orders, product, {
+              orderCount: day?.orderCount,
+              orderSum: day?.orderSum,
+            }, date)
+          }
         }
       }
     }
 
     if (offset + chunkSize < nmIds.length) {
-      await new Promise(resolve => setTimeout(resolve, 1200))
+      await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }
   }
 
@@ -1021,12 +1031,20 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
 
 async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string): Promise<{ orders: any[]; error?: string }> {
   const dates = getDateRange(from, to)
-  if (dates.length === 0) return { orders: [], error: 'Некорректный период для воронки продаж' }
-  if (dates.length === 1) return fetchFunnelProductOrders(apiKey, from, to)
-  if (!canLiveLoadDailyRange(dates, FUNNEL_HISTORY_MAX_DAYS)) {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  const historyFrom = new Date(nowMoscow)
+  historyFrom.setUTCDate(historyFrom.getUTCDate() - FUNNEL_HISTORY_MAX_DAYS)
+  const strategy = getDailyFunnelLoadStrategy(dates, FUNNEL_HISTORY_MAX_DAYS, {
+    from: historyFrom.toISOString().split('T')[0],
+    to: nowMoscow.toISOString().split('T')[0],
+  })
+  if (strategy === 'single-day') return fetchFunnelProductOrders(apiKey, from, to)
+  if (strategy === 'history') return fetchFunnelHistoryOrders(apiKey, from, to)
+  if (strategy === 'daily') return fetchFunnelProductOrdersByDate(apiKey, dates)
+  if (dates.length > FUNNEL_HISTORY_MAX_DAYS) {
     return { orders: [], error: 'Живое восстановление дневных данных ограничено периодом до 7 дней. Дождитесь планового прогрева кэша.' }
   }
-  return fetchFunnelProductOrdersByDate(apiKey, dates)
+  return { orders: [], error: 'Некорректный период для воронки продаж' }
 }
 
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
@@ -2087,10 +2105,8 @@ export async function GET(request: NextRequest) {
         response.dailyByEntrepreneur = dailyByEntrepreneurPayload
       }
       if (section === 'daily' && (shouldUseFunnelOrders || dataMetric === 'sales')) {
-        const failedEntrepreneurIds = new Set(rateLimitErrors.map((error) => error.id))
-        const cacheableTargets = dataMetric === 'sales'
-          ? targets.filter((ent) => !failedEntrepreneurIds.has(ent.id))
-          : rateLimitErrors.length === 0 ? targets : []
+        const cacheableTargetIds = new Set(getCacheableDailyTargetIds(results))
+        const cacheableTargets = targets.filter((ent) => cacheableTargetIds.has(ent.id))
         const datesToCache = dailyPayload?.dates || []
         await Promise.all(cacheableTargets.flatMap((ent) => datesToCache.map((date: string) => {
           const dayPayload = sliceDailyPayloadByDate(dailyByEntrepreneurPayload[ent.id], date)
