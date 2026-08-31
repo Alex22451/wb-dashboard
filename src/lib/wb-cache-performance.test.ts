@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   canLiveLoadDailyRange,
+  buildDailyRecoveryPlan,
   getMissingDailyTargetIdsByDate,
   getMissingDailyDates,
   shouldLiveLoadDailyRange,
@@ -12,6 +13,24 @@ import {
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-cache-performance.ts'
+
+test('plans exact seller recovery for daily dates after the last warm cache date', () => {
+  assert.deepEqual(buildDailyRecoveryPlan({
+    requestedDates: ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30'],
+    daily: { dates: ['2026-08-27', '2026-08-28'] },
+    incompleteDates: ['2026-08-28', '2026-08-29', '2026-08-30'],
+    missingTargetIdsByDate: {
+      '2026-08-28': [12, 12, -1],
+      '2026-08-29': [11],
+      '2026-08-30': [11, 12],
+    },
+    fallbackSelection: 'all',
+  }), [
+    { date: '2026-08-28', selection: '12' },
+    { date: '2026-08-29', selection: '11' },
+    { date: '2026-08-30', selection: '11,12' },
+  ])
+})
 
 test('requires a complete Redis response when the dashboard requests complete data', () => {
   assert.equal(shouldServeDailyCache({ missing: 1, requireComplete: true }), false)

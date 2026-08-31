@@ -39,6 +39,33 @@ export function getMissingDailyDates(
   return requestedDates.filter((date) => !availableDates.has(date) || incomplete.has(date))
 }
 
+export function buildDailyRecoveryPlan(input: {
+  requestedDates: string[]
+  daily: any
+  incompleteDates?: string[]
+  missingTargetIdsByDate?: Record<string, unknown>
+  fallbackSelection: string
+}): Array<{ date: string; selection: string }> {
+  const missingDates = getMissingDailyDates(
+    input.requestedDates,
+    input.daily,
+    input.incompleteDates || [],
+  )
+
+  return missingDates.map((date) => {
+    const rawIds = input.missingTargetIdsByDate?.[date]
+    const targetIds = Array.isArray(rawIds)
+      ? [...new Set(rawIds
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0))]
+      : []
+    return {
+      date,
+      selection: targetIds.length > 0 ? targetIds.join(',') : input.fallbackSelection,
+    }
+  })
+}
+
 export function getMissingDailyTargetIdsByDate(input: {
   targetIds: number[]
   dates: string[]
