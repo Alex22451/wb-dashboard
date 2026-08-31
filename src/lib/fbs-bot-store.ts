@@ -2,13 +2,15 @@
 import { FbsBotSnapshotSchema, type FbsBotSnapshot } from './fbs-bot-contract.ts'
 // @ts-expect-error TS5097 is intentional for the standalone unit test command.
 import { hasRedisConfig, redisCommand } from './redis-cache.ts'
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLER_DISPLAY_NAMES, FBS_BOT_SELLER_IDS } from './fbs-bot-sellers.ts'
 
 export const FBS_BOT_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:latest'
-const FBS_BOT_ANDREY_SNAPSHOT_KEY = 'dashboard:fbs-bot:v1:zubakhin-andrey:latest'
-const FBS_BOT_SELLER_IDS = ['zubakhina', 'zubakhin-andrey'] as const satisfies readonly FbsBotSnapshot['sellerId'][]
 
 export function snapshotKey(sellerId: FbsBotSnapshot['sellerId']): string {
-  return sellerId === 'zubakhina' ? FBS_BOT_SNAPSHOT_KEY : FBS_BOT_ANDREY_SNAPSHOT_KEY
+  return sellerId === 'zubakhina'
+    ? FBS_BOT_SNAPSHOT_KEY
+    : `dashboard:fbs-bot:v1:${sellerId}:latest`
 }
 
 type StoreErrorCode = 'unconfigured' | 'unavailable' | 'corrupt' | 'unexpected_result'
@@ -114,7 +116,10 @@ local function valid_current(value, expected_seller, allow_legacy_zubakhina)
     and value.sellerDisplayName == nil
   local seller_names = {
     zubakhina='Зубахина',
-    ['zubakhin-andrey']='Зубахин Андрей'
+    ['zubakhin-andrey']='Зубахин Андрей',
+    ['maslyakov-aa']='Масляков А.А.',
+    burago='Бураго',
+    ['maslyakov-lev']='Масляков Лев'
   }
   local expected_name = seller_names[value.sellerId]
   if expected_name == nil then return false end
@@ -237,7 +242,7 @@ function migrateLegacySnapshot(
     return input
   }
 
-  return { ...input, sellerDisplayName: 'Зубахина' }
+  return { ...input, sellerDisplayName: FBS_BOT_SELLER_DISPLAY_NAMES[sellerId] }
 }
 
 export function createFbsBotStore(options: FbsBotStoreOptions = {}) {

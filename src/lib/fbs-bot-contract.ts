@@ -1,5 +1,8 @@
 import { z } from 'zod'
 
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLERS } from './fbs-bot-sellers.ts'
+
 export const FBS_BOT_CONTRACT_VERSION = 1 as const
 
 const IsoDateSchema = z.string().datetime({ offset: true })
@@ -96,6 +99,21 @@ export const FbsBotSnapshotSchema = z.discriminatedUnion('sellerId', [
     sellerId: z.literal('zubakhin-andrey'),
     sellerDisplayName: z.literal('Зубахин Андрей'),
   }).strict(),
+  z.object({
+    ...FbsBotSnapshotShape,
+    sellerId: z.literal('maslyakov-aa'),
+    sellerDisplayName: z.literal('Масляков А.А.'),
+  }).strict(),
+  z.object({
+    ...FbsBotSnapshotShape,
+    sellerId: z.literal('burago'),
+    sellerDisplayName: z.literal('Бураго'),
+  }).strict(),
+  z.object({
+    ...FbsBotSnapshotShape,
+    sellerId: z.literal('maslyakov-lev'),
+    sellerDisplayName: z.literal('Масляков Лев'),
+  }).strict(),
 ])
 
 const LegacyZubakhinaSnapshotSchema = z.object({
@@ -111,7 +129,7 @@ export const FbsBotSnapshotIngressSchema = z.union([
   : { ...snapshot, sellerDisplayName: 'Зубахина' as const })
 
 export const FbsBotFleetStatusResponseSchema = z.object({
-  snapshots: z.array(FbsBotSnapshotSchema).max(2).superRefine((snapshots, context) => {
+  snapshots: z.array(FbsBotSnapshotSchema).max(FBS_BOT_SELLERS.length).superRefine((snapshots, context) => {
     const seenSellerIds = new Set<string>()
     for (const [index, snapshot] of snapshots.entries()) {
       if (seenSellerIds.has(snapshot.sellerId)) {

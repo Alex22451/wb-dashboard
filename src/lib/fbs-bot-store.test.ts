@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { FbsBotSnapshot } from './fbs-bot-contract.ts'
+// @ts-expect-error TS5097 is intentional for the standalone unit test command.
+import { FBS_BOT_SELLER_DISPLAY_NAMES, FBS_BOT_SELLER_IDS } from './fbs-bot-sellers.ts'
 import {
   createFbsBotStore,
   FBS_BOT_SNAPSHOT_KEY,
@@ -31,9 +33,11 @@ function makeSnapshot(
     errors: [],
   }
 
-  return sellerId === 'zubakhina'
-    ? { ...snapshotFields, sellerId, sellerDisplayName: 'Зубахина' }
-    : { ...snapshotFields, sellerId, sellerDisplayName: 'Зубахин Андрей' }
+  return {
+    ...snapshotFields,
+    sellerId,
+    sellerDisplayName: FBS_BOT_SELLER_DISPLAY_NAMES[sellerId],
+  } as FbsBotSnapshot
 }
 
 test('snapshot keys preserve the legacy cabinet key and isolate the new cabinet', () => {
@@ -58,7 +62,7 @@ test('loadAll rejects missing Redis configuration without issuing a command', as
   assert.equal(commandCalled, false)
 })
 
-test('loadAll reads both seller keys in registry order and omits missing snapshots', async () => {
+test('loadAll reads all seller keys in registry order and omits missing snapshots', async () => {
   const calls: unknown[][] = []
   const andreySnapshot = makeSnapshot('2026-08-12T10:00:00.000Z', 'zubakhin-andrey')
   const store = createFbsBotStore({
@@ -69,15 +73,12 @@ test('loadAll reads both seller keys in registry order and omits missing snapsho
       assert.equal(typeof command[1], 'string')
       assert.equal(command[2], 1)
       assert.equal(command.length, 4)
-      return command[3] === snapshotKey('zubakhina') ? 0 : JSON.stringify(andreySnapshot)
+      return command[3] === snapshotKey('zubakhin-andrey') ? JSON.stringify(andreySnapshot) : 0
     },
   })
 
   assert.deepEqual(await store.loadAll(), [andreySnapshot])
-  assert.deepEqual(calls.map(command => command[3]), [
-    'dashboard:fbs-bot:v1:latest',
-    'dashboard:fbs-bot:v1:zubakhin-andrey:latest',
-  ])
+  assert.deepEqual(calls.map(command => command[3]), FBS_BOT_SELLER_IDS.map(snapshotKey))
 })
 
 test('loadAll maps null and unexpected Redis response types to unavailable', async () => {
@@ -89,20 +90,19 @@ test('loadAll maps null and unexpected Redis response types to unavailable', asy
   }
 })
 
-test('loadAll returns both valid snapshots in registry order', async () => {
-  const zubakhinaSnapshot = makeSnapshot()
-  const andreySnapshot = makeSnapshot('2026-08-12T11:00:00.000Z', 'zubakhin-andrey')
+test('loadAll returns every valid snapshot in registry order', async () => {
+  const snapshots = FBS_BOT_SELLER_IDS.map((sellerId, index) =>
+    makeSnapshot(`2026-08-12T1${index}:00:00.000Z`, sellerId))
   const store = createFbsBotStore({
     hasConfig: () => true,
     command: async (command) => {
       assert.equal(command[0], 'EVAL')
-      return command[3] === snapshotKey('zubakhina')
-        ? JSON.stringify(zubakhinaSnapshot)
-        : JSON.stringify(andreySnapshot)
+      const snapshot = snapshots.find(item => snapshotKey(item.sellerId) === command[3])
+      return JSON.stringify(snapshot)
     },
   })
 
-  assert.deepEqual(await store.loadAll(), [zubakhinaSnapshot, andreySnapshot])
+  assert.deepEqual(await store.loadAll(), snapshots)
 })
 
 test('loadAll migrates only the exact pre-display-name Zubakhina snapshot', async () => {
@@ -123,9 +123,9 @@ test('loadAll migrates only the exact pre-display-name Zubakhina snapshot', asyn
   delete incompleteAndreySnapshot.sellerDisplayName
   const corruptStore = createFbsBotStore({
     hasConfig: () => true,
-    command: async command => command[3] === snapshotKey('zubakhina')
-      ? 0
-      : JSON.stringify(incompleteAndreySnapshot),
+    command: async command => command[3] === snapshotKey('zubakhin-andrey')
+      ? JSON.stringify(incompleteAndreySnapshot)
+      : 0,
   })
 
   await assert.rejects(corruptStore.loadAll(), (error: unknown) => (
@@ -141,7 +141,7 @@ test('loadAll surfaces corruption from either seller key', async () => {
   ]) {
     const store = createFbsBotStore({
       hasConfig: () => true,
-      command: async command => command[3] === snapshotKey('zubakhina') ? 0 : stored,
+      command: async command => command[3] === snapshotKey('zubakhin-andrey') ? stored : 0,
     })
     await assert.rejects(store.loadAll(), (error: unknown) => (
       error instanceof FbsBotStoreError && error.code === 'corrupt'

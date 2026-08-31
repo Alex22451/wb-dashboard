@@ -1,20 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'node:crypto'
 import { hasRedisConfig, redisCommand } from '@/lib/redis-cache'
 import { getAllVercelWbTargets, type WbTarget } from '@/lib/user-store'
+import { validateInternalSecret } from '@/lib/internal-request-auth'
 
-function getBaseUrl(request: NextRequest): string {
-  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
-  const proto = request.headers.get('x-forwarded-proto') || 'https'
-  return `${proto}://${host}`
+export const maxDuration = 240
+
+function getBaseUrl(): string | null {
+  const configured = process.env.WB_INTERNAL_ORIGIN || process.env.VERCEL_URL || ''
+  if (!configured) return null
+  try {
+    const url = new URL(configured.includes('://') ? configured : `https://${configured}`)
+    if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null
+    return url.origin
+  } catch {
+    return null
+  }
 }
 
-const WARM_BATCH_SIZE = 3
-const WARM_BATCH_PAUSE_MS = 61_000
-const FORCE_REFRESH_RECENT_DAYS = 3
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+const WARM_RANGE_DAYS = 7
 
 function getMoscowDashboardWarmRange(days: number) {
   const mskNow = new Date(Date.now() + 3 * 3600000)
@@ -37,41 +41,6 @@ function getDateRange(from: string, to: string) {
   return dates
 }
 
-function getRecentDates(to: string, days: number) {
-  return getDateRange(
-    new Date(new Date(`${to}T00:00:00.000Z`).getTime() - (days - 1) * 86400000).toISOString().split('T')[0],
-    to,
-  )
-}
-
-async function pruneOldDailyRedisKeys() {
-  const patterns = ['wb:daily:v1:*', 'wb:daily:v2:*', 'wb:daily:v3:*']
-  const deletedByPattern: Record<string, number> = {}
-  let totalDeleted = 0
-
-  for (const pattern of patterns) {
-    let cursor = '0'
-    let scanned = 0
-    deletedByPattern[pattern] = 0
-
-    do {
-      const result = await redisCommand<[string, string[]]>(['SCAN', cursor, 'MATCH', pattern, 'COUNT', 100])
-      if (!Array.isArray(result)) break
-      cursor = String(result[0] || '0')
-      const keys = Array.isArray(result[1]) ? result[1] : []
-      scanned += keys.length
-      if (keys.length) {
-        const deleted = await redisCommand<number>(['DEL', ...keys])
-        const count = Number(deleted || 0)
-        deletedByPattern[pattern] += count
-        totalDeleted += count
-      }
-    } while (cursor !== '0' && scanned < 1000)
-  }
-
-  return { totalDeleted, deletedByPattern }
-}
-
 async function probeRedis() {
   const key = `wb:probe:${Date.now()}`
   const value = 'ok'
@@ -88,15 +57,18 @@ async function probeRedis() {
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = request.headers.get('authorization') || ''
-    const token = request.nextUrl.searchParams.get('secret') || ''
-    if (auth !== `Bearer ${cronSecret}` && token !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'CRON_SECRET is required for cache warmup' }, { status: 503 })
+  }
+  const auth = request.headers.get('authorization') || ''
+  if (!validateInternalSecret(auth.startsWith('Bearer ') ? auth.slice(7) : '', cronSecret)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const baseUrl = getBaseUrl(request)
+  const baseUrl = getBaseUrl()
+  if (!baseUrl) {
+    return NextResponse.json({ error: 'WB_INTERNAL_ORIGIN or VERCEL_URL is required for cache warmup' }, { status: 503 })
+  }
   const internalToken = process.env.WB_VERCEL_API_TOKEN
   if (!internalToken) {
     return NextResponse.json({ error: 'WB_VERCEL_API_TOKEN is required for cache warmup' }, { status: 500 })
@@ -104,20 +76,23 @@ export async function GET(request: NextRequest) {
 
   const scope = request.nextUrl.searchParams.get('scope') === 'admin' ? 'admin' : 'all'
   const requestedMetric = request.nextUrl.searchParams.get('metric')
-  const metricMode: 'all' | 'orders' | 'sales' = requestedMetric === 'orders' || requestedMetric === 'sales' ? requestedMetric : 'all'
+  const metricMode: 'orders' | 'sales' = requestedMetric === 'sales' ? 'sales' : 'orders'
   const explicitDate = request.nextUrl.searchParams.get('date') || ''
-  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || (scope === 'all' ? 30 : 14))
-  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), 30) : (scope === 'all' ? 30 : 14)
+  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || WARM_RANGE_DAYS)
+  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), WARM_RANGE_DAYS) : WARM_RANGE_DAYS
   const { from, to } = getMoscowDashboardWarmRange(periodDays)
   const warmDates = explicitDate ? [explicitDate] : getDateRange(from, to)
-  const forceRefreshDates = new Set(explicitDate ? [explicitDate] : getRecentDates(to, FORCE_REFRESH_RECENT_DAYS))
   const availableTargets = scope === 'all' || metricMode !== 'orders' ? await getAllVercelWbTargets() : []
   const allTargets = scope === 'all' ? availableTargets : []
   const salesTargets = scope === 'all'
     ? allTargets
     : availableTargets.filter((target) => target.id < 100000)
-  const redisPrune = await pruneOldDailyRedisKeys()
   const redisProbe = await probeRedis()
+  const lockToken = randomUUID()
+  const lockResult = await redisCommand<string | null>(['SET', 'wb:cron:warm-wb:lock', lockToken, 'NX', 'EX', 270])
+  if (lockResult !== 'OK') {
+    return NextResponse.json({ error: 'Cache warmup is already running' }, { status: 409 })
+  }
 
   const startedAt = Date.now()
   const warmedDates: string[] = []
@@ -125,27 +100,21 @@ export async function GET(request: NextRequest) {
   const cacheHitDates: string[] = []
   const salesCacheHitDates: string[] = []
   const rateLimitErrors: any[] = []
-  const adWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; totalSpend: number; errors: any[] }> = []
-  const monthlyWarmups: Array<{ ok: boolean; status: number; cacheSource: string | null; months: number; errors: any[] }> = []
-  const productionWarmups: Array<{ days: number; from: string; to: string; ok: boolean; status: number; cacheSource: string | null; dates: number; errors: any[] }> = []
   let entrepreneurs = 0
   let ok = true
   let status = 200
 
-  const requestDate = async (date: string, target?: WbTarget, metric: 'orders' | 'sales' = 'orders') => {
+  const requestRange = async (rangeFrom: string, rangeTo: string, target?: WbTarget, metric: 'orders' | 'sales' = 'orders') => {
     const url = new URL('/api/wb-data', baseUrl)
     url.searchParams.set('entrepreneurId', target ? String(target.id) : 'all')
     url.searchParams.set('section', 'daily')
-    url.searchParams.set('dateFrom', date)
-    url.searchParams.set('dateTo', date)
+    url.searchParams.set('dateFrom', rangeFrom)
+    url.searchParams.set('dateTo', rangeTo)
+    url.searchParams.set('complete', '1')
+    url.searchParams.set('refresh', '1')
     if (metric === 'sales') url.searchParams.set('metric', 'sales')
-    const forceRefresh = forceRefreshDates.has(date)
-    if (forceRefresh) url.searchParams.set('refresh', '1')
     if (target) {
       url.searchParams.set('warmId', String(target.id))
-      url.searchParams.set('warmName', target.name)
-      url.searchParams.set('warmApiKey', target.wbApiKey)
-      if (target.useCategoryMapping) url.searchParams.set('warmUseCategoryMapping', '1')
     }
 
     const response = await fetch(url, {
@@ -153,7 +122,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'x-wb-internal-warm': internalToken,
       },
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(210000),
     })
     const json = await response.json().catch(() => ({}))
     if (!response.ok) {
@@ -164,184 +133,45 @@ export async function GET(request: NextRequest) {
       rateLimitErrors.push(...json.rateLimitErrors)
     }
     const dates = Array.isArray(json?.daily?.dates) ? json.daily.dates : []
-    if (dates.includes(date) && (!json?.rateLimitErrors || json.rateLimitErrors.length === 0)) {
-      if (metric === 'sales') warmedSalesDates.push(date)
-      else warmedDates.push(date)
+    if (!json?.rateLimitErrors || json.rateLimitErrors.length === 0) {
+      if (metric === 'sales') warmedSalesDates.push(...dates)
+      else warmedDates.push(...dates)
     }
     if (json?.cacheSource === 'redis') {
-      if (metric === 'sales') salesCacheHitDates.push(date)
-      else cacheHitDates.push(date)
+      if (metric === 'sales') salesCacheHitDates.push(...dates)
+      else cacheHitDates.push(...dates)
     }
     const dailyByEntrepreneur = json?.dailyByEntrepreneur && typeof json.dailyByEntrepreneur === 'object'
       ? Object.keys(json.dailyByEntrepreneur).length
       : 0
     entrepreneurs = Math.max(entrepreneurs, dailyByEntrepreneur)
     return {
-      date,
+      from: rangeFrom,
+      to: rangeTo,
       metric,
       target: target ? { id: target.id, name: target.name } : { id: 0, name: 'admin' },
       ok: response.ok,
       status: response.status,
       cacheSource: json?.cacheSource || null,
-      refreshed: forceRefresh,
+      refreshed: true,
     }
   }
 
-  const requestAdPeriod = async (days: number) => {
-    const range = getMoscowDashboardWarmRange(days)
-    const url = new URL('/api/ad-spend', baseUrl)
-    url.searchParams.set('entrepreneurId', 'all')
-    url.searchParams.set('scope', scope)
-    url.searchParams.set('from', range.from)
-    url.searchParams.set('to', range.to)
+  const salesWarmDates = metricMode === 'sales' ? warmDates : []
+  const batches: Array<Array<Awaited<ReturnType<typeof requestRange>>>> = []
+  const metricTargets = metricMode === 'sales' ? salesTargets : allTargets
+  const batch = scope === 'all'
+    ? await Promise.all(metricTargets.map((target) => requestRange(warmDates[0], warmDates[warmDates.length - 1], target, metricMode)))
+    : [await requestRange(warmDates[0], warmDates[warmDates.length - 1], undefined, metricMode)]
+  batches.push(batch)
 
-    const response = await fetch(url, {
-      cache: 'no-store',
-      headers: {
-        'x-wb-internal-warm': internalToken,
-      },
-      signal: AbortSignal.timeout(180000),
-    })
-    const json = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      ok = false
-      status = response.status
-    }
-    if (Array.isArray(json?.errors) && json.errors.length) {
-      rateLimitErrors.push(...json.errors)
-    }
-    return {
-      days,
-      from: range.from,
-      to: range.to,
-      ok: response.ok,
-      status: response.status,
-      totalSpend: Number(json?.totalSpend || 0),
-      errors: Array.isArray(json?.errors) ? json.errors : [],
-    }
-  }
-
-  const requestMonthly = async () => {
-    const url = new URL('/api/wb-data', baseUrl)
-    url.searchParams.set('entrepreneurId', 'all')
-    url.searchParams.set('section', 'monthly')
-    url.searchParams.set('refresh', '1')
-
-    const response = await fetch(url, {
-      cache: 'no-store',
-      headers: {
-        'x-wb-internal-warm': internalToken,
-      },
-      signal: AbortSignal.timeout(240000),
-    })
-    const json = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      ok = false
-      status = response.status
-    }
-    if (Array.isArray(json?.rateLimitErrors) && json.rateLimitErrors.length) {
-      rateLimitErrors.push(...json.rateLimitErrors)
-    }
-    return {
-      ok: response.ok,
-      status: response.status,
-      cacheSource: json?.cacheSource || null,
-      months: Array.isArray(json?.monthly?.months) ? json.monthly.months.length : 0,
-      errors: Array.isArray(json?.rateLimitErrors) ? json.rateLimitErrors : [],
-    }
-  }
-
-  const requestProductionPeriod = async (days: number) => {
-    const range = getMoscowDashboardWarmRange(days)
-    const url = new URL('/api/wb-data', baseUrl)
-    url.searchParams.set('entrepreneurId', 'all')
-    url.searchParams.set('section', 'production')
-    url.searchParams.set('dateFrom', range.from)
-    url.searchParams.set('dateTo', range.to)
-    url.searchParams.set('capacity', '2500')
-    url.searchParams.set('refresh', '1')
-
-    const response = await fetch(url, {
-      cache: 'no-store',
-      headers: {
-        'x-wb-internal-warm': internalToken,
-      },
-      signal: AbortSignal.timeout(240000),
-    })
-    const json = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      ok = false
-      status = response.status
-    }
-    if (Array.isArray(json?.rateLimitErrors) && json.rateLimitErrors.length) {
-      rateLimitErrors.push(...json.rateLimitErrors)
-    }
-    return {
-      days,
-      from: range.from,
-      to: range.to,
-      ok: response.ok,
-      status: response.status,
-      cacheSource: json?.cacheSource || null,
-      dates: Array.isArray(json?.production?.dates) ? json.production.dates.length : 0,
-      errors: Array.isArray(json?.rateLimitErrors) ? json.rateLimitErrors : [],
-    }
-  }
-
-  const batches: Array<Array<{ date: string; metric: 'orders' | 'sales'; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }>> = []
-  let lastDailyBatchFromRedis = true
-
-  const warmMetricDates = async (metric: 'orders' | 'sales', batchSize: number) => {
-    for (let offset = 0; offset < warmDates.length; offset += batchSize) {
-      const batchDates = warmDates.slice(offset, offset + batchSize)
-      const batch = scope === 'all'
-        ? (await Promise.all(batchDates.flatMap((date) => allTargets.map((target) => requestDate(date, target, metric)))))
-        : await Promise.all(batchDates.map((date) => requestDate(date, undefined, metric)))
-      batches.push(batch)
-      const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
-      lastDailyBatchFromRedis = batchFromRedis
-      if (!batchFromRedis && offset + batchSize < warmDates.length) {
-        await sleep(WARM_BATCH_PAUSE_MS)
-      }
-    }
-  }
-
-  if (metricMode !== 'sales') {
-    await warmMetricDates('orders', scope === 'all' ? 1 : WARM_BATCH_SIZE)
-  }
-
-  const salesWarmDates = metricMode === 'sales' || explicitDate
-    ? warmDates
-    : warmDates.filter((date) => forceRefreshDates.has(date))
-  if (metricMode !== 'orders' && salesWarmDates.length > 0) {
-    if (!lastDailyBatchFromRedis) await sleep(WARM_BATCH_PAUSE_MS)
-    for (let index = 0; index < salesWarmDates.length; index++) {
-      const date = salesWarmDates[index]
-      const batch: Array<{ date: string; metric: 'orders' | 'sales'; target: { id: number; name: string }; ok: boolean; status: number; cacheSource: string | null; refreshed: boolean }> = []
-      if (salesTargets.length > 0) {
-        for (const target of salesTargets) {
-          batch.push(await requestDate(date, target, 'sales'))
-        }
-      } else {
-        batch.push(await requestDate(date, undefined, 'sales'))
-      }
-      batches.push(batch)
-      const batchFromRedis = batch.every((item) => item.cacheSource === 'redis')
-      if (!batchFromRedis && index < salesWarmDates.length - 1) {
-        await sleep(WARM_BATCH_PAUSE_MS)
-      }
-    }
-  }
-
-  if (!explicitDate && metricMode !== 'sales') {
-    monthlyWarmups.push(await requestMonthly())
-    for (const days of [7, 14, 30]) {
-      productionWarmups.push(await requestProductionPeriod(days))
-    }
-    for (const days of [7, 14, 30]) {
-      adWarmups.push(await requestAdPeriod(days))
-    }
-  }
+  await redisCommand<number>([
+    'EVAL',
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+    '1',
+    'wb:cron:warm-wb:lock',
+    lockToken,
+  ])
 
   return NextResponse.json({
     warmedAt: new Date().toISOString(),
@@ -350,25 +180,21 @@ export async function GET(request: NextRequest) {
     metricMode,
     period: { from, to },
     section: 'daily',
-    warmedSections: explicitDate ? ['daily', 'daily-sales'] : ['daily', 'daily-sales', 'monthly', 'production', 'ads'],
+    warmedSections: metricMode === 'sales' ? ['daily-sales'] : ['daily'],
     ok,
     status,
     durationMs: Date.now() - startedAt,
-    dates: warmedDates,
-    salesDates: warmedSalesDates,
-    cacheHitDates,
-    salesCacheHitDates,
-    forceRefreshDates: [...forceRefreshDates],
+    dates: [...new Set(warmedDates)].sort(),
+    salesDates: [...new Set(warmedSalesDates)].sort(),
+    cacheHitDates: [...new Set(cacheHitDates)].sort(),
+    salesCacheHitDates: [...new Set(salesCacheHitDates)].sort(),
+    forceRefreshDates: warmDates,
     salesWarmDates,
     entrepreneurs,
     targets: scope === 'all' ? allTargets.map((target) => ({ id: target.id, name: target.name })) : 'admin',
     salesTargets: salesTargets.map((target) => ({ id: target.id, name: target.name })),
     rateLimitErrors,
     batches,
-    monthlyWarmups,
-    productionWarmups,
-    adWarmups,
-    redisPrune,
     redisProbe,
   })
 }

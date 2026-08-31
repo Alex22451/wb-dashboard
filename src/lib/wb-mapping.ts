@@ -13,6 +13,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Карнавальные маски', types: ['маски'] },
   { subject: 'Чехлы для бутылей', types: ['чехлы для бутылей'] },
   { subject: 'Чехлы для чемоданов', types: ['чехлы на чемодан'] },
+  { subject: 'Чехлы на сиденья', types: ['накидки на сиденье'] },
   { subject: 'Фартуки кухонные', types: ['фартуки'] },
   { subject: 'Флаги', types: ['флаги'] },
   { subject: 'Коврики пляжные', types: ['пляжные коврики'] },
@@ -96,7 +97,7 @@ const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
   гобелен: 'Гобелены',
 }
 
-export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'sized-pillows-v2'
+export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'pillowcase-size-v4'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
@@ -381,7 +382,7 @@ function extractUniquePillowSize(article: string): string | null {
     }
   }
 
-  for (const match of article.matchAll(/_(\d{2,3})_[Пп]_/g)) {
+  for (const match of article.matchAll(/_(\d{2,3})_[ПпНн]_/g)) {
     sizes.add(pillowShortCodeSize(match[1]))
   }
 
@@ -401,12 +402,20 @@ export function classifyFbsProduct(input: FbsProductInput): FbsClassification {
   const hasFullKnownSubject = SUBJECT_TO_EXCEL_TYPES.some(
     entry => subjectLower.includes(entry.subject.toLocaleLowerCase('ru-RU')),
   )
-  if (!hasFullKnownSubject) return { kind: 'blocked_unknown_category' }
 
-  let productType = mapWbOrderToType(subject, input.article, input.brand)
+  let productType = hasFullKnownSubject
+    ? mapWbOrderToType(subject, input.article, input.brand)
+    : /_коврик_/i.test(input.article)
+      ? 'коврики для мыши'
+      : null
   if (!productType) return { kind: 'blocked_unknown_category' }
 
-  if (productType === 'подушка внутренняя' || productType === 'подушка декоративная') {
+  if (
+    productType === 'подушка внутренняя'
+    || productType === 'подушка декоративная'
+    || productType === 'наволочка декоративная'
+    || productType === 'наволочки под сублимацию'
+  ) {
     const size = extractUniquePillowSize(input.article)
     if (!size) return { kind: 'blocked_unknown_size' }
     productType = `${productType} ${size}`
