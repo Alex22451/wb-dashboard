@@ -9,12 +9,15 @@ import {
   canLiveLoadDailyRange,
   getCacheableDailyTargetIds,
   getDailyFunnelLoadStrategy,
+  getFunnelRequestDelayMs,
   getFunnelOrderMetrics,
   getMissingDailyTargetIdsByDate,
   shouldRefreshDailyCache,
   shouldLiveLoadDailyRange,
   shouldServeDailyCache,
   sliceDailyPayloadByDate,
+  splitDailyLoadIssues,
+  getWbRateLimitRetryDelayMs,
   WB_FUNNEL_REQUEST_INTERVAL_MS,
 } from '@/lib/wb-cache-performance'
 import {
@@ -35,6 +38,11 @@ interface CacheEntry {
 
 const apiCache = new Map<string, CacheEntry>()
 const inFlightRequests = new Map<string, Promise<any>>()
+const funnelRateStates = new Map<string, {
+  lastReservedRequestAt?: number
+  blockedUntil: number
+  version: number
+}>()
 
 function apiKeyFingerprint(apiKey: string): string {
   return createHash('sha256').update(normalizeApiKey(apiKey)).digest('hex').slice(0, 16)
@@ -60,6 +68,59 @@ async function fetchWbStatistics(url: string, headers: Record<string, string>, t
     await sleep((attempt + 1) * 1500)
   }
   throw lastError || new Error('WB statistics request failed')
+}
+
+function reserveLocalFunnelRequestSlot(apiKey: string): { delayMs: number; version: number } {
+  const accountKey = apiKeyFingerprint(apiKey)
+  const state = funnelRateStates.get(accountKey) || { blockedUntil: 0, version: 0 }
+  const now = Date.now()
+  const earliestStartAt = Math.max(now, state.blockedUntil)
+  const intervalDelayMs = getFunnelRequestDelayMs(state.lastReservedRequestAt, earliestStartAt)
+  const reservedAt = earliestStartAt + intervalDelayMs
+  state.lastReservedRequestAt = reservedAt
+  funnelRateStates.set(accountKey, state)
+  return { delayMs: reservedAt - now, version: state.version }
+}
+
+function blockLocalFunnelRequests(apiKey: string, cooldownMs: number): void {
+  const accountKey = apiKeyFingerprint(apiKey)
+  const state = funnelRateStates.get(accountKey) || { blockedUntil: 0, version: 0 }
+  state.blockedUntil = Math.max(state.blockedUntil, Date.now() + cooldownMs)
+  state.version += 1
+  funnelRateStates.set(accountKey, state)
+}
+
+async function waitForLocalFunnelRequestSlot(apiKey: string): Promise<void> {
+  const accountKey = apiKeyFingerprint(apiKey)
+  while (true) {
+    const reservation = reserveLocalFunnelRequestSlot(apiKey)
+    if (reservation.delayMs > 0) await sleep(reservation.delayMs)
+    if (funnelRateStates.get(accountKey)?.version === reservation.version) return
+  }
+}
+
+async function fetchWbFunnel(
+  apiKey: string,
+  url: string,
+  init: RequestInit,
+  maxAttempts = 3,
+): Promise<Response> {
+  let response: Response | undefined
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await waitForLocalFunnelRequestSlot(apiKey)
+    response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(45000),
+    })
+    if (response.status !== 429 && response.status !== 461) return response
+    if (attempt === maxAttempts - 1) return response
+    const retryDelayMs = getWbRateLimitRetryDelayMs(
+      response.headers.get('x-ratelimit-retry') || response.headers.get('retry-after'),
+      attempt,
+    )
+    blockLocalFunnelRequests(apiKey, retryDelayMs)
+  }
+  return response as Response
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string, metric: DataMetric): string {
@@ -331,6 +392,7 @@ function mergeDailyPayloads(days: any[], dates: string[]) {
   }
 
   return {
+    fulfillmentComplete: days.every((day) => day.fulfillmentComplete !== false),
     dates,
     allDates: dates,
     products,
@@ -825,7 +887,7 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
     const limit = FUNNEL_PRODUCTS_PAGE_LIMIT
 
     while (offset < 250000) {
-      const response = await fetch(FUNNEL_PRODUCTS_URL, {
+      const response = await fetchWbFunnel(apiKey, FUNNEL_PRODUCTS_URL, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
@@ -842,7 +904,6 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
           limit,
           offset,
         }),
-        signal: AbortSignal.timeout(45000),
       })
 
       if (response.status === 429 || response.status === 461) {
@@ -864,7 +925,6 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
       if (products.length < limit) break
       if (positiveProducts.length < products.length) break
       offset += limit
-      await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }
 
     return { products: allProducts }
@@ -973,7 +1033,7 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
 
   for (let offset = 0; offset < nmIds.length; offset += chunkSize) {
     const chunk = nmIds.slice(offset, offset + chunkSize)
-    const response = await fetch(FUNNEL_PRODUCTS_HISTORY_URL, {
+    const response = await fetchWbFunnel(apiKey, FUNNEL_PRODUCTS_HISTORY_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${normalizeApiKey(apiKey)}`,
@@ -985,7 +1045,6 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
         skipDeletedNm: false,
         aggregationLevel: 'day',
       }),
-      signal: AbortSignal.timeout(45000),
     })
 
     if (response.status === 429 || response.status === 461) {
@@ -1016,10 +1075,6 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
           }
         }
       }
-    }
-
-    if (offset + chunkSize < nmIds.length) {
-      await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }
   }
 
@@ -1403,7 +1458,9 @@ export async function GET(request: NextRequest) {
           if (needDaily || needProduction) {
             try {
               const ordersUrl = `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=1`
-              const response = await fetchWbStatistics(ordersUrl, apiHeaders)
+              // This request only enriches the already complete Analytics totals with
+              // FBO/FBS. Do not hammer the 1/min Statistics endpoint on a 429.
+              const response = await fetchWbStatistics(ordersUrl, apiHeaders, 30000, 1)
               if (response.status === 429 || response.status === 461) {
                 returnError = 'WB API ограничил загрузку FBO/FBS. Подождите минуту и повторите.'
               } else if (response.status === 401) {
@@ -1631,20 +1688,23 @@ export async function GET(request: NextRequest) {
       mapOrders(fulfillmentOrders, allFulfillmentMappedOrders)
     }
 
-    // Collect rate limit errors for UI display
-    const rateLimitErrors = results
-      .flatMap(r => {
-        const errors: Array<{ id: number; name: string; error: string }> = []
-        if (r.error) errors.push({ id: r.entrepreneurId, name: r.entrepreneurName, error: r.error })
-        if (r.returnError) errors.push({ id: r.entrepreneurId, name: r.entrepreneurName, error: r.returnError })
-        return errors
-      })
+    const fulfillmentIncompleteTargetIds = new Set(
+      shouldUseFunnelOrders
+        ? results.filter((result) => !!result.returnError).map((result) => result.entrepreneurId)
+        : [],
+    )
+
+    // Primary order errors block the requested totals. Fulfillment enrichment errors
+    // remain visible warnings but must not discard complete Analytics order totals.
+    const loadIssues = splitDailyLoadIssues(results, shouldUseFunnelOrders)
+    const rateLimitErrors = loadIssues.errors
+    const fulfillmentWarnings = loadIssues.warnings
 
     // Build response based on requested section(s)
     // Product types (shared across sections)
     const productTypes = [...new Set(allMappedOrders.map(o => o.mappedType))]
 
-    const response: Record<string, any> = { rateLimitErrors }
+    const response: Record<string, any> = { rateLimitErrors, fulfillmentWarnings }
     let dailyPayload: any = null
     let dailyByEntrepreneurPayload: Record<string, any> = {}
 
@@ -2065,6 +2125,7 @@ export async function GET(request: NextRequest) {
         }
 
         return {
+          fulfillmentComplete: !dailyTargets.some((target) => fulfillmentIncompleteTargetIds.has(target.id)),
           dates: visibleDailyDates,
           allDates: allDailyDates,
           products: dailyProducts,
@@ -2105,7 +2166,9 @@ export async function GET(request: NextRequest) {
         response.dailyByEntrepreneur = dailyByEntrepreneurPayload
       }
       if (section === 'daily' && (shouldUseFunnelOrders || dataMetric === 'sales')) {
-        const cacheableTargetIds = new Set(getCacheableDailyTargetIds(results))
+        const cacheableTargetIds = new Set(getCacheableDailyTargetIds(results, {
+          allowReturnErrors: shouldUseFunnelOrders,
+        }))
         const cacheableTargets = targets.filter((ent) => cacheableTargetIds.has(ent.id))
         const datesToCache = dailyPayload?.dates || []
         await Promise.all(cacheableTargets.flatMap((ent) => datesToCache.map((date: string) => {

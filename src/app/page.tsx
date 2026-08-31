@@ -125,6 +125,7 @@ interface DashboardData {
 }
 
 interface DailyOrdersData {
+  fulfillmentComplete?: boolean
   dates: string[]
   allDates?: string[]
   products: { id: number; name: string }[]
@@ -1700,7 +1701,7 @@ function DataTable({ data, fulfillmentFilter = 'all', buyoutData = null, showBuy
   const grandTotal = activeProductTotals ? Object.values(activeProductTotals).reduce((s, v) => s + v, 0) : 0
   const buyoutDateTotals = showBuyouts ? getDailyDateTotals(buyoutData, fulfillmentFilter) : []
   const grandBuyoutTotal = buyoutDateTotals.reduce((sum, value) => sum + Number(value || 0), 0)
-  const showFulfillmentBreakdown = fulfillmentFilter === 'all'
+  const showFulfillmentBreakdown = fulfillmentFilter === 'all' && data.fulfillmentComplete !== false
   const maxCellValue = Math.max(1, ...Object.values(activePivot).flatMap((row) => Object.values(row)))
   const heatStyle = (value: number | undefined) => {
     const val = value || 0
@@ -2284,6 +2285,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
     }
 
     return {
+      fulfillmentComplete: days.every((day) => day.fulfillmentComplete !== false),
       dates,
       allDates: dates,
       products,
@@ -2724,7 +2726,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           )}
         </Button>
 
-        {fetchedData && (
+        {fetchedData?.fulfillmentComplete !== false && (
           <ToggleGroup type="single" value={fulfillmentFilter} onValueChange={(v) => { if (v) setFulfillmentFilter(v as 'all' | 'fbs' | 'fbo') }} className="justify-start rounded-md border">
             <ToggleGroupItem value="all" className="text-xs px-3">Все</ToggleGroupItem>
             <ToggleGroupItem value="fbs" className="text-xs px-3 text-amber-700 dark:text-amber-400">FBS</ToggleGroupItem>
@@ -2737,6 +2739,11 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
         <Skeleton className="h-96 w-full" />
       ) : fetchedData ? (
         <div className="space-y-4">
+          {fetchedData.fulfillmentComplete === false && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              Заказы загружены полностью. Разбивка FBS/FBO временно недоступна и не показана.
+            </div>
+          )}
           {/* FBS/FBO summary cards */}
           {fetchedData.dates.length > 0 && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -2747,20 +2754,20 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                   {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.productTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
               </Card>
-              <Card className="border-amber-200 dark:border-amber-800">
+              {fetchedData.fulfillmentComplete !== false && <Card className="border-amber-200 dark:border-amber-800">
                 <CardContent className="pt-4 pb-4">
                   <div className="text-xs text-amber-700 dark:text-amber-400 mb-1">FBS (склад продавца)</div>
                   <div className="text-xl font-bold text-amber-700 dark:text-amber-400">{formatNumber(Object.values(fetchedData.fbsProductTotals).reduce((s, v) => s + v, 0))}</div>
                   {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.fbsProductTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
-              </Card>
-              <Card className="border-sky-200 dark:border-sky-800">
+              </Card>}
+              {fetchedData.fulfillmentComplete !== false && <Card className="border-sky-200 dark:border-sky-800">
                 <CardContent className="pt-4 pb-4">
                   <div className="text-xs text-sky-700 dark:text-sky-400 mb-1">FBO (склад WB)</div>
                   <div className="text-xl font-bold text-sky-700 dark:text-sky-400">{formatNumber(Object.values(fetchedData.fboProductTotals).reduce((s, v) => s + v, 0))}</div>
                   {showBuyouts && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Выкупы: {formatNumber(Object.values(buyoutData?.fboProductTotals || {}).reduce((s, v) => s + Number(v || 0), 0))}</div>}
                 </CardContent>
-              </Card>
+              </Card>}
             </div>
           )}
           {fetchedData.dates.length > 0 && fetchedData.entrepreneurs.length > 1 && (
@@ -2790,11 +2797,11 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                               <span className="text-right">
                                 <span className="block font-semibold">{formatNumber(total)}</span>
                                 {showBuyouts && <span className="block text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.entrepreneurDailyData?.[date]?.[ent.id] || 0)}</span>}
-                                <span className="block text-[11px] text-muted-foreground">
+                                {fetchedData.fulfillmentComplete !== false && <span className="block text-[11px] text-muted-foreground">
                                   <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
                                   <span className="mx-1">/</span>
                                   <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fbo)}</span>
-                                </span>
+                                </span>}
                               </span>
                             </div>
                           )
@@ -2804,11 +2811,11 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                           <span className="text-right">
                             <span className="block font-semibold">{formatNumber(fetchedData.dateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
                             {showBuyouts && <span className="block text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.dateTotals?.[fetchedData.dates.indexOf(date)] || 0)}</span>}
-                            <span className="block text-[11px] text-muted-foreground">
+                            {fetchedData.fulfillmentComplete !== false && <span className="block text-[11px] text-muted-foreground">
                               <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
                               <span className="mx-1">/</span>
                               <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fetchedData.fboDateTotals[fetchedData.dates.indexOf(date)] || 0)}</span>
-                            </span>
+                            </span>}
                           </span>
                         </div>
                       </div>
@@ -2838,22 +2845,22 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                               <td key={ent.id} className="px-3 py-2 text-right">
                                 <div className="font-medium">{formatNumber(total)}</div>
                                 {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.entrepreneurDailyData?.[date]?.[ent.id] || 0)}</div>}
-                                <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                                {fetchedData.fulfillmentComplete !== false && <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
                                   <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fbs)}</span>
                                   <span className="mx-1">/</span>
                                   <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fbo)}</span>
-                                </div>
+                                </div>}
                               </td>
                             )
                           })}
                           <td className="px-3 py-2 text-right">
                             <div className="font-semibold">{formatNumber(fetchedData.dateTotals[dateIdx] || 0)}</div>
                             {showBuyouts && <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">В {formatNumber(buyoutData?.dateTotals?.[dateIdx] || 0)}</div>}
-                            <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                            {fetchedData.fulfillmentComplete !== false && <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
                               <span className="text-amber-700 dark:text-amber-400">FBS {formatNumber(fetchedData.fbsDateTotals[dateIdx] || 0)}</span>
                               <span className="mx-1">/</span>
                               <span className="text-sky-700 dark:text-sky-400">FBO {formatNumber(fetchedData.fboDateTotals[dateIdx] || 0)}</span>
-                            </div>
+                            </div>}
                           </td>
                         </tr>
                       ))}
@@ -2863,7 +2870,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
               </CardContent>
             </Card>
           )}
-          <DataTable data={fetchedData} fulfillmentFilter={fulfillmentFilter} buyoutData={buyoutData} showBuyouts={showBuyouts} />
+          <DataTable data={fetchedData} fulfillmentFilter={fetchedData.fulfillmentComplete === false ? 'all' : fulfillmentFilter} buyoutData={buyoutData} showBuyouts={showBuyouts} />
         </div>
       ) : (
         <EmptyState
