@@ -7,9 +7,12 @@ import {
   buildDailyRecoveryPlan,
   getCacheableDailyTargetIds,
   getDailyFunnelLoadStrategy,
+  getFunnelRequestDelayMs,
   getFunnelOrderMetrics,
   getMissingDailyTargetIdsByDate,
   getMissingDailyDates,
+  splitDailyLoadIssues,
+  getWbRateLimitRetryDelayMs,
   shouldLiveLoadDailyRange,
   shouldRefreshDailyCache,
   shouldServeDailyCache,
@@ -53,12 +56,45 @@ test('paces funnel requests at or above the documented twenty-second interval', 
   assert.ok(WB_FUNNEL_REQUEST_INTERVAL_MS >= 20_000)
 })
 
+test('paces the first history request after the preceding products request', () => {
+  assert.equal(getFunnelRequestDelayMs(1_000, 1_000), WB_FUNNEL_REQUEST_INTERVAL_MS)
+  assert.equal(getFunnelRequestDelayMs(1_000, 11_000), WB_FUNNEL_REQUEST_INTERVAL_MS - 10_000)
+  assert.equal(getFunnelRequestDelayMs(1_000, 1_000 + WB_FUNNEL_REQUEST_INTERVAL_MS), 0)
+  assert.equal(getFunnelRequestDelayMs(2_000, 1_000), WB_FUNNEL_REQUEST_INTERVAL_MS + 1_000)
+  assert.equal(getFunnelRequestDelayMs(undefined, 1_000), 0)
+})
+
+test('honors WB rate-limit retry headers with a bounded fallback', () => {
+  assert.equal(getWbRateLimitRetryDelayMs('2', 0), 2_250)
+  assert.equal(getWbRateLimitRetryDelayMs(null, 0), WB_FUNNEL_REQUEST_INTERVAL_MS)
+  assert.equal(getWbRateLimitRetryDelayMs(null, 1), WB_FUNNEL_REQUEST_INTERVAL_MS * 2)
+  assert.equal(getWbRateLimitRetryDelayMs('999', 0), 60_000)
+})
+
 test('keeps successful seller cache partitions when another seller fails', () => {
   assert.deepEqual(getCacheableDailyTargetIds([
     { entrepreneurId: 11 },
     { entrepreneurId: 12, error: 'rate limited' },
     { entrepreneurId: 13, returnError: 'fulfillment unavailable' },
   ]), [11])
+
+  assert.deepEqual(getCacheableDailyTargetIds([
+    { entrepreneurId: 11 },
+    { entrepreneurId: 12, error: 'primary orders unavailable' },
+    { entrepreneurId: 13, returnError: 'fulfillment breakdown unavailable' },
+  ], { allowReturnErrors: true }), [11, 13])
+})
+
+test('keeps fulfillment-only failures non-blocking for order totals', () => {
+  const results = [
+    { entrepreneurId: 11, entrepreneurName: 'Seller 11', error: 'orders unavailable' },
+    { entrepreneurId: 12, entrepreneurName: 'Seller 12', returnError: 'FBO/FBS unavailable' },
+  ]
+  assert.deepEqual(splitDailyLoadIssues(results, true), {
+    errors: [{ id: 11, name: 'Seller 11', error: 'orders unavailable' }],
+    warnings: [{ id: 12, name: 'Seller 12', error: 'FBO/FBS unavailable' }],
+  })
+  assert.equal(splitDailyLoadIssues(results, false).errors.length, 2)
 })
 
 test('collapses missing day partitions into one bounded range recovery selection', () => {
@@ -165,6 +201,7 @@ test('cache-only wins over an internal refresh request', () => {
 
 test('slices a multi-day daily payload into one cacheable day', () => {
   const daily = {
+    fulfillmentComplete: false,
     dates: ['2026-08-22', '2026-08-23'],
     allDates: ['2026-08-22', '2026-08-23'],
     products: [{ id: 0, name: 'Плед ФЛИС' }],
@@ -203,6 +240,7 @@ test('slices a multi-day daily payload into one cacheable day', () => {
   }
 
   assert.deepEqual(sliceDailyPayloadByDate(daily, '2026-08-23'), {
+    fulfillmentComplete: false,
     dates: ['2026-08-23'],
     allDates: ['2026-08-23'],
     products: [{ id: 0, name: 'Плед ФЛИС' }],

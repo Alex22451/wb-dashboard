@@ -1,5 +1,27 @@
 export const WB_FUNNEL_REQUEST_INTERVAL_MS = 21000
 
+export function getFunnelRequestDelayMs(
+  previousRequestStartedAt: number | undefined,
+  now: number,
+  intervalMs = WB_FUNNEL_REQUEST_INTERVAL_MS,
+): number {
+  if (previousRequestStartedAt === undefined) return 0
+  return Math.max(0, previousRequestStartedAt + intervalMs - now)
+}
+
+export function getWbRateLimitRetryDelayMs(
+  retryAfterSeconds: string | null,
+  retryAttempt: number,
+  fallbackIntervalMs = WB_FUNNEL_REQUEST_INTERVAL_MS,
+): number {
+  const parsedSeconds = Number(retryAfterSeconds)
+  const headerDelayMs = Number.isFinite(parsedSeconds) && parsedSeconds > 0
+    ? Math.ceil(parsedSeconds * 1000) + 250
+    : 0
+  const fallbackDelayMs = fallbackIntervalMs * Math.max(1, retryAttempt + 1)
+  return Math.min(60_000, headerDelayMs || fallbackDelayMs)
+}
+
 export function shouldServeDailyCache(input: {
   missing: number
   requireComplete: boolean
@@ -42,10 +64,32 @@ export function getCacheableDailyTargetIds(results: Array<{
   entrepreneurId: number
   error?: string
   returnError?: string
-}>): number[] {
+}>, options: { allowReturnErrors?: boolean } = {}): number[] {
   return results
-    .filter((result) => !result.error && !result.returnError)
+    .filter((result) => !result.error && (options.allowReturnErrors || !result.returnError))
     .map((result) => result.entrepreneurId)
+}
+
+export function splitDailyLoadIssues(results: Array<{
+  entrepreneurId: number
+  entrepreneurName: string
+  error?: string
+  returnError?: string
+}>, treatReturnErrorsAsWarnings: boolean): {
+  errors: Array<{ id: number; name: string; error: string }>
+  warnings: Array<{ id: number; name: string; error: string }>
+} {
+  const errors: Array<{ id: number; name: string; error: string }> = []
+  const warnings: Array<{ id: number; name: string; error: string }> = []
+  for (const result of results) {
+    if (result.error) errors.push({ id: result.entrepreneurId, name: result.entrepreneurName, error: result.error })
+    if (result.returnError) {
+      const issue = { id: result.entrepreneurId, name: result.entrepreneurName, error: result.returnError }
+      if (treatReturnErrorsAsWarnings) warnings.push(issue)
+      else errors.push(issue)
+    }
+  }
+  return { errors, warnings }
 }
 
 export function shouldLiveLoadDailyRange(input: {
@@ -184,6 +228,7 @@ export function sliceDailyPayloadByDate(daily: any, date: string): any | null {
   fillProductTotals(fboPivot, fboProductTotals)
 
   return {
+    fulfillmentComplete: daily.fulfillmentComplete !== false,
     dates: [date],
     allDates: [date],
     products,
