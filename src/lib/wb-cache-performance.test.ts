@@ -3,16 +3,74 @@ import test from 'node:test'
 
 import {
   canLiveLoadDailyRange,
+  buildDailyRangeRecoverySelection,
   buildDailyRecoveryPlan,
+  getCacheableDailyTargetIds,
+  getDailyFunnelLoadStrategy,
+  getFunnelOrderMetrics,
   getMissingDailyTargetIdsByDate,
   getMissingDailyDates,
   shouldLiveLoadDailyRange,
   shouldRefreshDailyCache,
   shouldServeDailyCache,
   sliceDailyPayloadByDate,
+  WB_FUNNEL_REQUEST_INTERVAL_MS,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-cache-performance.ts'
+
+test('loads a week through one history strategy instead of seven daily calls', () => {
+  const historyWindow = { from: '2026-08-24', to: '2026-08-31' }
+  assert.equal(getDailyFunnelLoadStrategy(['2026-08-30'], 7, historyWindow), 'single-day')
+  assert.equal(getDailyFunnelLoadStrategy([
+    '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27',
+    '2026-08-28', '2026-08-29', '2026-08-30',
+  ], 7, historyWindow), 'history')
+  assert.equal(getDailyFunnelLoadStrategy([
+    '2026-08-10', '2026-08-11', '2026-08-12',
+  ], 7, historyWindow), 'daily')
+  assert.equal(getDailyFunnelLoadStrategy(
+    Array.from({ length: 8 }, (_, index) => `2026-08-${String(index + 1).padStart(2, '0')}`),
+    7,
+    historyWindow,
+  ), 'unsupported')
+})
+
+test('uses each history day order sum instead of repeating the range revenue', () => {
+  assert.deepEqual(getFunnelOrderMetrics({ orderCount: 2, orderSum: 240 }), {
+    count: 2,
+    orderSum: 240,
+    unitRevenue: 120,
+  })
+  assert.deepEqual(getFunnelOrderMetrics({ orderCount: 0, orderSum: 700 }), {
+    count: 0,
+    orderSum: 700,
+    unitRevenue: 0,
+  })
+})
+
+test('paces funnel requests at or above the documented twenty-second interval', () => {
+  assert.ok(WB_FUNNEL_REQUEST_INTERVAL_MS >= 20_000)
+})
+
+test('keeps successful seller cache partitions when another seller fails', () => {
+  assert.deepEqual(getCacheableDailyTargetIds([
+    { entrepreneurId: 11 },
+    { entrepreneurId: 12, error: 'rate limited' },
+    { entrepreneurId: 13, returnError: 'fulfillment unavailable' },
+  ]), [11])
+})
+
+test('collapses missing day partitions into one bounded range recovery selection', () => {
+  assert.equal(buildDailyRangeRecoverySelection([
+    { date: '2026-08-28', selection: '12' },
+    { date: '2026-08-29', selection: '11' },
+    { date: '2026-08-30', selection: '11,12' },
+  ], 'all'), '11,12')
+  assert.equal(buildDailyRangeRecoverySelection([
+    { date: '2026-08-28', selection: 'all' },
+  ], 'all'), 'all')
+})
 
 test('plans exact seller recovery for daily dates after the last warm cache date', () => {
   assert.deepEqual(buildDailyRecoveryPlan({
