@@ -7,6 +7,9 @@ import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
 import {
   canLiveLoadDailyRange,
+  getMissingDailyTargetIdsByDate,
+  shouldRefreshDailyCache,
+  shouldLiveLoadDailyRange,
   shouldServeDailyCache,
   sliceDailyPayloadByDate,
 } from '@/lib/wb-cache-performance'
@@ -365,12 +368,28 @@ async function readMergedRedisDailyPayload(
 }
 
 async function readAvailableMergedRedisDailyPayload(
-  targets: Array<{ wbApiKey: string; useCategoryMapping?: boolean }>,
+  targets: Array<{ id: number; wbApiKey: string; useCategoryMapping?: boolean }>,
   dates: string[],
   metric: DataMetric = 'orders',
-): Promise<{ daily: any | null; present: number; missing: number; total: number }> {
+): Promise<{
+  daily: any | null
+  present: number
+  missing: number
+  total: number
+  missingDates: string[]
+  missingEntrepreneurIdsByDate: Record<string, number[]>
+}> {
   const total = targets.length * dates.length
-  if (dates.length === 0 || targets.length === 0) return { daily: null, present: 0, missing: total, total }
+  if (dates.length === 0 || targets.length === 0) {
+    return {
+      daily: null,
+      present: 0,
+      missing: total,
+      total,
+      missingDates: [...dates],
+      missingEntrepreneurIdsByDate: Object.fromEntries(dates.map((date) => [date, targets.map((target) => target.id)])),
+    }
+  }
 
   const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)))
   let rawRows: unknown[] | null = null
@@ -389,11 +408,19 @@ async function readAvailableMergedRedisDailyPayload(
   }
 
   const dailyRows: any[] = []
-  for (const raw of rawRows) {
+  const presentRows = rawRows.map(() => false)
+  const presentByDate = new Map(dates.map((date) => [date, 0]))
+  for (let index = 0; index < rawRows.length; index += 1) {
+    const raw = rawRows[index]
     if (!raw || typeof raw !== 'string') continue
     try {
       const parsed = JSON.parse(raw)
-      if (parsed?.daily?.dates && Array.isArray(parsed.daily.dates)) dailyRows.push(parsed.daily)
+      const date = dates[index % dates.length]
+      if (Array.isArray(parsed?.daily?.dates) && parsed.daily.dates.includes(date)) {
+        dailyRows.push(parsed.daily)
+        presentRows[index] = true
+        presentByDate.set(date, (presentByDate.get(date) || 0) + 1)
+      }
     } catch {
       // Ignore malformed cache entries; the next warmup will replace them.
     }
@@ -404,6 +431,12 @@ async function readAvailableMergedRedisDailyPayload(
     present: dailyRows.length,
     missing: Math.max(total - dailyRows.length, 0),
     total,
+    missingDates: dates.filter((date) => (presentByDate.get(date) || 0) < targets.length),
+    missingEntrepreneurIdsByDate: getMissingDailyTargetIdsByDate({
+      targetIds: targets.map((target) => target.id),
+      dates,
+      presentRows,
+    }),
   }
 }
 
@@ -816,8 +849,7 @@ async function fetchFunnelProducts(apiKey: string, from: string, to: string): Pr
         return { products: allProducts, error: `Нет доступа к воронке продаж (${response.status})` }
       }
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        return { products: allProducts, error: `Ошибка воронки продаж (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}` }
+        return { products: allProducts, error: `Ошибка воронки продаж (${response.status}). Повторите попытку позже.` }
       }
 
       const data = await response.json()
@@ -959,8 +991,7 @@ async function fetchFunnelHistoryOrders(apiKey: string, from: string, to: string
       break
     }
     if (!response.ok) {
-      const body = await response.json().catch(() => ({}))
-      errors.push(`Ошибка истории воронки (${response.status}): ${body.detail || body.title || body.message || 'неизвестная ошибка'}`)
+      errors.push(`Ошибка истории воронки (${response.status}). Повторите попытку позже.`)
       break
     }
 
@@ -1025,6 +1056,7 @@ export async function GET(request: NextRequest) {
     const section = searchParams.get('section') || '' // 'dashboard' | 'daily' | 'monthly' | 'production' | '' (all)
     const includeAdminAngelina = user.role === 'admin' && searchParams.get('includeAngelina') === '1'
     const requireCompleteDailyCache = section === 'daily' && searchParams.get('complete') === '1'
+    const cacheOnlyDaily = section === 'daily' && searchParams.get('cacheOnly') === '1'
     const requestedMetric: DataMetric = searchParams.get('metric') === 'sales' ? 'sales' : 'orders'
     const dataMetric: DataMetric = section === 'production' || section === 'supply' ? 'orders' : requestedMetric
 
@@ -1140,8 +1172,13 @@ export async function GET(request: NextRequest) {
       : section === 'production'
         ? `production:${productionCapacity}:${productionLoadCacheVersion}`
         : null
-    const shouldRefreshReportCache = internalWarmRequest && searchParams.get('refresh') === '1'
-    const shouldRefreshDailyCache = section === 'daily' && shouldRefreshReportCache
+    const refreshRequested = searchParams.get('refresh') === '1'
+    const shouldRefreshReportCache = internalWarmRequest && refreshRequested
+    const refreshDailyCache = section === 'daily' && shouldRefreshDailyCache({
+      internalWarmRequest,
+      refreshRequested,
+      cacheOnly: cacheOnlyDaily,
+    })
     if (reportCacheSection && !shouldRefreshReportCache) {
       const cachedReport = await readRedisReportResponse(reportCacheSection, targets, requestedDateFrom, requestedDateTo, dataMetric)
       if (cachedReport) {
@@ -1200,7 +1237,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (section === 'daily' && !useExactSingleDayStats && !shouldRefreshDailyCache) {
+    if (section === 'daily' && !useExactSingleDayStats && !refreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, dataMetric)
       if (cachedDaily.daily && shouldServeDailyCache({
@@ -1220,11 +1257,31 @@ export async function GET(request: NextRequest) {
             present: cachedDaily.present,
             missing: cachedDaily.missing,
             total: cachedDaily.total,
+            missingDates: cachedDaily.missingDates,
+            missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
           },
           daily: cachedDaily.daily,
         })
       }
-      if (!canLiveLoadDailyRange(currentDates, FUNNEL_HISTORY_MAX_DAYS)) {
+      if (!shouldLiveLoadDailyRange({
+        dates: currentDates,
+        cacheOnly: cacheOnlyDaily,
+        maxDays: FUNNEL_HISTORY_MAX_DAYS,
+      })) {
+        if (cacheOnlyDaily) {
+          return NextResponse.json({
+            rateLimitErrors: [],
+            cacheSource: 'redis-miss',
+            cacheStats: {
+              present: cachedDaily.present,
+              missing: cachedDaily.missing,
+              total: cachedDaily.total,
+              missingDates: cachedDaily.missingDates,
+              missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
+            },
+            daily: null,
+          })
+        }
         return NextResponse.json({
           rateLimitErrors: [{
             id: 0,
@@ -1236,18 +1293,21 @@ export async function GET(request: NextRequest) {
             present: cachedDaily.present,
             missing: cachedDaily.missing,
             total: cachedDaily.total,
+            missingDates: cachedDaily.missingDates,
+            missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
           },
           daily: cachedDaily.daily || null,
         })
       }
     }
 
-    if (section === 'daily' && useExactSingleDayStats && !shouldRefreshDailyCache) {
+    if (section === 'daily' && useExactSingleDayStats && !refreshDailyCache) {
       const cachedDailyRows = await Promise.all(targets.map(async (ent) => ({
         ent,
         daily: await readRedisDailyPayload(ent.wbApiKey, requestedDateFrom, dailyCacheVariant(ent), dataMetric),
       })))
       const availableDailyRows = cachedDailyRows.filter((row) => row.daily)
+      const missingEntrepreneurIds = cachedDailyRows.filter((row) => !row.daily).map((row) => row.ent.id)
       const missing = cachedDailyRows.length - availableDailyRows.length
       if (availableDailyRows.length > 0 && shouldServeDailyCache({
         missing,
@@ -1267,9 +1327,29 @@ export async function GET(request: NextRequest) {
             present: availableDailyRows.length,
             missing,
             total: cachedDailyRows.length,
+            missingDates: missing === 0 ? [] : [requestedDateFrom],
+            missingEntrepreneurIdsByDate: { [requestedDateFrom]: missingEntrepreneurIds },
           },
           daily: mergeDailyPayloads(availableDailyRows.map((row) => row.daily), [requestedDateFrom]),
           dailyByEntrepreneur,
+        })
+      }
+      if (!shouldLiveLoadDailyRange({
+        dates: [requestedDateFrom],
+        cacheOnly: cacheOnlyDaily,
+        maxDays: FUNNEL_HISTORY_MAX_DAYS,
+      })) {
+        return NextResponse.json({
+          rateLimitErrors: [],
+          cacheSource: 'redis-miss',
+          cacheStats: {
+            present: availableDailyRows.length,
+            missing,
+            total: cachedDailyRows.length,
+            missingDates: [requestedDateFrom],
+            missingEntrepreneurIdsByDate: { [requestedDateFrom]: missingEntrepreneurIds },
+          },
+          daily: null,
         })
       }
     }
@@ -2351,6 +2431,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(response)
   } catch (e: any) {
     console.error('wb-data error:', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return NextResponse.json({ error: 'Не удалось загрузить данные WB. Повторите попытку.' }, { status: 500 })
   }
 }

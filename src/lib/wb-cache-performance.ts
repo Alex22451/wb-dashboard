@@ -9,6 +9,49 @@ export function canLiveLoadDailyRange(dates: string[], maxDays = 7): boolean {
   return dates.length > 0 && dates.length <= maxDays
 }
 
+export function shouldLiveLoadDailyRange(input: {
+  dates: string[]
+  cacheOnly: boolean
+  maxDays?: number
+}): boolean {
+  return !input.cacheOnly && canLiveLoadDailyRange(input.dates, input.maxDays)
+}
+
+export function shouldRefreshDailyCache(input: {
+  internalWarmRequest: boolean
+  refreshRequested: boolean
+  cacheOnly: boolean
+}): boolean {
+  return input.internalWarmRequest && input.refreshRequested && !input.cacheOnly
+}
+
+export function getMissingDailyDates(
+  requestedDates: string[],
+  daily: any,
+  incompleteDates: string[] = [],
+): string[] {
+  const availableDates = new Set(
+    Array.isArray(daily?.dates)
+      ? daily.dates.filter((date: unknown): date is string => typeof date === 'string')
+      : [],
+  )
+  const incomplete = new Set(incompleteDates)
+  return requestedDates.filter((date) => !availableDates.has(date) || incomplete.has(date))
+}
+
+export function getMissingDailyTargetIdsByDate(input: {
+  targetIds: number[]
+  dates: string[]
+  presentRows: boolean[]
+}): Record<string, number[]> {
+  return Object.fromEntries(input.dates.map((date, dateIndex) => [
+    date,
+    input.targetIds.filter((_, targetIndex) => (
+      !input.presentRows[(targetIndex * input.dates.length) + dateIndex]
+    )),
+  ]))
+}
+
 export function sliceDailyPayloadByDate(daily: any, date: string): any | null {
   const sourceDateIdx = daily?.dates?.indexOf(date)
   if (sourceDateIdx === undefined || sourceDateIdx < 0) return null

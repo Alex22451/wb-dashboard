@@ -3,6 +3,10 @@ import test from 'node:test'
 
 import {
   canLiveLoadDailyRange,
+  getMissingDailyTargetIdsByDate,
+  getMissingDailyDates,
+  shouldLiveLoadDailyRange,
+  shouldRefreshDailyCache,
   shouldServeDailyCache,
   sliceDailyPayloadByDate,
 // Node's native TypeScript runner requires the explicit extension.
@@ -26,6 +30,60 @@ test('allows live daily recovery only inside the supported seven-day budget', ()
     '2026-08-20', '2026-08-21', '2026-08-22', '2026-08-23',
   ]), false)
   assert.equal(canLiveLoadDailyRange([]), false)
+})
+
+test('recovers only dates missing from a partial Redis range', () => {
+  const requested = [
+    '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27',
+    '2026-08-28', '2026-08-29', '2026-08-30',
+  ]
+
+  assert.deepEqual(getMissingDailyDates(requested, {
+    dates: [
+      '2026-08-24', '2026-08-25', '2026-08-26',
+      '2026-08-28', '2026-08-29', '2026-08-30',
+    ],
+  }), ['2026-08-27'])
+  assert.deepEqual(getMissingDailyDates(requested, {
+    dates: requested,
+  }, ['2026-08-27']), ['2026-08-27'])
+  assert.deepEqual(getMissingDailyDates(requested, null), requested)
+})
+
+test('identifies only the missing seller partitions for each cached date', () => {
+  assert.deepEqual(getMissingDailyTargetIdsByDate({
+    targetIds: [11, 12],
+    dates: ['2026-08-29', '2026-08-30'],
+    // Redis MGET is target-major: 11/29, 11/30, 12/29, 12/30.
+    presentRows: [true, true, true, false],
+  }), {
+    '2026-08-29': [],
+    '2026-08-30': [12],
+  })
+})
+
+test('cache-only probes never start a live WB range load', () => {
+  const dates = ['2026-08-24', '2026-08-25']
+
+  assert.equal(shouldLiveLoadDailyRange({ dates, cacheOnly: true }), false)
+  assert.equal(shouldLiveLoadDailyRange({ dates, cacheOnly: false }), true)
+  assert.equal(shouldLiveLoadDailyRange({
+    dates: Array.from({ length: 8 }, (_, index) => `2026-08-${String(index + 1).padStart(2, '0')}`),
+    cacheOnly: false,
+  }), false)
+})
+
+test('cache-only wins over an internal refresh request', () => {
+  assert.equal(shouldRefreshDailyCache({
+    internalWarmRequest: true,
+    refreshRequested: true,
+    cacheOnly: true,
+  }), false)
+  assert.equal(shouldRefreshDailyCache({
+    internalWarmRequest: true,
+    refreshRequested: true,
+    cacheOnly: false,
+  }), true)
 })
 
 test('slices a multi-day daily payload into one cacheable day', () => {
