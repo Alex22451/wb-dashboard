@@ -44,12 +44,13 @@ export function haveSameWbSellerIdentity(currentToken: string, replacementToken:
 export function applyWbApiKeyOverrides<T extends WbApiKeyTarget>(
   targets: T[],
   overrides: Map<number, string>,
-): Array<T & { useCategoryMapping: true }> {
+): T[] {
   return targets.map((target) => {
     const override = overrides.get(target.id)?.trim()
+    if (!override) return target
     return {
       ...target,
-      wbApiKey: override || target.wbApiKey,
+      wbApiKey: override,
       useCategoryMapping: true,
     }
   })
