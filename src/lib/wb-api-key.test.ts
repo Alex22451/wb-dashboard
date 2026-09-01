@@ -49,18 +49,36 @@ test('deduplicates rotated tokens by seller identity instead of token text', () 
 })
 
 test('applies only non-empty API key overrides to matching configured targets', () => {
+  const oldToken = token({ sid: 'seller-1', nonce: 'old' })
+  const newToken = token({ sid: 'seller-1', nonce: 'new' })
   const targets = [
-    { id: 1, name: 'Seller 1', wbApiKey: 'old-1', wbPromotionApiKey: 'promo-1' },
+    { id: 1, name: 'Seller 1', wbApiKey: oldToken, wbPromotionApiKey: 'promo-1' },
     { id: 2, name: 'Seller 2', wbApiKey: 'old-2', wbPromotionApiKey: 'promo-2' },
   ]
   assert.deepEqual(applyWbApiKeyOverrides(targets, new Map([
-    [1, ' new-1 '],
+    [1, ` ${newToken} `],
     [2, '  '],
     [3, 'new-3'],
   ])), [
-    { id: 1, name: 'Seller 1', wbApiKey: 'new-1', wbPromotionApiKey: 'promo-1', useCategoryMapping: true },
+    {
+      id: 1,
+      name: 'Seller 1',
+      wbApiKey: newToken,
+      wbPromotionApiKey: 'promo-1',
+      useCategoryMapping: true,
+      dailyCacheFallbackWbApiKey: oldToken,
+      dailyCacheFallbackUseCategoryMapping: undefined,
+    },
     { id: 2, name: 'Seller 2', wbApiKey: 'old-2', wbPromotionApiKey: 'promo-2' },
   ])
+})
+
+test('ignores a persisted override when the configured seller identity changed', () => {
+  const configured = token({ sid: 'seller-2', nonce: 'configured' })
+  const staleOverride = token({ sid: 'seller-1', nonce: 'override' })
+  const targets = [{ id: 1, wbApiKey: configured }]
+
+  assert.deepEqual(applyWbApiKeyOverrides(targets, new Map([[1, staleOverride]])), targets)
 })
 
 test('preserves an existing category mapping flag when no override is present', () => {

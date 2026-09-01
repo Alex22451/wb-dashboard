@@ -28,6 +28,8 @@ export interface WbTarget {
   wbApiKey: string
   wbPromotionApiKey?: string | null
   useCategoryMapping?: boolean
+  dailyCacheFallbackWbApiKey?: string
+  dailyCacheFallbackUseCategoryMapping?: boolean
 }
 
 const REDIS_USER_ID_OFFSET = 100000

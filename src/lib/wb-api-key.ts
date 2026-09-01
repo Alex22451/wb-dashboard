@@ -2,6 +2,8 @@ export interface WbApiKeyTarget {
   id: number
   wbApiKey: string
   useCategoryMapping?: boolean
+  dailyCacheFallbackWbApiKey?: string
+  dailyCacheFallbackUseCategoryMapping?: boolean
 }
 
 function readJwtPayload(token: string): Record<string, unknown> | null {
@@ -47,11 +49,15 @@ export function applyWbApiKeyOverrides<T extends WbApiKeyTarget>(
 ): T[] {
   return targets.map((target) => {
     const override = overrides.get(target.id)?.trim()
-    if (!override) return target
+    if (!override || !haveSameWbSellerIdentity(target.wbApiKey, override)) return target
     return {
       ...target,
       wbApiKey: override,
       useCategoryMapping: true,
+      dailyCacheFallbackWbApiKey: target.dailyCacheFallbackWbApiKey || target.wbApiKey,
+      dailyCacheFallbackUseCategoryMapping: target.dailyCacheFallbackWbApiKey
+        ? target.dailyCacheFallbackUseCategoryMapping
+        : target.useCategoryMapping,
     }
   })
 }
