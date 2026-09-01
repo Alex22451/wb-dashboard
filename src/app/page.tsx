@@ -69,7 +69,7 @@ import {
   createDashboardLoadFailure,
   normalizeDashboardLoadErrors,
 } from '@/lib/dashboard-load-errors'
-import { buildDailyRangeRecoverySelection, buildDailyRecoveryPlan, canLiveLoadDailyRange, getMissingDailyDates, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
+import { buildDailyRecoveryPlan, getFunnelRequestDelayMs, getMissingDailyDates, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
 import {
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
@@ -2438,35 +2438,25 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             return
           }
 
-          if (canLiveLoadDailyRange(dates, 7)) {
-            const recoverySelection = buildDailyRangeRecoverySelection(recoveryPlan, selection)
-            const liveResult = await requestRange(recoverySelection, { requireComplete: true })
+          let recoveryFailed = false
+          let previousRecoveryStartedAt: number | undefined
+          for (let index = 0; index < recoveryPlan.length; index += 1) {
+            if (!isActiveLoad()) return
+            const recoveryDelayMs = getFunnelRequestDelayMs(previousRecoveryStartedAt, Date.now())
+            if (recoveryDelayMs > 0) await sleep(recoveryDelayMs)
+            if (!isActiveLoad()) return
+            previousRecoveryStartedAt = Date.now()
+            const { date, selection: recoverySelection } = recoveryPlan[index]
+            const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
             const liveErrors = liveResult.json.rateLimitErrors || []
             if (!liveResult.ok || liveErrors.length || !liveResult.json.daily) {
+              recoveryFailed = true
               errors.push(...(liveErrors.length
                 ? liveErrors
-                : [createDashboardDateLoadFailure(recoveryPlan[0].date, liveResult.json.error)]))
-              return
+                : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
             }
-          } else {
-            let recoveryFailed = false
-            for (let index = 0; index < recoveryPlan.length; index += 1) {
-              if (!isActiveLoad()) return
-              const { date, selection: recoverySelection } = recoveryPlan[index]
-              const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
-              const liveErrors = liveResult.json.rateLimitErrors || []
-              if (!liveResult.ok || liveErrors.length || !liveResult.json.daily) {
-                recoveryFailed = true
-                errors.push(...(liveErrors.length
-                  ? liveErrors
-                  : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
-              }
-              if (liveResult.json.cacheSource !== 'redis' && index < recoveryPlan.length - 1) {
-                await sleep(DASHBOARD_DAILY_RECOVERY_PAUSE_MS)
-              }
-            }
-            if (recoveryFailed) return
           }
+          if (recoveryFailed) return
           if (!isActiveLoad()) return
 
           const completeResult = await requestRange(selection, {
