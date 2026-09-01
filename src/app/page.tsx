@@ -2726,7 +2726,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           )}
         </Button>
 
-        {fetchedData?.fulfillmentComplete !== false && (
+        {fetchedData && fetchedData.fulfillmentComplete !== false && (
           <ToggleGroup type="single" value={fulfillmentFilter} onValueChange={(v) => { if (v) setFulfillmentFilter(v as 'all' | 'fbs' | 'fbo') }} className="justify-start rounded-md border">
             <ToggleGroupItem value="all" className="text-xs px-3">Все</ToggleGroupItem>
             <ToggleGroupItem value="fbs" className="text-xs px-3 text-amber-700 dark:text-amber-400">FBS</ToggleGroupItem>

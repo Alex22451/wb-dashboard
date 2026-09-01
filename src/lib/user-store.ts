@@ -1,6 +1,7 @@
 import type { CurrentUser } from './auth'
 import { getEntrepreneurs } from './entrepreneurs-config'
 import { hasRedisConfig, redisCommand } from './redis-cache'
+import { applyWbApiKeyOverrides, getWbTargetIdentity, getWbTokenTtlSeconds } from './wb-api-key'
 
 export interface StoredUser {
   id: number
@@ -164,6 +165,66 @@ function preferencesKey(id: number) {
   return `wb_user_${id}_preferences`
 }
 
+function adminApiKeyOverrideKey(id: number) {
+  return `wb_admin_${id}_api_key_override`
+}
+
+function parseAdminApiKeyOverride(raw: unknown): string | null {
+  if (!raw) return null
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown>
+    const apiKey = typeof parsed?.apiKey === 'string' ? parsed.apiKey.trim() : ''
+    return apiKey || null
+  } catch {
+    return null
+  }
+}
+
+async function getConfiguredAdminWbTargets(): Promise<WbTarget[]> {
+  const targets: WbTarget[] = getEntrepreneurs()
+    .filter((entrepreneur) => entrepreneur.apiKey && entrepreneur.apiKey.trim() !== '')
+    .map((entrepreneur) => ({
+      id: entrepreneur.id,
+      name: entrepreneur.name,
+      wbApiKey: entrepreneur.apiKey,
+      wbPromotionApiKey: entrepreneur.promotionApiKey || entrepreneur.apiKey,
+    }))
+
+  const overrideRows = await Promise.all(targets.map(async (target) => {
+    try {
+      const raw = await redisCommand<string>(['GET', adminApiKeyOverrideKey(target.id)])
+      return [target.id, parseAdminApiKeyOverride(raw)] as const
+    } catch {
+      return [target.id, null] as const
+    }
+  }))
+  const overrides = new Map<number, string>()
+  for (const [id, apiKey] of overrideRows) {
+    if (apiKey) overrides.set(id, apiKey)
+  }
+  return applyWbApiKeyOverrides(targets, overrides)
+}
+
+export async function saveAdminWbApiKeyOverride(id: number, apiKey: string): Promise<void> {
+  const normalized = apiKey.trim().replace(/^bearer\s+/i, '').trim()
+  const ttlSeconds = getWbTokenTtlSeconds(normalized)
+  if (!Number.isFinite(id) || id <= 0 || !normalized || !ttlSeconds) throw new Error('INVALID_ADMIN_API_KEY_OVERRIDE')
+  const result = await redisCommand<string>(['SET', adminApiKeyOverrideKey(id), JSON.stringify({
+    apiKey: normalized,
+    updatedAt: new Date().toISOString(),
+  }), 'EX', ttlSeconds])
+  if (result !== 'OK') throw new Error('ADMIN_API_KEY_OVERRIDE_STORE_UNAVAILABLE')
+}
+
+export async function clearAdminWbApiKeyOverride(id: number): Promise<void> {
+  if (!Number.isFinite(id) || id <= 0) throw new Error('INVALID_ADMIN_API_KEY_OVERRIDE')
+  const result = await redisCommand<string>(['SET', adminApiKeyOverrideKey(id), JSON.stringify({
+    apiKey: null,
+    disabledAt: new Date().toISOString(),
+  })])
+  if (result !== 'OK') throw new Error('ADMIN_API_KEY_OVERRIDE_STORE_UNAVAILABLE')
+}
+
 export async function getStoredUserById(id: number): Promise<StoredUser | null> {
   if (id < REDIS_USER_ID_OFFSET && getEdgeConfig()) {
     const edgeRaw = await edgeGet<string | StoredUser>(userKey(id))
@@ -309,23 +370,29 @@ async function getAdminAngelinaTarget(): Promise<WbTarget | null> {
 
 export async function getVercelEntrepreneursForUser(user: CurrentUser, options?: { includeAdminAngelina?: boolean }) {
   if (user.role === 'admin') {
-    const rows = getEntrepreneurs().map((e) => ({
+    const rows = (await getConfiguredAdminWbTargets()).map((e) => ({
       id: e.id,
       name: e.name,
-      wbApiKey: e.apiKey || null,
+      wbApiKey: e.wbApiKey || null,
       totalOrders: 0,
-      hasApiKey: !!e.apiKey,
+      hasApiKey: !!e.wbApiKey,
     }))
     if (options?.includeAdminAngelina) {
       const angelinaTarget = await getAdminAngelinaTarget()
       if (angelinaTarget) {
-        rows.push({
-          id: angelinaTarget.id,
-          name: angelinaTarget.name,
-          wbApiKey: angelinaTarget.wbApiKey,
-          totalOrders: 0,
-          hasApiKey: true,
-        })
+        const identities = new Set(rows.map((row) => (
+          getWbTargetIdentity(row.wbApiKey || '')
+        )))
+        const angelinaIdentity = getWbTargetIdentity(angelinaTarget.wbApiKey)
+        if (!identities.has(angelinaIdentity)) {
+          rows.push({
+            id: angelinaTarget.id,
+            name: angelinaTarget.name,
+            wbApiKey: angelinaTarget.wbApiKey,
+            totalOrders: 0,
+            hasApiKey: true,
+          })
+        }
       }
     }
     return rows
@@ -342,16 +409,9 @@ export async function getVercelEntrepreneursForUser(user: CurrentUser, options?:
 }
 
 export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
-  const targets: WbTarget[] = getEntrepreneurs()
-    .filter((e) => e.apiKey && e.apiKey.trim() !== '')
-    .map((e) => ({
-      id: e.id,
-      name: e.name,
-      wbApiKey: e.apiKey,
-      wbPromotionApiKey: e.promotionApiKey || e.apiKey,
-    }))
+  const targets: WbTarget[] = await getConfiguredAdminWbTargets()
 
-  const seen = new Set(targets.map((target) => normalizeApiKey(target.wbApiKey)))
+  const seen = new Set(targets.map((target) => getWbTargetIdentity(target.wbApiKey)))
   const seenTargetIds = new Set(targets.map((target) => target.id))
   let maxUserId = 0
   try {
@@ -452,10 +512,11 @@ export async function getAllVercelWbTargets(): Promise<WbTarget[]> {
     if (!user) continue
     if (!keys?.apiKey) continue
     const normalized = normalizeApiKey(keys.apiKey)
-    if (!normalized || seen.has(normalized)) continue
+    const identity = getWbTargetIdentity(keys.apiKey)
+    if (!normalized || seen.has(identity)) continue
     const targetId = REDIS_USER_ID_OFFSET + user.id
     if (seenTargetIds.has(targetId)) continue
-    seen.add(normalized)
+    seen.add(identity)
     seenTargetIds.add(targetId)
     const isAngelina = user.username.toLowerCase() === 'angelina'
     targets.push({
@@ -476,19 +537,13 @@ export async function getVercelWbTargets(
   options?: { includeAdminAngelina?: boolean },
 ): Promise<WbTarget[]> {
   if (user.role === 'admin') {
-    const rows: WbTarget[] = getEntrepreneurs()
-      .filter((e) => e.apiKey && e.apiKey.trim() !== '')
-      .map((e) => ({
-        id: e.id,
-        name: e.name,
-        wbApiKey: e.apiKey,
-        wbPromotionApiKey: e.promotionApiKey || e.apiKey,
-      }))
+    const rows: WbTarget[] = await getConfiguredAdminWbTargets()
     if (options?.includeAdminAngelina) {
       const angelinaTarget = await getAdminAngelinaTarget()
       if (angelinaTarget) {
-        const seen = new Set(rows.map((row) => normalizeApiKey(row.wbApiKey)))
-        if (!seen.has(normalizeApiKey(angelinaTarget.wbApiKey))) rows.push(angelinaTarget)
+        const seen = new Set(rows.map((row) => getWbTargetIdentity(row.wbApiKey)))
+        const angelinaIdentity = getWbTargetIdentity(angelinaTarget.wbApiKey)
+        if (!seen.has(angelinaIdentity)) rows.push(angelinaTarget)
       }
     }
 

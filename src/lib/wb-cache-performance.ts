@@ -36,13 +36,15 @@ export function canLiveLoadDailyRange(dates: string[], maxDays = 7): boolean {
 export function getDailyFunnelLoadStrategy(
   dates: string[],
   maxDays = 7,
-  historyWindow: { from: string; to: string },
+  _historyWindow: { from: string; to: string },
 ): 'single-day' | 'history' | 'daily' | 'unsupported' {
   if (dates.length === 1) return 'single-day'
   if (dates.length === 0 || dates.length > maxDays) return 'unsupported'
-  return dates.every((date) => date >= historyWindow.from && date <= historyWindow.to)
-    ? 'history'
-    : 'daily'
+  // The history endpoint accepts only 20 nmIds per request. Real sellers have
+  // hundreds or thousands of products, so a weekly history load cannot finish
+  // inside a Vercel function. Daily product snapshots bound the request count
+  // by the selected date range instead of the catalog size.
+  return 'daily'
 }
 
 export function getFunnelOrderMetrics(source: {

@@ -1,7 +1,8 @@
 import { db } from '@/lib/db'
 import { forbidden, getCurrentUser, unauthorized } from '@/lib/auth'
-import { isVercel } from '@/lib/entrepreneurs-config'
-import { clearUserApiKey, saveUserApiKeys } from '@/lib/user-store'
+import { getEntrepreneurs, isVercel } from '@/lib/entrepreneurs-config'
+import { haveSameWbSellerIdentity } from '@/lib/wb-api-key'
+import { clearAdminWbApiKeyOverride, clearUserApiKey, saveAdminWbApiKeyOverride, saveUserApiKeys } from '@/lib/user-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 function extractSellerName(payload: unknown): string | null {
@@ -35,17 +36,66 @@ async function fetchWbSellerName(apiKey: string): Promise<string | null> {
   return null
 }
 
+async function validateWbOrdersKey(apiKey: string): Promise<{ analytics: boolean; statistics: boolean }> {
+  const token = apiKey.trim().replace(/^bearer\s+/i, '').trim()
+  const ping = async (url: string) => {
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: token },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10000),
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+  const [analytics, statistics] = await Promise.all([
+    ping('https://seller-analytics-api.wildberries.ru/ping'),
+    ping('https://statistics-api.wildberries.ru/ping'),
+  ])
+  return { analytics, statistics }
+}
+
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return unauthorized()
 
-  // On Vercel, API keys are managed via environment variables, not the database
+  // On Vercel, admin rotations are stored as server-side Redis overrides.
   if (isVercel()) {
     if (user.role === 'admin') {
-      return NextResponse.json({
-        error: 'Админские ключи на Vercel настраиваются через ENTREPRENEURS. Пользовательские ключи сохраняются в аккаунте пользователя.',
-        vercel: true,
-      }, { status: 400 })
+      try {
+        const body = await request.json()
+        const entrepreneurId = Number(body?.entrepreneurId)
+        const apiKey = typeof body?.apiKey === 'string'
+          ? body.apiKey.trim().replace(/^bearer\s+/i, '').trim()
+          : ''
+        if (!Number.isFinite(entrepreneurId) || entrepreneurId <= 0 || !apiKey) {
+          return NextResponse.json({ error: 'Выберите ИП и введите ключ WB' }, { status: 400 })
+        }
+
+        const entrepreneur = getEntrepreneurs().find((item) => item.id === entrepreneurId)
+        if (!entrepreneur?.apiKey) {
+          return NextResponse.json({ error: 'ИП не найден в админской конфигурации' }, { status: 404 })
+        }
+        if (!haveSameWbSellerIdentity(entrepreneur.apiKey, apiKey)) {
+          return NextResponse.json({ error: 'Ключ выпущен для другого кабинета WB' }, { status: 400 })
+        }
+
+        const access = await validateWbOrdersKey(apiKey)
+        if (!access.analytics || !access.statistics) {
+          return NextResponse.json({
+            error: 'Ключ не прошёл проверку Analytics и Statistics',
+            access,
+          }, { status: 400 })
+        }
+
+        await saveAdminWbApiKeyOverride(entrepreneurId, apiKey)
+        return NextResponse.json({ success: true, entrepreneurId, access })
+      } catch {
+        console.error('Save admin WB API key override failed')
+        return NextResponse.json({ error: 'Не удалось сохранить ключ WB' }, { status: 500 })
+      }
     }
 
     try {
@@ -118,10 +168,19 @@ export async function DELETE(request: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return unauthorized()
 
-  // On Vercel, API keys are managed via environment variables, not the database
+  // On Vercel, an admin DELETE reverts the Redis override to repository config.
   if (isVercel()) {
     if (user.role === 'admin') {
-      return NextResponse.json({ error: 'Админские ключи на Vercel настраиваются через ENTREPRENEURS' }, { status: 400 })
+      const entrepreneurId = Number(request.nextUrl.searchParams.get('entrepreneurId'))
+      const entrepreneur = getEntrepreneurs().find((item) => item.id === entrepreneurId)
+      if (!entrepreneur) return NextResponse.json({ error: 'ИП не найден' }, { status: 404 })
+      try {
+        await clearAdminWbApiKeyOverride(entrepreneurId)
+        return NextResponse.json({ success: true, entrepreneurId, reverted: true })
+      } catch {
+        console.error('Clear admin WB API key override failed')
+        return NextResponse.json({ error: 'Не удалось вернуть ключ из основной конфигурации' }, { status: 500 })
+      }
     }
     await clearUserApiKey(user.id)
     return NextResponse.json({ success: true, entrepreneurId: user.id })

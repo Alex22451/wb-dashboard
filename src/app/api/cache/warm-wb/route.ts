@@ -18,7 +18,13 @@ function getBaseUrl(): string | null {
   }
 }
 
-const WARM_RANGE_DAYS = 7
+const DEFAULT_WARM_RANGE_DAYS = 1
+const MAX_WARM_RANGE_DAYS = 7
+const SINGLE_DAY_TARGET_BATCH_SIZE = 3
+const SINGLE_DAY_REQUEST_TIMEOUT_MS = 90_000
+const RANGE_REQUEST_TIMEOUT_MS = 210_000
+const OUTER_WARM_BUDGET_MS = 225_000
+const OUTER_WARM_RESERVE_MS = 5_000
 
 function getMoscowDashboardWarmRange(days: number) {
   const mskNow = new Date(Date.now() + 3 * 3600000)
@@ -73,13 +79,16 @@ export async function GET(request: NextRequest) {
   if (!internalToken) {
     return NextResponse.json({ error: 'WB_VERCEL_API_TOKEN is required for cache warmup' }, { status: 500 })
   }
+  const startedAt = Date.now()
 
   const scope = request.nextUrl.searchParams.get('scope') === 'admin' ? 'admin' : 'all'
   const requestedMetric = request.nextUrl.searchParams.get('metric')
   const metricMode: 'orders' | 'sales' = requestedMetric === 'sales' ? 'sales' : 'orders'
   const explicitDate = request.nextUrl.searchParams.get('date') || ''
-  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || WARM_RANGE_DAYS)
-  const periodDays = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.floor(requestedDays), 1), WARM_RANGE_DAYS) : WARM_RANGE_DAYS
+  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || DEFAULT_WARM_RANGE_DAYS)
+  const periodDays = Number.isFinite(requestedDays)
+    ? Math.min(Math.max(Math.floor(requestedDays), 1), MAX_WARM_RANGE_DAYS)
+    : DEFAULT_WARM_RANGE_DAYS
   const { from, to } = getMoscowDashboardWarmRange(periodDays)
   const warmDates = explicitDate ? [explicitDate] : getDateRange(from, to)
   const availableTargets = scope === 'all' || metricMode !== 'orders' ? await getAllVercelWbTargets() : []
@@ -94,7 +103,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Cache warmup is already running' }, { status: 409 })
   }
 
-  const startedAt = Date.now()
   const warmedDates: string[] = []
   const warmedSalesDates: string[] = []
   const cacheHitDates: string[] = []
@@ -117,14 +125,61 @@ export async function GET(request: NextRequest) {
       url.searchParams.set('warmId', String(target.id))
     }
 
-    const response = await fetch(url, {
-      cache: 'no-store',
-      headers: {
-        'x-wb-internal-warm': internalToken,
-      },
-      signal: AbortSignal.timeout(210000),
-    })
-    const json = await response.json().catch(() => ({}))
+    const desiredTimeoutMs = warmDates.length === 1
+      ? SINGLE_DAY_REQUEST_TIMEOUT_MS
+      : RANGE_REQUEST_TIMEOUT_MS
+    const remainingBudgetMs = OUTER_WARM_BUDGET_MS - (Date.now() - startedAt)
+    if (remainingBudgetMs < desiredTimeoutMs + OUTER_WARM_RESERVE_MS) {
+      ok = false
+      status = 504
+      rateLimitErrors.push({
+        id: target?.id || 0,
+        name: target?.name || 'admin',
+        error: 'Прогрев остановлен до исчерпания лимита функции; цель будет повторена следующим запуском.',
+      })
+      return {
+        from: rangeFrom,
+        to: rangeTo,
+        metric,
+        target: target ? { id: target.id, name: target.name } : { id: 0, name: 'admin' },
+        ok: false,
+        status: 504,
+        cacheSource: null,
+        refreshed: false,
+      }
+    }
+
+    let response: Response
+    let json: any
+    try {
+      response = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'x-wb-internal-warm': internalToken,
+        },
+        signal: AbortSignal.timeout(desiredTimeoutMs),
+      })
+      json = await response.json().catch(() => ({}))
+    } catch {
+      ok = false
+      status = 504
+      const error = {
+        id: target?.id || 0,
+        name: target?.name || 'admin',
+        error: 'Внутренний запрос прогрева кэша не завершился вовремя.',
+      }
+      rateLimitErrors.push(error)
+      return {
+        from: rangeFrom,
+        to: rangeTo,
+        metric,
+        target: target ? { id: target.id, name: target.name } : { id: 0, name: 'admin' },
+        ok: false,
+        status: 504,
+        cacheSource: null,
+        refreshed: false,
+      }
+    }
     if (!response.ok) {
       ok = false
       status = response.status
@@ -160,10 +215,19 @@ export async function GET(request: NextRequest) {
   const salesWarmDates = metricMode === 'sales' ? warmDates : []
   const batches: Array<Array<Awaited<ReturnType<typeof requestRange>>>> = []
   const metricTargets = metricMode === 'sales' ? salesTargets : allTargets
-  const batch = scope === 'all'
-    ? await Promise.all(metricTargets.map((target) => requestRange(warmDates[0], warmDates[warmDates.length - 1], target, metricMode)))
-    : [await requestRange(warmDates[0], warmDates[warmDates.length - 1], undefined, metricMode)]
-  batches.push(batch)
+  if (scope === 'all') {
+    const targetBatchSize = warmDates.length === 1
+      ? SINGLE_DAY_TARGET_BATCH_SIZE
+      : Math.max(metricTargets.length, 1)
+    for (let offset = 0; offset < metricTargets.length; offset += targetBatchSize) {
+      const targetBatch = metricTargets.slice(offset, offset + targetBatchSize)
+      batches.push(await Promise.all(targetBatch.map((target) => (
+        requestRange(warmDates[0], warmDates[warmDates.length - 1], target, metricMode)
+      ))))
+    }
+  } else {
+    batches.push([await requestRange(warmDates[0], warmDates[warmDates.length - 1], undefined, metricMode)])
+  }
 
   await redisCommand<number>([
     'EVAL',
@@ -175,7 +239,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     warmedAt: new Date().toISOString(),
-    moscowSchedule: '07:00',
+    moscowSchedule: '08:00',
     scope,
     metricMode,
     period: { from, to },

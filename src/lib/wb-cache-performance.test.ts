@@ -22,13 +22,13 @@ import {
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-cache-performance.ts'
 
-test('loads a week through one history strategy instead of seven daily calls', () => {
+test('loads a week as bounded single-day product snapshots instead of product history chunks', () => {
   const historyWindow = { from: '2026-08-24', to: '2026-08-31' }
   assert.equal(getDailyFunnelLoadStrategy(['2026-08-30'], 7, historyWindow), 'single-day')
   assert.equal(getDailyFunnelLoadStrategy([
     '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27',
     '2026-08-28', '2026-08-29', '2026-08-30',
-  ], 7, historyWindow), 'history')
+  ], 7, historyWindow), 'daily')
   assert.equal(getDailyFunnelLoadStrategy([
     '2026-08-10', '2026-08-11', '2026-08-12',
   ], 7, historyWindow), 'daily')

@@ -7,7 +7,7 @@
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/lib/unit-economics.test.ts src/lib/wb-mapping.test.ts src/lib/wb-cache-performance.test.ts src/lib/dashboard-load-errors.test.ts src/lib/fbs-bot-contract.test.ts src/lib/internal-request-auth.test.ts src/lib/fbs-bot-store.test.ts src/lib/fbs-bot-route-handlers.test.ts src/lib/fbs-bot-fleet.test.ts",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/lib/unit-economics.test.ts src/lib/wb-mapping.test.ts src/lib/wb-cache-performance.test.ts src/lib/wb-api-key.test.ts src/lib/dashboard-load-errors.test.ts src/lib/fbs-bot-contract.test.ts src/lib/internal-request-auth.test.ts src/lib/fbs-bot-store.test.ts src/lib/fbs-bot-route-handlers.test.ts src/lib/fbs-bot-fleet.test.ts",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
