@@ -18,6 +18,8 @@ import {
   sliceDailyPayloadByDate,
   splitDailyLoadIssues,
   getWbRateLimitRetryDelayMs,
+  shouldRetryWbRateLimitInRequest,
+  shouldContinueDailyFunnelLoad,
   WB_FUNNEL_REQUEST_INTERVAL_MS,
 } from '@/lib/wb-cache-performance'
 import {
@@ -119,6 +121,7 @@ async function fetchWbFunnel(
       attempt,
     )
     blockLocalFunnelRequests(apiKey, retryDelayMs)
+    if (!shouldRetryWbRateLimitInRequest(retryDelayMs)) return response
   }
   return response as Response
 }
@@ -1030,6 +1033,7 @@ async function fetchFunnelProductOrdersByDate(apiKey: string, dates: string[]): 
     const result = await fetchFunnelProductOrders(apiKey, date, date)
     if (result.orders.length > 0) orders.push(...result.orders)
     if (result.error) errors.push(result.error)
+    if (!shouldContinueDailyFunnelLoad(result.error)) break
     if (index < dates.length - 1) {
       await new Promise(resolve => setTimeout(resolve, WB_FUNNEL_REQUEST_INTERVAL_MS))
     }

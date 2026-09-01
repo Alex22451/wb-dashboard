@@ -19,7 +19,23 @@ export function getWbRateLimitRetryDelayMs(
     ? Math.ceil(parsedSeconds * 1000) + 250
     : 0
   const fallbackDelayMs = fallbackIntervalMs * Math.max(1, retryAttempt + 1)
-  return Math.min(60_000, headerDelayMs || fallbackDelayMs)
+  return Math.min(30 * 60_000, headerDelayMs || fallbackDelayMs)
+}
+
+export function shouldRetryWbRateLimitInRequest(delayMs: number): boolean {
+  return Number.isFinite(delayMs) && delayMs >= 0 && delayMs <= 60_000
+}
+
+export function shouldContinueDailyRecovery(input: {
+  requestOk: boolean
+  errorCount: number
+  hasDaily: boolean
+}): boolean {
+  return input.requestOk && input.errorCount === 0 && input.hasDaily
+}
+
+export function shouldContinueDailyFunnelLoad(error: string | undefined): boolean {
+  return !error
 }
 
 export function shouldServeDailyCache(input: {

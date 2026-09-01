@@ -1,10 +1,20 @@
 import net from 'net'
 import tls from 'tls'
 
+function isSupportedRedisRestUrl(value: string) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:'
+      && (url.hostname === 'upstash.io' || url.hostname.endsWith('.upstash.io'))
+  } catch {
+    return false
+  }
+}
+
 function getRestRedisConfig() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
-  if (!url || !token) return null
+  if (!url || !token || !isSupportedRedisRestUrl(url)) return null
   return { url: url.replace(/\/$/, ''), token }
 }
 

@@ -13,6 +13,9 @@ import {
   getMissingDailyDates,
   splitDailyLoadIssues,
   getWbRateLimitRetryDelayMs,
+  shouldRetryWbRateLimitInRequest,
+  shouldContinueDailyRecovery,
+  shouldContinueDailyFunnelLoad,
   shouldLiveLoadDailyRange,
   shouldRefreshDailyCache,
   shouldServeDailyCache,
@@ -68,7 +71,24 @@ test('honors WB rate-limit retry headers with a bounded fallback', () => {
   assert.equal(getWbRateLimitRetryDelayMs('2', 0), 2_250)
   assert.equal(getWbRateLimitRetryDelayMs(null, 0), WB_FUNNEL_REQUEST_INTERVAL_MS)
   assert.equal(getWbRateLimitRetryDelayMs(null, 1), WB_FUNNEL_REQUEST_INTERVAL_MS * 2)
-  assert.equal(getWbRateLimitRetryDelayMs('999', 0), 60_000)
+  assert.equal(getWbRateLimitRetryDelayMs('856', 0), 856_250)
+  assert.equal(getWbRateLimitRetryDelayMs('99999', 0), 30 * 60_000)
+})
+
+test('does not wait through a long WB cooldown inside one serverless request', () => {
+  assert.equal(shouldRetryWbRateLimitInRequest(59_000), true)
+  assert.equal(shouldRetryWbRateLimitInRequest(856_250), false)
+})
+
+test('stops daily recovery after the first failed WB day', () => {
+  assert.equal(shouldContinueDailyRecovery({ requestOk: true, errorCount: 0, hasDaily: true }), true)
+  assert.equal(shouldContinueDailyRecovery({ requestOk: true, errorCount: 1, hasDaily: false }), false)
+  assert.equal(shouldContinueDailyRecovery({ requestOk: false, errorCount: 0, hasDaily: false }), false)
+})
+
+test('stops a multi-day server load after the first WB funnel error', () => {
+  assert.equal(shouldContinueDailyFunnelLoad(undefined), true)
+  assert.equal(shouldContinueDailyFunnelLoad('WB Analytics API limited the request'), false)
 })
 
 test('keeps successful seller cache partitions when another seller fails', () => {

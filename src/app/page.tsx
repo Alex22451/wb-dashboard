@@ -69,7 +69,7 @@ import {
   createDashboardLoadFailure,
   normalizeDashboardLoadErrors,
 } from '@/lib/dashboard-load-errors'
-import { buildDailyRecoveryPlan, getFunnelRequestDelayMs, getMissingDailyDates, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
+import { buildDailyRecoveryPlan, getFunnelRequestDelayMs, getMissingDailyDates, shouldContinueDailyRecovery, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
 import {
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
@@ -2449,11 +2449,16 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             const { date, selection: recoverySelection } = recoveryPlan[index]
             const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
             const liveErrors = liveResult.json.rateLimitErrors || []
-            if (!liveResult.ok || liveErrors.length || !liveResult.json.daily) {
+            if (!shouldContinueDailyRecovery({
+              requestOk: liveResult.ok,
+              errorCount: liveErrors.length,
+              hasDaily: !!liveResult.json.daily,
+            })) {
               recoveryFailed = true
               errors.push(...(liveErrors.length
                 ? liveErrors
                 : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
+              break
             }
           }
           if (recoveryFailed) return
