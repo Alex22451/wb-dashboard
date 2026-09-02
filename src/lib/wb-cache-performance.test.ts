@@ -87,6 +87,13 @@ test('stops daily recovery after the first failed WB day', () => {
   assert.equal(shouldContinueDailyRecovery({ requestOk: true, errorCount: 0, hasDaily: true }), true)
   assert.equal(shouldContinueDailyRecovery({ requestOk: true, errorCount: 1, hasDaily: false }), false)
   assert.equal(shouldContinueDailyRecovery({ requestOk: false, errorCount: 0, hasDaily: false }), false)
+  assert.equal(shouldContinueDailyRecovery({
+    requestOk: true,
+    errorCount: 0,
+    warningCount: 1,
+    hasDaily: true,
+    fulfillmentComplete: false,
+  }), false)
 })
 
 test('stops a multi-day server load after the first WB funnel error', () => {
@@ -149,10 +156,25 @@ test('plans exact seller recovery for daily dates after the last warm cache date
   ])
 })
 
+test('plans recovery for present cache partitions with incomplete fulfillment', () => {
+  assert.deepEqual((cachePerformance as any).buildDailyRecoveryPlan({
+    requestedDates: ['2026-08-31'],
+    daily: { dates: ['2026-08-31'] },
+    incompleteDates: [],
+    missingTargetIdsByDate: { '2026-08-31': [] },
+    incompleteTargetIdsByDate: { '2026-08-31': [7, 3, 7] },
+    fallbackSelection: 'all',
+  }), [
+    { date: '2026-08-31', selection: '3,7' },
+  ])
+})
+
 test('requires a complete Redis response when the dashboard requests complete data', () => {
   assert.equal(shouldServeDailyCache({ missing: 1, requireComplete: true }), false)
   assert.equal(shouldServeDailyCache({ missing: 0, requireComplete: true }), true)
+  assert.equal(shouldServeDailyCache({ missing: 0, incomplete: 1, requireComplete: true }), false)
   assert.equal(shouldServeDailyCache({ missing: 1, requireComplete: false }), true)
+  assert.equal(shouldServeDailyCache({ missing: 0, incomplete: 1, requireComplete: false }), true)
 })
 
 test('allows live daily recovery only inside the supported seven-day budget', () => {
@@ -370,6 +392,81 @@ test('rejects a successful but truncated fulfillment response', () => {
     { '2026-09-01\u0000A': 1 },
     { '2026-09-01\u0000A': 1, '2026-09-01\u0000B': 999 },
   ), false)
+})
+
+test('converts exact stock-type analytics counts into warehouse-tagged fulfillment rows', () => {
+  const buildRows = (cachePerformance as any).buildStockAnalyticsFulfillmentOrders
+  const wb = buildRows?.([{
+    nmID: 101,
+    vendorCode: 'pillow-40x40',
+    subjectName: 'Подушки декоративные',
+    brandName: 'Brand',
+    metrics: { ordersCount: 2 },
+  }], 'wb', '2026-08-31')
+  const mp = buildRows?.([{
+    nmID: 202,
+    vendorCode: 'bag',
+    subjectName: 'Сумки',
+    brandName: 'Brand',
+    metrics: { ordersCount: 1 },
+  }], 'mp', '2026-08-31')
+
+  assert.equal(wb?.error, undefined)
+  assert.equal(mp?.error, undefined)
+  assert.deepEqual(wb?.orders.map((row: any) => ({
+    date: row.date,
+    nmId: row.nmId,
+    supplierArticle: row.supplierArticle,
+    subject: row.subject,
+    brand: row.brand,
+    warehouseType: row.warehouseType,
+  })), [
+    {
+      date: '2026-08-31T12:00:00',
+      nmId: 101,
+      supplierArticle: 'pillow-40x40',
+      subject: 'Подушки декоративные',
+      brand: 'Brand',
+      warehouseType: 'Склад WB',
+    },
+    {
+      date: '2026-08-31T12:00:00',
+      nmId: 101,
+      supplierArticle: 'pillow-40x40',
+      subject: 'Подушки декоративные',
+      brand: 'Brand',
+      warehouseType: 'Склад WB',
+    },
+  ])
+  assert.equal(mp?.orders.length, 1)
+  assert.equal(mp?.orders[0]?.warehouseType, 'Склад продавца')
+  assert.equal(buildRows?.([{ metrics: { ordersCount: -1 } }], 'wb', '2026-08-31')?.error,
+    'Некорректный ответ складской аналитики FBS/FBO')
+})
+
+test('turns a stock analytics network rejection into a fulfillment warning', async () => {
+  const loadSafely = (cachePerformance as any).loadStockAnalyticsResponseSafely
+  const result = await loadSafely?.(async () => {
+    throw new Error('socket reset with private details')
+  })
+
+  assert.deepEqual(result, {
+    response: null,
+    error: 'Ошибка сети складской аналитики FBS/FBO',
+  })
+})
+
+test('accepts a stock analytics page only when no positive rows can remain', () => {
+  const isComplete = (cachePerformance as any).isStockAnalyticsPageComplete
+  assert.equal(isComplete?.([{ metrics: { ordersCount: 2 } }], 1000), true)
+  assert.equal(isComplete?.([
+    { metrics: { ordersCount: 2 } },
+    { metrics: { ordersCount: 0 } },
+  ], 2), true)
+  assert.equal(isComplete?.([
+    { metrics: { ordersCount: 2 } },
+    { metrics: { ordersCount: 1 } },
+  ], 2), false)
 })
 
 test('accepts only real order dates and applies Moscow time to timestamps', () => {

@@ -23,6 +23,9 @@ import {
   hasCompleteFulfillmentCoverage,
   getMoscowOrderDate,
   reconcileFulfillmentCounts,
+  buildStockAnalyticsFulfillmentOrders,
+  loadStockAnalyticsResponseSafely,
+  isStockAnalyticsPageComplete,
   WB_FUNNEL_REQUEST_INTERVAL_MS,
 } from '@/lib/wb-cache-performance'
 import {
@@ -141,6 +144,7 @@ async function fetchWbFunnel(
   url: string,
   init: RequestInit,
   maxAttempts = 3,
+  timeoutMs = 45_000,
 ): Promise<Response> {
   const distributedCooldownMs = await getDistributedFunnelCooldownMs(apiKey)
   if (distributedCooldownMs > 0) {
@@ -155,7 +159,7 @@ async function fetchWbFunnel(
     await waitForLocalFunnelRequestSlot(apiKey)
     response = await fetch(url, {
       ...init,
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
     if (response.status !== 429 && response.status !== 461) return response
     const retryDelayMs = getWbRateLimitRetryDelayMs(
@@ -837,6 +841,7 @@ const CACHE_TTL_RATE_LIMIT = 60 * 1000      // WB orders/statistics limit is 1 r
 const AD_API_BASE = 'https://advert-api.wildberries.ru'
 const FUNNEL_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products'
 const FUNNEL_PRODUCTS_HISTORY_URL = 'https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history'
+const STOCK_ANALYTICS_PRODUCTS_URL = 'https://seller-analytics-api.wildberries.ru/api/v2/stocks-report/products/products'
 const FUNNEL_PRODUCTS_PAGE_LIMIT = 1000
 const FUNNEL_HISTORY_MAX_DAYS = 7
 
@@ -1308,6 +1313,60 @@ async function fetchMarketplaceFbsOrders(
   return { orders }
 }
 
+async function fetchStockAnalyticsFulfillmentOrders(
+  apiKey: string,
+  date: string,
+): Promise<{ orders: any[]; error?: string }> {
+  const orders: any[] = []
+  const limit = 1000
+
+  for (const stockType of ['wb', 'mp'] as const) {
+    const loaded = await loadStockAnalyticsResponseSafely(() => fetchWbFunnel(apiKey, STOCK_ANALYTICS_PRODUCTS_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${normalizeApiKey(apiKey)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nmIDs: [],
+        currentPeriod: { start: date, end: date },
+        stockType,
+        skipDeletedNm: false,
+        orderBy: { field: 'ordersCount', mode: 'desc' },
+        availabilityFilters: [],
+        limit,
+        offset: 0,
+      }),
+      cache: 'no-store',
+      redirect: 'error',
+    }, 1, 10_000))
+    if (loaded.error || !loaded.response) {
+      return { orders: [], error: loaded.error || 'Ошибка сети складской аналитики FBS/FBO' }
+    }
+    const response = loaded.response
+
+    if (response.status === 429 || response.status === 461) {
+      return { orders: [], error: 'WB API ограничил складскую аналитику FBS/FBO. Повторите позже.' }
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { orders: [], error: `Нет доступа к складской аналитике FBS/FBO (${response.status})` }
+    }
+    if (!response.ok) {
+      return { orders: [], error: `Ошибка складской аналитики FBS/FBO (${response.status})` }
+    }
+
+    const payload = await response.json().catch(() => null)
+    const items = Array.isArray(payload?.data?.items) ? payload.data.items : null
+    if (!items) return { orders: [], error: 'Некорректный ответ складской аналитики FBS/FBO' }
+    const built = buildStockAnalyticsFulfillmentOrders(items, stockType, date)
+    if (built.error) return built
+    orders.push(...built.orders)
+
+    if (!isStockAnalyticsPageComplete(items, limit)) {
+      return { orders: [], error: 'Складская аналитика FBS/FBO превысила безопасный лимит страницы' }
+    }
+  }
+
+  return { orders }
+}
+
 function buildMarketplaceFboFallbackOrders(
   funnelOrders: any[],
   marketplaceFbsOrders: any[],
@@ -1595,8 +1654,11 @@ export async function GET(request: NextRequest) {
     if (section === 'daily' && !useExactSingleDayStats && !refreshDailyCache) {
       const currentDates = getDateRange(requestedDateFrom, requestedDateTo)
       const cachedDaily = await readAvailableMergedRedisDailyPayload(targets, currentDates, dataMetric)
+      const incomplete = Object.values(cachedDaily.incompleteFulfillmentEntrepreneurIdsByDate)
+        .reduce((sum, ids) => sum + ids.length, 0)
       if (cachedDaily.daily && shouldServeDailyCache({
         missing: cachedDaily.missing,
+        incomplete,
         requireComplete: requireCompleteDailyCache,
       })) {
         return NextResponse.json({
@@ -1672,6 +1734,7 @@ export async function GET(request: NextRequest) {
       const missing = cachedDailyRows.length - availableDailyRows.length
       if (availableDailyRows.length > 0 && shouldServeDailyCache({
         missing,
+        incomplete: incompleteFulfillmentEntrepreneurIds.length,
         requireComplete: requireCompleteDailyCache,
       })) {
         const dailyByEntrepreneur = Object.fromEntries(availableDailyRows.map((row) => [row.ent.id, row.daily]))
@@ -1792,6 +1855,23 @@ export async function GET(request: NextRequest) {
               }
             } else {
               returnError = marketplaceFbs.error
+            }
+          }
+
+          if ((needDaily || needProduction) && returnError && dateFrom === dateTo) {
+            const stockAnalytics = await fetchStockAnalyticsFulfillmentOrders(ent.wbApiKey, dateFrom)
+            if (!stockAnalytics.error) {
+              const useExcelMapping = shouldUseExcelMapping(ent)
+              const funnelCounts = getMappedOrderCounts(funnel.orders, useExcelMapping)
+              const fulfillmentCounts = getMappedOrderCounts(stockAnalytics.orders, useExcelMapping)
+              if (hasCompleteFulfillmentCoverage(funnelCounts, fulfillmentCounts)) {
+                fulfillmentOrders = stockAnalytics.orders
+                returnError = undefined
+              } else {
+                returnError = 'Складская аналитика FBS/FBO не совпала с итогами воронки продаж'
+              }
+            } else {
+              returnError = stockAnalytics.error
             }
           }
 

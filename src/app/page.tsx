@@ -2383,12 +2383,17 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             return { ok: res.ok, json: await res.json() }
           }
           const commitCompleteRange = (json: any) => {
+            const hasIncompleteFulfillment = Object.values(
+              json.cacheStats?.incompleteFulfillmentEntrepreneurIdsByDate || {},
+            ).some((ids) => Array.isArray(ids) && ids.length > 0)
             const missingDates = getMissingDailyDates(
               dates,
               json.daily,
               Array.isArray(json.cacheStats?.missingDates) ? json.cacheStats.missingDates : [],
             )
-            if (!json.daily || missingDates.length > 0) return false
+            if (!json.daily || json.daily.fulfillmentComplete === false || hasIncompleteFulfillment || missingDates.length > 0) {
+              return false
+            }
 
             const completeDays = dates
               .map((date) => sliceDailyPayloadByDate(json.daily, date) as DailyOrdersData | null)
@@ -2428,6 +2433,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
               ? cachedResult.json.cacheStats.missingDates
               : [],
             missingTargetIdsByDate: cachedResult.json.cacheStats?.missingEntrepreneurIdsByDate,
+            incompleteTargetIdsByDate: cachedResult.json.cacheStats?.incompleteFulfillmentEntrepreneurIdsByDate,
             fallbackSelection: selection,
           })
 
@@ -2449,14 +2455,18 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             const { date, selection: recoverySelection } = recoveryPlan[index]
             const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
             const liveErrors = liveResult.json.rateLimitErrors || []
+            const liveWarnings = liveResult.json.fulfillmentWarnings || []
             if (!shouldContinueDailyRecovery({
               requestOk: liveResult.ok,
               errorCount: liveErrors.length,
+              warningCount: liveWarnings.length,
               hasDaily: !!liveResult.json.daily,
+              fulfillmentComplete: liveResult.json.daily?.fulfillmentComplete,
             })) {
               recoveryFailed = true
-              errors.push(...(liveErrors.length
-                ? liveErrors
+              const liveIssues = [...liveErrors, ...liveWarnings]
+              errors.push(...(liveIssues.length
+                ? liveIssues
                 : [createDashboardDateLoadFailure(date, liveResult.json.error)]))
               break
             }

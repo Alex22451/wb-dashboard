@@ -29,9 +29,15 @@ export function shouldRetryWbRateLimitInRequest(delayMs: number): boolean {
 export function shouldContinueDailyRecovery(input: {
   requestOk: boolean
   errorCount: number
+  warningCount?: number
   hasDaily: boolean
+  fulfillmentComplete?: boolean
 }): boolean {
-  return input.requestOk && input.errorCount === 0 && input.hasDaily
+  return input.requestOk
+    && input.errorCount === 0
+    && Number(input.warningCount || 0) === 0
+    && input.hasDaily
+    && input.fulfillmentComplete !== false
 }
 
 export function shouldContinueDailyFunnelLoad(error: string | undefined): boolean {
@@ -40,9 +46,10 @@ export function shouldContinueDailyFunnelLoad(error: string | undefined): boolea
 
 export function shouldServeDailyCache(input: {
   missing: number
+  incomplete?: number
   requireComplete: boolean
 }): boolean {
-  return input.missing === 0 || !input.requireComplete
+  return (input.missing === 0 && Number(input.incomplete || 0) === 0) || !input.requireComplete
 }
 
 export function canLiveLoadDailyRange(dates: string[], maxDays = 7): boolean {
@@ -145,21 +152,28 @@ export function buildDailyRecoveryPlan(input: {
   daily: any
   incompleteDates?: string[]
   missingTargetIdsByDate?: Record<string, unknown>
+  incompleteTargetIdsByDate?: Record<string, unknown>
   fallbackSelection: string
 }): Array<{ date: string; selection: string }> {
+  const normalizeIds = (rawIds: unknown): number[] => Array.isArray(rawIds)
+    ? [...new Set(rawIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0))]
+    : []
+  const fulfillmentIncompleteDates = input.requestedDates.filter((date) => (
+    normalizeIds(input.incompleteTargetIdsByDate?.[date]).length > 0
+  ))
   const missingDates = getMissingDailyDates(
     input.requestedDates,
     input.daily,
-    input.incompleteDates || [],
+    [...new Set([...(input.incompleteDates || []), ...fulfillmentIncompleteDates])],
   )
 
   return missingDates.map((date) => {
-    const rawIds = input.missingTargetIdsByDate?.[date]
-    const targetIds = Array.isArray(rawIds)
-      ? [...new Set(rawIds
-        .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id) && id > 0))]
-      : []
+    const targetIds = [...new Set([
+      ...normalizeIds(input.missingTargetIdsByDate?.[date]),
+      ...normalizeIds(input.incompleteTargetIdsByDate?.[date]),
+    ])].sort((a, b) => a - b)
     return {
       date,
       selection: targetIds.length > 0 ? targetIds.join(',') : input.fallbackSelection,
@@ -310,6 +324,53 @@ export function hasCompleteFulfillmentCoverage(
     const covered = Math.max(0, Math.trunc(Number(fulfillmentTotals?.[key] || 0)))
     return covered === total
   })
+}
+
+export function buildStockAnalyticsFulfillmentOrders(
+  items: unknown,
+  stockType: 'wb' | 'mp',
+  date: string,
+): { orders: any[]; error?: string } {
+  if (!Array.isArray(items) || !['wb', 'mp'].includes(stockType) || getMoscowOrderDate(date) !== date) {
+    return { orders: [], error: 'Некорректный ответ складской аналитики FBS/FBO' }
+  }
+
+  const orders: any[] = []
+  for (const item of items) {
+    const rawCount = Number(item?.metrics?.ordersCount)
+    if (!Number.isInteger(rawCount) || rawCount < 0 || orders.length + rawCount > 250_000) {
+      return { orders: [], error: 'Некорректный ответ складской аналитики FBS/FBO' }
+    }
+    for (let index = 0; index < rawCount; index += 1) {
+      orders.push({
+        date: `${date}T12:00:00`,
+        lastChangeDate: `${date}T12:00:00`,
+        supplierArticle: String(item?.vendorCode || ''),
+        nmId: Number(item?.nmID) || 0,
+        subject: String(item?.subjectName || ''),
+        brand: String(item?.brandName || ''),
+        techSize: '',
+        warehouseType: stockType === 'mp' ? 'Склад продавца' : 'Склад WB',
+        odid: `stock-analytics:${stockType}:${item?.nmID || item?.vendorCode || 'unknown'}:${date}:${index}`,
+        isStockAnalyticsOrder: true,
+      })
+    }
+  }
+  return { orders }
+}
+
+export async function loadStockAnalyticsResponseSafely<T>(
+  loader: () => Promise<T>,
+): Promise<{ response: T | null; error?: string }> {
+  try {
+    return { response: await loader() }
+  } catch {
+    return { response: null, error: 'Ошибка сети складской аналитики FBS/FBO' }
+  }
+}
+
+export function isStockAnalyticsPageComplete(items: any[], limit: number): boolean {
+  return items.length < limit || items.some((item) => Number(item?.metrics?.ordersCount) === 0)
 }
 
 export function getMoscowOrderDate(value: unknown): string {
