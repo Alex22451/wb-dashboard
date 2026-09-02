@@ -97,6 +97,36 @@ function blockLocalFunnelRequests(apiKey: string, cooldownMs: number): void {
   funnelRateStates.set(accountKey, state)
 }
 
+function funnelCooldownKey(apiKey: string): string {
+  return `wb:funnel:cooldown:${apiKeyFingerprint(apiKey)}`
+}
+
+async function getDistributedFunnelCooldownMs(apiKey: string): Promise<number> {
+  try {
+    const raw = await redisCommand<string>(['GET', funnelCooldownKey(apiKey)])
+    const blockedUntil = Number(raw || 0)
+    return Number.isFinite(blockedUntil) ? Math.max(0, blockedUntil - Date.now()) : 0
+  } catch {
+    return 0
+  }
+}
+
+async function blockDistributedFunnelRequests(apiKey: string, cooldownMs: number): Promise<void> {
+  const boundedCooldownMs = Math.max(1_000, Math.min(Math.ceil(cooldownMs), 30 * 60_000))
+  try {
+    await redisCommand<number>([
+      'EVAL',
+      "local current = tonumber(redis.call('get', KEYS[1]) or '0'); local next = tonumber(ARGV[1]); if next > current then redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2]); return next else return current end",
+      '1',
+      funnelCooldownKey(apiKey),
+      String(Date.now() + boundedCooldownMs),
+      String(boundedCooldownMs),
+    ])
+  } catch {
+    // Redis unavailability must not make the WB request path fail permanently.
+  }
+}
+
 async function waitForLocalFunnelRequestSlot(apiKey: string): Promise<void> {
   const accountKey = apiKeyFingerprint(apiKey)
   while (true) {
@@ -112,6 +142,14 @@ async function fetchWbFunnel(
   init: RequestInit,
   maxAttempts = 3,
 ): Promise<Response> {
+  const distributedCooldownMs = await getDistributedFunnelCooldownMs(apiKey)
+  if (distributedCooldownMs > 0) {
+    return new Response(null, {
+      status: 429,
+      headers: { 'x-ratelimit-retry': String(Math.ceil(distributedCooldownMs / 1000)) },
+    })
+  }
+
   let response: Response | undefined
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await waitForLocalFunnelRequestSlot(apiKey)
@@ -120,12 +158,15 @@ async function fetchWbFunnel(
       signal: AbortSignal.timeout(45000),
     })
     if (response.status !== 429 && response.status !== 461) return response
-    if (attempt === maxAttempts - 1) return response
     const retryDelayMs = getWbRateLimitRetryDelayMs(
-      response.headers.get('x-ratelimit-retry') || response.headers.get('retry-after'),
+      response.headers.get('x-ratelimit-retry')
+        || response.headers.get('retry-after')
+        || response.headers.get('x-ratelimit-reset'),
       attempt,
     )
     blockLocalFunnelRequests(apiKey, retryDelayMs)
+    await blockDistributedFunnelRequests(apiKey, retryDelayMs)
+    if (attempt === maxAttempts - 1) return response
     if (!shouldRetryWbRateLimitInRequest(retryDelayMs)) return response
   }
   return response as Response
