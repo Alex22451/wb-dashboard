@@ -272,3 +272,155 @@ export function sliceDailyPayloadByDate(daily: any, date: string): any | null {
     fboProductTotals,
   }
 }
+
+export function reconcileFulfillmentCounts(
+  funnelTotals: Record<string, number>,
+  rawFbsCounts: Record<string, number>,
+): {
+  fbs: Record<string, number>
+  fbo: Record<string, number>
+  sourceExcess: Record<string, number>
+} {
+  const fbs: Record<string, number> = {}
+  const fbo: Record<string, number> = {}
+  const sourceExcess: Record<string, number> = {}
+  const keys = [...new Set([...Object.keys(funnelTotals || {}), ...Object.keys(rawFbsCounts || {})])]
+
+  for (const key of keys) {
+    const total = Math.max(0, Math.trunc(Number(funnelTotals?.[key] || 0)))
+    const rawFbs = Math.max(0, Math.trunc(Number(rawFbsCounts?.[key] || 0)))
+    const reconciledFbs = Math.min(rawFbs, total)
+    const reconciledFbo = total - reconciledFbs
+    const excess = rawFbs - reconciledFbs
+    if (reconciledFbs > 0) fbs[key] = reconciledFbs
+    if (reconciledFbo > 0) fbo[key] = reconciledFbo
+    if (excess > 0) sourceExcess[key] = excess
+  }
+
+  return { fbs, fbo, sourceExcess }
+}
+
+export function hasCompleteFulfillmentCoverage(
+  funnelTotals: Record<string, number>,
+  fulfillmentTotals: Record<string, number>,
+): boolean {
+  const keys = new Set([...Object.keys(funnelTotals || {}), ...Object.keys(fulfillmentTotals || {})])
+  return [...keys].every((key) => {
+    const total = Math.max(0, Math.trunc(Number(funnelTotals?.[key] || 0)))
+    const covered = Math.max(0, Math.trunc(Number(fulfillmentTotals?.[key] || 0)))
+    return covered === total
+  })
+}
+
+export function getMoscowOrderDate(value: unknown): string {
+  const raw = String(value || '')
+  if (!raw) return ''
+  const sourceDate = raw.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)) return ''
+  const parsedSourceDate = new Date(`${sourceDate}T00:00:00.000Z`)
+  if (Number.isNaN(parsedSourceDate.getTime()) || parsedSourceDate.toISOString().slice(0, 10) !== sourceDate) return ''
+  if (!raw.includes('T')) {
+    return raw === sourceDate ? raw : ''
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/.test(raw)) return ''
+  const parsed = new Date(raw).getTime()
+  if (Number.isNaN(parsed)) return ''
+  return new Date(parsed + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+export function getMissingWarmTargetIds(
+  cacheStats: any,
+  dates: string[],
+): number[] | null {
+  const byDate = getMissingWarmTargetsByDate(cacheStats, dates)
+  if (!byDate) return null
+  const ids = new Set<number>()
+  for (const dateIds of Object.values(byDate)) {
+    for (const id of dateIds) ids.add(id)
+  }
+  return [...ids].sort((a, b) => a - b)
+}
+
+export function getMissingWarmTargetsByDate(
+  cacheStats: any,
+  dates: string[],
+): Record<string, number[]> | null {
+  if (!cacheStats || !Array.isArray(dates)) return null
+  const rawByDate = cacheStats.missingEntrepreneurIdsByDate
+  const rawIncompleteByDate = cacheStats.incompleteFulfillmentEntrepreneurIdsByDate
+  const expectedMissing = Math.max(0, Math.trunc(Number(cacheStats.missing || 0)))
+  if (expectedMissing > 0 && (!rawByDate || typeof rawByDate !== 'object')) return null
+
+  const byDate: Record<string, number[]> = {}
+  let describedMissing = 0
+  for (const date of dates) {
+    const rawMissingIds = rawByDate && typeof rawByDate === 'object' ? rawByDate[date] : []
+    const rawIncompleteIds = rawIncompleteByDate && typeof rawIncompleteByDate === 'object'
+      ? rawIncompleteByDate[date]
+      : []
+    const missingIds = [...new Set((Array.isArray(rawMissingIds) ? rawMissingIds : [])
+      .map((rawId: unknown) => Number(rawId))
+      .filter((id: number) => Number.isInteger(id) && id > 0))]
+    describedMissing += missingIds.length
+    const ids = [...new Set([
+      ...missingIds,
+      ...(Array.isArray(rawIncompleteIds) ? rawIncompleteIds : [])
+        .map((rawId: unknown) => Number(rawId))
+        .filter((id: number) => Number.isInteger(id) && id > 0),
+    ])]
+      .sort((a, b) => a - b)
+    if (ids.length > 0) byDate[date] = ids
+  }
+  if (describedMissing !== expectedMissing) return null
+  return byDate
+}
+
+export function applyFulfillmentBreakdown(
+  daily: any,
+  rawFboByProductName: Record<string, number>,
+  entrepreneurId: number,
+): any {
+  if (!daily || !Array.isArray(daily.dates) || daily.dates.length !== 1) {
+    throw new Error('Fulfillment breakdown requires exactly one cached date')
+  }
+
+  const date = daily.dates[0]
+  const fbsPivot: Record<number, Record<number, number>> = {}
+  const fboPivot: Record<number, Record<number, number>> = {}
+  const fbsProductTotals: Record<number, number> = {}
+  const fboProductTotals: Record<number, number> = {}
+  let fbsTotal = 0
+  let fboTotal = 0
+
+  for (const product of daily.products || []) {
+    const productId = Number(product.id)
+    const total = Math.max(0, Math.trunc(Number(daily.pivot?.[productId]?.[0] || 0)))
+    const rawFbo = Math.max(0, Math.trunc(Number(rawFboByProductName?.[product.name] || 0)))
+    const fbo = Math.min(rawFbo, total)
+    const fbs = total - fbo
+
+    if (fbs > 0) {
+      fbsPivot[productId] = { 0: fbs }
+      fbsProductTotals[productId] = fbs
+      fbsTotal += fbs
+    }
+    if (fbo > 0) {
+      fboPivot[productId] = { 0: fbo }
+      fboProductTotals[productId] = fbo
+      fboTotal += fbo
+    }
+  }
+
+  return {
+    ...daily,
+    fulfillmentComplete: true,
+    fbsPivot,
+    fbsDateTotals: [fbsTotal],
+    fbsProductTotals,
+    fboPivot,
+    fboDateTotals: [fboTotal],
+    fboProductTotals,
+    entrepreneurDailyFbs: { [date]: { [entrepreneurId]: fbsTotal } },
+    entrepreneurDailyFbo: { [date]: { [entrepreneurId]: fboTotal } },
+  }
+}

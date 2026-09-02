@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { hasRedisConfig, redisCommand } from '@/lib/redis-cache'
 import { getAllVercelWbTargets, type WbTarget } from '@/lib/user-store'
 import { validateInternalSecret } from '@/lib/internal-request-auth'
+import { getMissingWarmTargetsByDate } from '@/lib/wb-cache-performance'
 
 export const maxDuration = 240
 
@@ -84,8 +85,11 @@ export async function GET(request: NextRequest) {
   const scope = request.nextUrl.searchParams.get('scope') === 'admin' ? 'admin' : 'all'
   const requestedMetric = request.nextUrl.searchParams.get('metric')
   const metricMode: 'orders' | 'sales' = requestedMetric === 'sales' ? 'sales' : 'orders'
+  const missingOnly = request.nextUrl.pathname.endsWith('/warm-wb-retry')
+    || request.nextUrl.searchParams.get('missingOnly') === '1'
   const explicitDate = request.nextUrl.searchParams.get('date') || ''
-  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || DEFAULT_WARM_RANGE_DAYS)
+  const defaultWarmRangeDays = missingOnly ? MAX_WARM_RANGE_DAYS : DEFAULT_WARM_RANGE_DAYS
+  const requestedDays = Number(request.nextUrl.searchParams.get('periodDays') || defaultWarmRangeDays)
   const periodDays = Number.isFinite(requestedDays)
     ? Math.min(Math.max(Math.floor(requestedDays), 1), MAX_WARM_RANGE_DAYS)
     : DEFAULT_WARM_RANGE_DAYS
@@ -112,6 +116,45 @@ export async function GET(request: NextRequest) {
   let ok = true
   let status = 200
 
+  const probeMissingTargets = async (targets: WbTarget[]): Promise<Array<{ date: string; target: WbTarget }>> => {
+    const url = new URL('/api/wb-data', baseUrl)
+    url.searchParams.set('entrepreneurId', 'all')
+    url.searchParams.set('section', 'daily')
+    url.searchParams.set('dateFrom', warmDates[0])
+    url.searchParams.set('dateTo', warmDates[warmDates.length - 1])
+    url.searchParams.set('complete', '1')
+    url.searchParams.set('cacheOnly', '1')
+    if (metricMode === 'sales') url.searchParams.set('metric', 'sales')
+
+    try {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'x-wb-internal-warm': internalToken },
+        signal: AbortSignal.timeout(30_000),
+      })
+      const json = await response.json().catch(() => ({}))
+      const missingByDate = response.ok ? getMissingWarmTargetsByDate(json?.cacheStats, warmDates) : null
+      if (!missingByDate) throw new Error('missing cache partition metadata')
+      const targetById = new Map(targets.map((target) => [target.id, target]))
+      // Retry newest gaps first so yesterday cannot starve behind older slow partitions.
+      return [...warmDates].reverse().flatMap((date) => (
+        (missingByDate[date] || []).flatMap((id) => {
+          const target = targetById.get(id)
+          return target ? [{ date, target }] : []
+        })
+      ))
+    } catch {
+      ok = false
+      status = 503
+      rateLimitErrors.push({
+        id: 0,
+        name: 'cron',
+        error: 'Не удалось безопасно определить отсутствующие разделы кэша для повторного прогрева.',
+      })
+      return []
+    }
+  }
+
   const requestRange = async (rangeFrom: string, rangeTo: string, target?: WbTarget, metric: 'orders' | 'sales' = 'orders') => {
     const url = new URL('/api/wb-data', baseUrl)
     url.searchParams.set('entrepreneurId', target ? String(target.id) : 'all')
@@ -125,7 +168,7 @@ export async function GET(request: NextRequest) {
       url.searchParams.set('warmId', String(target.id))
     }
 
-    const desiredTimeoutMs = warmDates.length === 1
+    const desiredTimeoutMs = rangeFrom === rangeTo
       ? SINGLE_DAY_REQUEST_TIMEOUT_MS
       : RANGE_REQUEST_TIMEOUT_MS
     const remainingBudgetMs = OUTER_WARM_BUDGET_MS - (Date.now() - startedAt)
@@ -216,14 +259,24 @@ export async function GET(request: NextRequest) {
   const batches: Array<Array<Awaited<ReturnType<typeof requestRange>>>> = []
   const metricTargets = metricMode === 'sales' ? salesTargets : allTargets
   if (scope === 'all') {
-    const targetBatchSize = warmDates.length === 1
-      ? SINGLE_DAY_TARGET_BATCH_SIZE
-      : Math.max(metricTargets.length, 1)
-    for (let offset = 0; offset < metricTargets.length; offset += targetBatchSize) {
-      const targetBatch = metricTargets.slice(offset, offset + targetBatchSize)
-      batches.push(await Promise.all(targetBatch.map((target) => (
-        requestRange(warmDates[0], warmDates[warmDates.length - 1], target, metricMode)
-      ))))
+    if (missingOnly) {
+      const missingWork = await probeMissingTargets(metricTargets)
+      for (let offset = 0; offset < missingWork.length; offset += SINGLE_DAY_TARGET_BATCH_SIZE) {
+        const workBatch = missingWork.slice(offset, offset + SINGLE_DAY_TARGET_BATCH_SIZE)
+        batches.push(await Promise.all(workBatch.map(({ date, target }) => (
+          requestRange(date, date, target, metricMode)
+        ))))
+      }
+    } else {
+      const targetBatchSize = warmDates.length === 1
+        ? SINGLE_DAY_TARGET_BATCH_SIZE
+        : Math.max(metricTargets.length, 1)
+      for (let offset = 0; offset < metricTargets.length; offset += targetBatchSize) {
+        const targetBatch = metricTargets.slice(offset, offset + targetBatchSize)
+        batches.push(await Promise.all(targetBatch.map((target) => (
+          requestRange(warmDates[0], warmDates[warmDates.length - 1], target, metricMode)
+        ))))
+      }
     }
   } else {
     batches.push([await requestRange(warmDates[0], warmDates[warmDates.length - 1], undefined, metricMode)])
@@ -242,6 +295,7 @@ export async function GET(request: NextRequest) {
     moscowSchedule: '08:00',
     scope,
     metricMode,
+    missingOnly,
     period: { from, to },
     section: 'daily',
     warmedSections: metricMode === 'sales' ? ['daily-sales'] : ['daily'],

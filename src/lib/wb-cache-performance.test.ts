@@ -24,6 +24,9 @@ import {
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-cache-performance.ts'
+// Node's native TypeScript runner requires the explicit extension.
+// @ts-expect-error TS5097 is intentional for this standalone test command.
+import * as cachePerformance from './wb-cache-performance.ts'
 
 test('loads a week as bounded single-day product snapshots instead of product history chunks', () => {
   const historyWindow = { from: '2026-08-24', to: '2026-08-31' }
@@ -285,4 +288,133 @@ test('slices a multi-day daily payload into one cacheable day', () => {
     fboDateTotals: [0],
     fboProductTotals: {},
   })
+})
+
+test('enriches exact funnel totals with a clamped FBS/FBO breakdown', () => {
+  const daily = {
+    fulfillmentComplete: false,
+    dates: ['2026-08-30'],
+    allDates: ['2026-08-30'],
+    products: [{ id: 0, name: 'A' }, { id: 1, name: 'B' }],
+    entrepreneurs: [{ id: 5, name: 'Seller 5' }],
+    pivot: { 0: { 0: 5 }, 1: { 0: 3 } },
+    dateTotals: [8],
+    productTotals: { 0: 5, 1: 3 },
+    entrepreneurDailyData: { '2026-08-30': { 5: 8 } },
+    fbsPivot: {}, fbsDateTotals: [0], fbsProductTotals: {},
+    fboPivot: {}, fboDateTotals: [0], fboProductTotals: {},
+    entrepreneurDailyFbs: { '2026-08-30': { 5: 0 } },
+    entrepreneurDailyFbo: { '2026-08-30': { 5: 0 } },
+  }
+
+  const enriched = (cachePerformance as any).applyFulfillmentBreakdown?.(
+    daily,
+    { A: 2, B: 9, C: 4 },
+    5,
+  )
+
+  assert.deepEqual({
+    fulfillmentComplete: enriched?.fulfillmentComplete,
+    pivot: enriched?.pivot,
+    dateTotals: enriched?.dateTotals,
+    fbsPivot: enriched?.fbsPivot,
+    fboPivot: enriched?.fboPivot,
+    fbsDateTotals: enriched?.fbsDateTotals,
+    fboDateTotals: enriched?.fboDateTotals,
+    fbsProductTotals: enriched?.fbsProductTotals,
+    fboProductTotals: enriched?.fboProductTotals,
+    entrepreneurDailyFbs: enriched?.entrepreneurDailyFbs,
+    entrepreneurDailyFbo: enriched?.entrepreneurDailyFbo,
+  }, {
+    fulfillmentComplete: true,
+    pivot: { 0: { 0: 5 }, 1: { 0: 3 } },
+    dateTotals: [8],
+    fbsPivot: { 0: { 0: 3 } },
+    fboPivot: { 0: { 0: 2 }, 1: { 0: 3 } },
+    fbsDateTotals: [3],
+    fboDateTotals: [5],
+    fbsProductTotals: { 0: 3 },
+    fboProductTotals: { 0: 2, 1: 3 },
+    entrepreneurDailyFbs: { '2026-08-30': { 5: 3 } },
+    entrepreneurDailyFbo: { '2026-08-30': { 5: 5 } },
+  })
+})
+
+test('reconciles a complete fulfillment partition against authoritative Funnel totals', () => {
+  const reconciled = (cachePerformance as any).reconcileFulfillmentCounts?.(
+    { a: 5, b: 3 },
+    { a: 2, b: 9, c: 4 },
+  )
+
+  assert.deepEqual(reconciled, {
+    fbs: { a: 2, b: 3 },
+    fbo: { a: 3 },
+    sourceExcess: { b: 6, c: 4 },
+  })
+})
+
+test('rejects a successful but truncated fulfillment response', () => {
+  assert.equal((cachePerformance as any).hasCompleteFulfillmentCoverage?.(
+    { '2026-09-01\u0000A': 5, '2026-09-01\u0000B': 3 },
+    { '2026-09-01\u0000A': 5, '2026-09-01\u0000B': 2 },
+  ), false)
+  assert.equal((cachePerformance as any).hasCompleteFulfillmentCoverage?.(
+    { '2026-09-01\u0000A': 5, '2026-09-01\u0000B': 3 },
+    { '2026-09-01\u0000A': 6, '2026-09-01\u0000B': 3 },
+  ), false)
+  assert.equal((cachePerformance as any).hasCompleteFulfillmentCoverage?.(
+    { '2026-09-01\u0000A': 5, '2026-09-01\u0000B': 3 },
+    { '2026-09-01\u0000A': 5, '2026-09-01\u0000B': 3 },
+  ), true)
+  assert.equal((cachePerformance as any).hasCompleteFulfillmentCoverage?.(
+    { '2026-09-01\u0000A': 1 },
+    { '2026-09-01\u0000A': 1, '2026-09-01\u0000B': 999 },
+  ), false)
+})
+
+test('accepts only real order dates and applies Moscow time to timestamps', () => {
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-09-01'), '2026-09-01')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-08-31T22:30:00Z'), '2026-09-01')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-09-01garbage'), '')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-02-30'), '')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-02-30T00:00:00Z'), '')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2026-02-29T00:00:00Z'), '')
+  assert.equal((cachePerformance as any).getMoscowOrderDate?.('2024-02-29T00:00:00Z'), '2024-02-29')
+})
+
+test('selects only missing sellers for a scheduled cache retry', () => {
+  assert.deepEqual((cachePerformance as any).getMissingWarmTargetIds?.({
+    missing: 3,
+    missingEntrepreneurIdsByDate: {
+      '2026-09-01': [5],
+      '2026-09-02': [5, 6],
+    },
+  }, ['2026-09-01', '2026-09-02']), [5, 6])
+  assert.deepEqual((cachePerformance as any).getMissingWarmTargetIds?.({ missing: 0 }, ['2026-09-01']), [])
+  assert.equal((cachePerformance as any).getMissingWarmTargetIds?.({ missing: 1 }, ['2026-09-01']), null)
+  assert.equal((cachePerformance as any).getMissingWarmTargetIds?.({
+    missing: 1,
+    missingEntrepreneurIdsByDate: { '2026-08-31': [5] },
+  }, ['2026-09-01']), null)
+
+  assert.deepEqual((cachePerformance as any).getMissingWarmTargetsByDate?.({
+    missing: 3,
+    missingEntrepreneurIdsByDate: {
+      '2026-08-31': [5],
+      '2026-09-01': [5, 6],
+    },
+  }, ['2026-08-31', '2026-09-01']), {
+    '2026-08-31': [5],
+    '2026-09-01': [5, 6],
+  })
+
+  assert.deepEqual((cachePerformance as any).getMissingWarmTargetsByDate?.({
+    missing: 0,
+    incompleteFulfillmentEntrepreneurIdsByDate: { '2026-09-01': [5] },
+  }, ['2026-09-01']), { '2026-09-01': [5] })
+
+  assert.equal((cachePerformance as any).getMissingWarmTargetsByDate?.({
+    missing: 2,
+    missingEntrepreneurIdsByDate: { '2026-09-01': [5] },
+  }, ['2026-09-01']), null)
 })

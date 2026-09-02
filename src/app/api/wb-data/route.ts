@@ -20,6 +20,9 @@ import {
   getWbRateLimitRetryDelayMs,
   shouldRetryWbRateLimitInRequest,
   shouldContinueDailyFunnelLoad,
+  hasCompleteFulfillmentCoverage,
+  getMoscowOrderDate,
+  reconcileFulfillmentCounts,
   WB_FUNNEL_REQUEST_INTERVAL_MS,
 } from '@/lib/wb-cache-performance'
 import {
@@ -28,6 +31,8 @@ import {
   EXCLUDED_WB_SUBJECTS,
   extractItemsMultiplier,
 } from '@/lib/wb-mapping'
+
+export const maxDuration = 120
 
 // ─── In-memory cache ────────────────────────────────────────────────
 // Caches WB API responses to avoid hitting the API on every request
@@ -473,6 +478,7 @@ async function readAvailableMergedRedisDailyPayload(
   total: number
   missingDates: string[]
   missingEntrepreneurIdsByDate: Record<string, number[]>
+  incompleteFulfillmentEntrepreneurIdsByDate: Record<string, number[]>
 }> {
   const total = targets.length * dates.length
   if (dates.length === 0 || targets.length === 0) {
@@ -483,6 +489,7 @@ async function readAvailableMergedRedisDailyPayload(
       total,
       missingDates: [...dates],
       missingEntrepreneurIdsByDate: Object.fromEntries(dates.map((date) => [date, targets.map((target) => target.id)])),
+      incompleteFulfillmentEntrepreneurIdsByDate: {},
     }
   }
 
@@ -527,8 +534,10 @@ async function readAvailableMergedRedisDailyPayload(
   const dailyRows: any[] = []
   const presentRows = rawRows.map(() => false)
   const presentByDate = new Map(dates.map((date) => [date, 0]))
+  const incompleteFulfillmentEntrepreneurIdsByDate: Record<string, number[]> = {}
   for (let index = 0; index < rawRows.length; index += 1) {
     const date = dates[index % dates.length]
+    const target = targets[Math.floor(index / dates.length)]
     for (const raw of [rawRows[index], fallbackRawRows[index]]) {
       if (!raw || typeof raw !== 'string') continue
       try {
@@ -537,6 +546,11 @@ async function readAvailableMergedRedisDailyPayload(
           dailyRows.push(parsed.daily)
           presentRows[index] = true
           presentByDate.set(date, (presentByDate.get(date) || 0) + 1)
+          if (metric === 'orders' && parsed.daily.fulfillmentComplete === false && target) {
+            incompleteFulfillmentEntrepreneurIdsByDate[date] = [
+              ...new Set([...(incompleteFulfillmentEntrepreneurIdsByDate[date] || []), target.id]),
+            ]
+          }
           break
         }
       } catch {
@@ -556,6 +570,7 @@ async function readAvailableMergedRedisDailyPayload(
       dates,
       presentRows,
     }),
+    incompleteFulfillmentEntrepreneurIdsByDate,
   }
 }
 
@@ -892,6 +907,20 @@ function getDirectProductName(order: any): string {
   return 'Товар без артикула'
 }
 
+function getMappedOrderType(order: any, useExcelMapping: boolean): string | null {
+  if (!useExcelMapping) return getDirectProductName(order)
+
+  const subject = String(order.subject || '')
+  const subjectLower = subject.toLowerCase()
+  if (EXCLUDED_WB_SUBJECTS.some(excluded => subjectLower.includes(excluded.toLowerCase()))) return null
+  return mapWbOrderToProductKey(
+    subject,
+    String(order.supplierArticle || ''),
+    String(order.brand || ''),
+    order.techSize || order.size,
+  )
+}
+
 function getDateRange(from: string, to: string, maxDays = 120): string[] {
   const start = new Date(`${from}T00:00:00Z`)
   const end = new Date(`${to}T00:00:00Z`)
@@ -1156,6 +1185,164 @@ async function fetchFunnelDailyOrders(apiKey: string, from: string, to: string):
   return { orders: [], error: 'Некорректный период для воронки продаж' }
 }
 
+async function fetchMarketplaceFbsOrders(
+  apiKey: string,
+  from: string,
+  to: string,
+): Promise<{ orders: any[]; error?: string }> {
+  const dates = getDateRange(from, to, 31)
+  if (dates.length === 0 || dates.length > 30) {
+    return { orders: [], error: 'FBS API поддерживает период не более 30 дней' }
+  }
+
+  const dateFrom = Math.floor(new Date(`${from}T00:00:00+03:00`).getTime() / 1000)
+  const dateTo = Math.floor(new Date(`${to}T23:59:59+03:00`).getTime() / 1000)
+  const limit = 1000
+  let next = '0'
+  const uniqueOrders = new Map<string, any>()
+  const deadlineAt = Date.now() + 40_000
+
+  for (let page = 0; page < 20; page += 1) {
+    const remainingMs = deadlineAt - Date.now()
+    if (remainingMs < 1_000) {
+      return { orders: [], error: 'Резервная разбивка FBS/FBO не завершилась вовремя' }
+    }
+    const url = new URL('https://marketplace-api.wildberries.ru/api/v3/orders')
+    url.searchParams.set('limit', String(limit))
+    url.searchParams.set('next', next)
+    url.searchParams.set('dateFrom', String(dateFrom))
+    url.searchParams.set('dateTo', String(dateTo))
+
+    let response: Response
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: wbAuthHeader(apiKey) },
+        cache: 'no-store',
+        redirect: 'error',
+        signal: AbortSignal.timeout(Math.min(10_000, remainingMs)),
+      })
+    } catch {
+      return { orders: [], error: 'Ошибка сети при загрузке резервной разбивки FBS/FBO' }
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { orders: [], error: `Нет доступа к резервной разбивке FBS/FBO (${response.status})` }
+    }
+    if (!response.ok) {
+      return { orders: [], error: `Ошибка резервной разбивки FBS/FBO (${response.status})` }
+    }
+
+    const raw = await response.text()
+    let payload: any
+    try {
+      // Preserve int64 assembly-order IDs as strings before JSON.parse.
+      payload = JSON.parse(raw.replace(/("id"\s*:\s*)(-?\d{16,})/g, '$1"$2"'))
+    } catch {
+      return { orders: [], error: 'Некорректный ответ резервной разбивки FBS/FBO' }
+    }
+    const rows = Array.isArray(payload?.orders) ? payload.orders : null
+    if (!rows) return { orders: [], error: 'Неполный ответ резервной разбивки FBS/FBO' }
+    for (const row of rows) {
+      const id = String(row?.id || '')
+      if (!id) return { orders: [], error: 'Резервная разбивка FBS/FBO содержит заказ без идентификатора' }
+      uniqueOrders.set(id, row)
+    }
+    if (rows.length < limit) break
+
+    const nextMatch = raw.match(/"next"\s*:\s*"?(\d+)"?/)
+    const nextValue = nextMatch?.[1] || ''
+    if (!nextValue || nextValue === next || nextValue === '0') {
+      return { orders: [], error: 'Не удалось продолжить резервную разбивку FBS/FBO' }
+    }
+    next = nextValue
+    if (page === 19) return { orders: [], error: 'Резервная разбивка FBS/FBO превысила лимит страниц' }
+    await sleep(250)
+  }
+
+  const orders: any[] = []
+  for (const order of uniqueOrders.values()) {
+    const date = getMoscowOrderDate(order?.createdAt)
+    if (!date) return { orders: [], error: 'Резервная разбивка FBS/FBO содержит заказ без даты' }
+    if (date >= from && date <= to) orders.push(order)
+  }
+  return { orders }
+}
+
+function buildMarketplaceFboFallbackOrders(
+  funnelOrders: any[],
+  marketplaceFbsOrders: any[],
+  useExcelMapping: boolean,
+): { orders: any[]; error?: string } {
+  const separator = '\u0000'
+  const funnelCounts: Record<string, number> = {}
+  const fbsCounts: Record<string, number> = {}
+  const representativeByKey = new Map<string, any>()
+  const mappedTypeByNmId = new Map<number, string>()
+
+  for (const order of funnelOrders) {
+    const mappedType = getMappedOrderType(order, useExcelMapping)
+    const date = getMoscowOrderDate(order?.date)
+    if (!mappedType || !date) continue
+    const key = `${date}${separator}${mappedType}`
+    funnelCounts[key] = (funnelCounts[key] || 0) + 1
+    if (!representativeByKey.has(key)) representativeByKey.set(key, order)
+    const nmId = Number(order?.nmId) || 0
+    if (nmId) mappedTypeByNmId.set(nmId, mappedType)
+  }
+
+  for (const order of marketplaceFbsOrders) {
+    const nmId = Number(order?.nmId) || 0
+    const mappedType = mappedTypeByNmId.get(nmId)
+    const date = getMoscowOrderDate(order?.createdAt)
+    if (!nmId || !date) {
+      return { orders: [], error: 'Резервная разбивка FBS/FBO содержит неполный заказ' }
+    }
+    if (!mappedType) {
+      return { orders: [], error: 'Резервная разбивка FBS/FBO содержит товар вне воронки продаж' }
+    }
+    const key = `${date}${separator}${mappedType}`
+    fbsCounts[key] = (fbsCounts[key] || 0) + 1
+  }
+
+  const reconciled = reconcileFulfillmentCounts(funnelCounts, fbsCounts)
+  const sourceExcessCount = Object.values(reconciled.sourceExcess).reduce((sum, value) => sum + value, 0)
+  if (sourceExcessCount > 0) {
+    return {
+      orders: [],
+      error: 'Резервная разбивка FBS/FBO не совпала с итогами воронки продаж',
+    }
+  }
+  const orders: any[] = []
+  for (const [key, count] of Object.entries(reconciled.fbo)) {
+    const representative = representativeByKey.get(key)
+    if (!representative) continue
+    for (let index = 0; index < count; index += 1) {
+      orders.push({
+        ...representative,
+        warehouseType: 'Склад WB',
+        odid: `marketplace-fbo:${representative.nmId || 'unknown'}:${key}:${index}`,
+      })
+    }
+  }
+
+  return { orders }
+}
+
+function getMappedOrderCounts(
+  orders: any[],
+  useExcelMapping: boolean,
+): Record<string, number> {
+  const separator = '\u0000'
+  const counts: Record<string, number> = {}
+  for (const order of orders) {
+    const mappedType = getMappedOrderType(order, useExcelMapping)
+    const date = getMoscowOrderDate(order?.date)
+    if (!mappedType || !date) continue
+    const key = `${date}${separator}${mappedType}`
+    counts[key] = (counts[key] || 0) + 1
+  }
+  return counts
+}
+
 async function fetchAdSpend(apiKey: string, from: string, to: string): Promise<number> {
   const url = `${AD_API_BASE}/adv/v1/upd?from=${from}&to=${to}`
   const response = await fetch(url, {
@@ -1386,6 +1573,7 @@ export async function GET(request: NextRequest) {
             total: cachedDaily.total,
             missingDates: cachedDaily.missingDates,
             missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
+            incompleteFulfillmentEntrepreneurIdsByDate: cachedDaily.incompleteFulfillmentEntrepreneurIdsByDate,
           },
           daily: cachedDaily.daily,
         })
@@ -1405,6 +1593,7 @@ export async function GET(request: NextRequest) {
               total: cachedDaily.total,
               missingDates: cachedDaily.missingDates,
               missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
+              incompleteFulfillmentEntrepreneurIdsByDate: cachedDaily.incompleteFulfillmentEntrepreneurIdsByDate,
             },
             daily: null,
           })
@@ -1422,6 +1611,7 @@ export async function GET(request: NextRequest) {
             total: cachedDaily.total,
             missingDates: cachedDaily.missingDates,
             missingEntrepreneurIdsByDate: cachedDaily.missingEntrepreneurIdsByDate,
+            incompleteFulfillmentEntrepreneurIdsByDate: cachedDaily.incompleteFulfillmentEntrepreneurIdsByDate,
           },
           daily: cachedDaily.daily || null,
         })
@@ -1435,6 +1625,9 @@ export async function GET(request: NextRequest) {
       })))
       const availableDailyRows = cachedDailyRows.filter((row) => row.daily)
       const missingEntrepreneurIds = cachedDailyRows.filter((row) => !row.daily).map((row) => row.ent.id)
+      const incompleteFulfillmentEntrepreneurIds = dataMetric === 'orders'
+        ? cachedDailyRows.filter((row) => row.daily?.fulfillmentComplete === false).map((row) => row.ent.id)
+        : []
       const missing = cachedDailyRows.length - availableDailyRows.length
       if (availableDailyRows.length > 0 && shouldServeDailyCache({
         missing,
@@ -1456,6 +1649,7 @@ export async function GET(request: NextRequest) {
             total: cachedDailyRows.length,
             missingDates: missing === 0 ? [] : [requestedDateFrom],
             missingEntrepreneurIdsByDate: { [requestedDateFrom]: missingEntrepreneurIds },
+            incompleteFulfillmentEntrepreneurIdsByDate: { [requestedDateFrom]: incompleteFulfillmentEntrepreneurIds },
           },
           daily: mergeDailyPayloads(availableDailyRows.map((row) => row.daily), [requestedDateFrom]),
           dailyByEntrepreneur,
@@ -1475,6 +1669,7 @@ export async function GET(request: NextRequest) {
             total: cachedDailyRows.length,
             missingDates: [requestedDateFrom],
             missingEntrepreneurIdsByDate: { [requestedDateFrom]: missingEntrepreneurIds },
+            incompleteFulfillmentEntrepreneurIdsByDate: { [requestedDateFrom]: incompleteFulfillmentEntrepreneurIds },
           },
           daily: null,
         })
@@ -1521,12 +1716,41 @@ export async function GET(request: NextRequest) {
                 returnError = 'Неверный API ключ для загрузки FBO/FBS (401)'
               } else if (response.ok) {
                 const allOrders = await response.json()
-                if (Array.isArray(allOrders)) fulfillmentOrders = filterToDateRange(allOrders, dateFrom, dateTo)
+                if (Array.isArray(allOrders)) {
+                  fulfillmentOrders = filterToDateRange(allOrders, dateFrom, dateTo)
+                  const useExcelMapping = shouldUseExcelMapping(ent)
+                  const funnelCounts = getMappedOrderCounts(funnel.orders, useExcelMapping)
+                  const fulfillmentCounts = getMappedOrderCounts(fulfillmentOrders, useExcelMapping)
+                  if (!hasCompleteFulfillmentCoverage(funnelCounts, fulfillmentCounts)) {
+                    returnError = 'WB API вернул неполную разбивку FBO/FBS'
+                  }
+                } else {
+                  returnError = 'Некорректный ответ API FBO/FBS'
+                }
               } else {
                 returnError = `Ошибка API FBO/FBS (${response.status})`
               }
             } catch (_e) {
               returnError = 'Ошибка сети при загрузке FBO/FBS'
+            }
+          }
+
+          if ((needDaily || needProduction) && returnError) {
+            const marketplaceFbs = await fetchMarketplaceFbsOrders(ent.wbApiKey, dateFrom, dateTo)
+            if (!marketplaceFbs.error) {
+              const fallback = buildMarketplaceFboFallbackOrders(
+                funnel.orders,
+                marketplaceFbs.orders,
+                shouldUseExcelMapping(ent),
+              )
+              if (!fallback.error) {
+                fulfillmentOrders = fallback.orders
+                returnError = undefined
+              } else {
+                returnError = fallback.error
+              }
+            } else {
+              returnError = marketplaceFbs.error
             }
           }
 
@@ -1692,37 +1916,13 @@ export async function GET(request: NextRequest) {
 
       const mapOrders = (sourceOrders: any[], targetRows: typeof allMappedOrders) => {
       for (const order of sourceOrders) {
-        let mappedType: string
-        if (useExcelMapping) {
-          const subject = order.subject || ''
-          const article = order.supplierArticle || ''
-          const brand = order.brand || ''
-
-          // Filter out EXCLUDED subjects only for the configured admin/catalog keys.
-          // User-added external API keys should show raw WB API data without Excel mapping.
-          const subjectLower = subject.toLowerCase()
-          if (EXCLUDED_WB_SUBJECTS.some(excl => subjectLower.includes(excl.toLowerCase()))) {
-            continue
-          }
-
-          const mapped = mapWbOrderToProductKey(subject, article, brand, order.techSize || order.size)
-          if (!mapped) continue
-          mappedType = mapped
-        } else {
-          mappedType = getDirectProductName(order)
-        }
+        const mappedType = getMappedOrderType(order, useExcelMapping)
+        if (!mappedType) continue
 
         // Convert UTC date to Moscow date (UTC+3)
         // WB API returns dates like "2026-05-18T01:30:00Z" (UTC)
         // An order at 01:30 MSK is actually 2026-05-17T22:30:00Z — wrong date without conversion
-        const orderDate = order.date
-        let dateStr: string
-        if (orderDate && orderDate.includes('T')) {
-          const mskMs = new Date(orderDate).getTime() + 3 * 60 * 60 * 1000
-          dateStr = new Date(mskMs).toISOString().substring(0, 10)
-        } else {
-          dateStr = orderDate?.substring(0, 10) || ''
-        }
+        const dateStr = getMoscowOrderDate(order.date)
         const monthStr = dateStr.substring(0, 7)
         const isFbs = (order.warehouseType || '').includes('продавца') // "Склад продавца" = FBS
 
