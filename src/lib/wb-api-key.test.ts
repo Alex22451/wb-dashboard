@@ -3,13 +3,13 @@ import test from 'node:test'
 
 import {
   applyWbApiKeyOverrides,
-  getConfiguredWbTargetCachePolicy,
   getWbApiKeyFingerprint,
   getWbSellerIdentity,
   getWbTargetIdentity,
   getWbTokenTtlSeconds,
   haveSameWbSellerIdentity,
   rollWbApiKeyOverride,
+  shouldUseConfiguredCategoryMapping,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-api-key.ts'
@@ -92,7 +92,6 @@ test('applies only non-empty API key overrides to matching configured targets', 
       name: 'Seller 1',
       wbApiKey: newToken,
       wbPromotionApiKey: 'promo-1',
-      useCategoryMapping: true,
       dailyCacheFallbackWbApiKey: oldToken,
       dailyCacheFallbackUseCategoryMapping: undefined,
     },
@@ -148,16 +147,17 @@ test('keeps the same configured-seller mapping and cache policy after token rota
   const configuredTarget = {
     id: 5,
     wbApiKey: configuredToken,
-    ...getConfiguredWbTargetCachePolicy(configuredToken),
+    useConfiguredOrderMapping: true,
   }
 
   const beforeRotation = applyWbApiKeyOverrides([configuredTarget], new Map())[0]
   const afterRotation = applyWbApiKeyOverrides([configuredTarget], new Map([[5, replacementToken]]))[0]
 
-  assert.equal(beforeRotation?.useCategoryMapping, true)
-  assert.equal(afterRotation?.useCategoryMapping, true)
-  assert.equal(beforeRotation?.dailyCacheFallbackWbApiKey, configuredToken)
+  assert.equal(beforeRotation?.useCategoryMapping, undefined)
+  assert.equal(afterRotation?.useCategoryMapping, undefined)
+  assert.equal(beforeRotation?.dailyCacheFallbackWbApiKey, undefined)
   assert.equal(afterRotation?.dailyCacheFallbackWbApiKey, configuredToken)
-  assert.equal(beforeRotation?.dailyCacheFallbackUseCategoryMapping, false)
-  assert.equal(afterRotation?.dailyCacheFallbackUseCategoryMapping, false)
+  assert.equal(afterRotation?.dailyCacheFallbackUseCategoryMapping, undefined)
+  assert.equal(shouldUseConfiguredCategoryMapping(beforeRotation), true)
+  assert.equal(shouldUseConfiguredCategoryMapping(afterRotation), true)
 })

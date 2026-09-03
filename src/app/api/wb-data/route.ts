@@ -5,7 +5,7 @@ import { getAllVercelWbTargets, getVercelWbTargets, type WbTarget } from '@/lib/
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
-import { getWbApiKeyFingerprint } from '@/lib/wb-api-key'
+import { getWbApiKeyFingerprint, shouldUseConfiguredCategoryMapping } from '@/lib/wb-api-key'
 import {
   canLiveLoadDailyRange,
   getCacheableDailyTargetIds,
@@ -1594,7 +1594,10 @@ export async function GET(request: NextRequest) {
         .map((ent) => normalizeApiKey(ent.apiKey || ''))
         .filter(Boolean)
     )
-    const shouldUseExcelMapping = (target: WbTarget) => !!target.useCategoryMapping || mappedAdminApiKeys.has(normalizeApiKey(target.wbApiKey))
+    const shouldUseExcelMapping = (target: WbTarget) => (
+      shouldUseConfiguredCategoryMapping(target)
+      || mappedAdminApiKeys.has(normalizeApiKey(target.wbApiKey))
+    )
 
     // Determine cache TTL based on section
     const CACHE_TTL_PRODUCTION = 2 * 60 * 1000  // 2 min
