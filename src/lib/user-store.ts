@@ -3,6 +3,7 @@ import { getEntrepreneurs } from './entrepreneurs-config'
 import { hasRedisConfig, redisCommand } from './redis-cache'
 import {
   applyWbApiKeyOverrides,
+  getConfiguredWbTargetCachePolicy,
   getWbTargetIdentity,
   getWbTokenTtlSeconds,
   rollWbApiKeyOverride,
@@ -204,6 +205,7 @@ async function getConfiguredAdminWbTargets(): Promise<WbTarget[]> {
       name: entrepreneur.name,
       wbApiKey: entrepreneur.apiKey,
       wbPromotionApiKey: entrepreneur.promotionApiKey || entrepreneur.apiKey,
+      ...getConfiguredWbTargetCachePolicy(entrepreneur.apiKey),
     }))
 
   const overrideRows = await Promise.all(targets.map(async (target) => {

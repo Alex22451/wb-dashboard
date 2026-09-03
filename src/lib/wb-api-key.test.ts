@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   applyWbApiKeyOverrides,
+  getConfiguredWbTargetCachePolicy,
   getWbApiKeyFingerprint,
   getWbSellerIdentity,
   getWbTargetIdentity,
@@ -139,4 +140,24 @@ test('preserves an existing category mapping flag when no override is present', 
   ]
 
   assert.deepEqual(applyWbApiKeyOverrides(targets, new Map()), targets)
+})
+
+test('keeps the same configured-seller mapping and cache policy after token rotation', () => {
+  const configuredToken = token({ sid: 'seller-1', nonce: 'configured' })
+  const replacementToken = token({ sid: 'seller-1', nonce: 'replacement' })
+  const configuredTarget = {
+    id: 5,
+    wbApiKey: configuredToken,
+    ...getConfiguredWbTargetCachePolicy(configuredToken),
+  }
+
+  const beforeRotation = applyWbApiKeyOverrides([configuredTarget], new Map())[0]
+  const afterRotation = applyWbApiKeyOverrides([configuredTarget], new Map([[5, replacementToken]]))[0]
+
+  assert.equal(beforeRotation?.useCategoryMapping, true)
+  assert.equal(afterRotation?.useCategoryMapping, true)
+  assert.equal(beforeRotation?.dailyCacheFallbackWbApiKey, configuredToken)
+  assert.equal(afterRotation?.dailyCacheFallbackWbApiKey, configuredToken)
+  assert.equal(beforeRotation?.dailyCacheFallbackUseCategoryMapping, false)
+  assert.equal(afterRotation?.dailyCacheFallbackUseCategoryMapping, false)
 })

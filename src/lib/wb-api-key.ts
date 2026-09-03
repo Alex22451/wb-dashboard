@@ -15,6 +15,20 @@ export interface WbApiKeyOverrideRecord {
   previousCacheFingerprints?: string[]
 }
 
+export function getConfiguredWbTargetCachePolicy(apiKey: string): Pick<
+  WbApiKeyTarget,
+  'useCategoryMapping' | 'dailyCacheFallbackWbApiKey' | 'dailyCacheFallbackUseCategoryMapping'
+> {
+  return {
+    useCategoryMapping: true,
+    // Configured sellers historically wrote mapped order payloads to the
+    // default namespace. Keep it as a read fallback while every configured
+    // seller, including a rotated override, uses the same category namespace.
+    dailyCacheFallbackWbApiKey: apiKey,
+    dailyCacheFallbackUseCategoryMapping: false,
+  }
+}
+
 function normalizedToken(token: string): string {
   return token.trim().replace(/^bearer\s+/i, '').trim()
 }
