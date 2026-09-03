@@ -5,7 +5,7 @@ import { getAllVercelWbTargets, getVercelWbTargets, type WbTarget } from '@/lib/
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import { redisCommand } from '@/lib/redis-cache'
-import { getWbApiKeyFingerprint, getWbApiKeyFingerprintCandidates } from '@/lib/wb-api-key'
+import { getWbApiKeyFingerprint } from '@/lib/wb-api-key'
 import {
   canLiveLoadDailyRange,
   getCacheableDailyTargetIds,
@@ -237,11 +237,6 @@ function redisDailyKey(apiKey: string, date: string, variant = 'default', metric
   return redisDailyKeyForFingerprint(apiKeyFingerprint(apiKey), date, variant, metric)
 }
 
-function redisDailyLegacyKey(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
-  const candidates = getWbApiKeyFingerprintCandidates(apiKey)
-  return redisDailyKeyForFingerprint(candidates[1] || candidates[0], date, variant, metric)
-}
-
 function dailyCacheVariant(target: { useCategoryMapping?: boolean }) {
   return target.useCategoryMapping ? 'category' : 'default'
 }
@@ -251,6 +246,7 @@ type DailyCacheTarget = {
   useCategoryMapping?: boolean
   dailyCacheFallbackWbApiKey?: string
   dailyCacheFallbackUseCategoryMapping?: boolean
+  dailyCacheFallbackFingerprints?: string[]
 }
 
 function dailyCacheFallbackVariant(target: DailyCacheTarget) {
@@ -266,18 +262,22 @@ function redisDailyTtlSeconds(date: string) {
   return 180 * 24 * 60 * 60
 }
 
-async function readRedisDailyPayload(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders'): Promise<any | null> {
-  for (const fingerprint of getWbApiKeyFingerprintCandidates(apiKey)) {
-    const raw = await redisCommand<string>(['GET', redisDailyKeyForFingerprint(fingerprint, date, variant, metric)])
-    if (!raw || typeof raw !== 'string') continue
-    try {
-      const parsed = JSON.parse(raw)
-      if (parsed?.daily?.dates && Array.isArray(parsed.daily.dates)) return parsed.daily
-    } catch {
-      // Try the next rollout-compatible cache identity.
+function redisDailyReadKeys(target: DailyCacheTarget, date: string, metric: DataMetric): string[] {
+  const keys = [redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)]
+  for (const fingerprint of target.dailyCacheFallbackFingerprints || []) {
+    if (/^[a-f0-9]{16}$/.test(fingerprint)) {
+      keys.push(redisDailyKeyForFingerprint(fingerprint, date, dailyCacheVariant(target), metric))
     }
   }
-  return null
+  if (target.dailyCacheFallbackWbApiKey) {
+    keys.push(redisDailyKey(
+      target.dailyCacheFallbackWbApiKey,
+      date,
+      dailyCacheFallbackVariant(target),
+      metric,
+    ))
+  }
+  return [...new Set(keys)]
 }
 
 async function readTargetRedisDailyPayload(
@@ -285,14 +285,17 @@ async function readTargetRedisDailyPayload(
   date: string,
   metric: DataMetric = 'orders',
 ): Promise<any | null> {
-  const primary = await readRedisDailyPayload(target.wbApiKey, date, dailyCacheVariant(target), metric)
-  if (primary || !target.dailyCacheFallbackWbApiKey) return primary
-  return readRedisDailyPayload(
-    target.dailyCacheFallbackWbApiKey,
-    date,
-    dailyCacheFallbackVariant(target),
-    metric,
-  )
+  for (const key of redisDailyReadKeys(target, date, metric)) {
+    const raw = await redisCommand<string>(['GET', key])
+    if (!raw || typeof raw !== 'string') continue
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.daily?.dates && Array.isArray(parsed.daily.dates)) return parsed.daily
+    } catch {
+      // Try the next trusted fallback cache partition.
+    }
+  }
+  return null
 }
 
 async function writeRedisDailyPayload(apiKey: string, date: string, daily: any, variant = 'default', metric: DataMetric = 'orders') {
@@ -550,82 +553,23 @@ async function readAvailableMergedRedisDailyPayload(
     }
   }
 
-  const keys = targets.flatMap((target) => dates.map((date) => redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)))
-  const legacyKeys = targets.flatMap((target) => dates.map((date) => redisDailyLegacyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)))
-  const fallbackKeys = targets.flatMap((target) => dates.map((date) => redisDailyKey(
-    target.dailyCacheFallbackWbApiKey || target.wbApiKey,
-    date,
-    target.dailyCacheFallbackWbApiKey ? dailyCacheFallbackVariant(target) : dailyCacheVariant(target),
-    metric,
-  )))
-  const fallbackLegacyKeys = targets.flatMap((target) => dates.map((date) => redisDailyLegacyKey(
-    target.dailyCacheFallbackWbApiKey || target.wbApiKey,
-    date,
-    target.dailyCacheFallbackWbApiKey ? dailyCacheFallbackVariant(target) : dailyCacheVariant(target),
-    metric,
-  )))
-  let rawRows: unknown[] | null = null
-  let legacyRawRows: unknown[] | null = null
-  let fallbackRawRows: unknown[] | null = null
-  let fallbackLegacyRawRows: unknown[] | null = null
-
-  try {
-    const [mgetRows, legacyMgetRows, fallbackMgetRows, fallbackLegacyMgetRows] = await Promise.all([
-      redisCommand<unknown[]>(['MGET', ...keys]),
-      redisCommand<unknown[]>(['MGET', ...legacyKeys]),
-      redisCommand<unknown[]>(['MGET', ...fallbackKeys]),
-      redisCommand<unknown[]>(['MGET', ...fallbackLegacyKeys]),
-    ])
-    if (Array.isArray(mgetRows)) rawRows = mgetRows
-    if (Array.isArray(legacyMgetRows)) legacyRawRows = legacyMgetRows
-    if (Array.isArray(fallbackMgetRows)) fallbackRawRows = fallbackMgetRows
-    if (Array.isArray(fallbackLegacyMgetRows)) fallbackLegacyRawRows = fallbackLegacyMgetRows
-  } catch {
-    rawRows = null
-    legacyRawRows = null
-    fallbackRawRows = null
-    fallbackLegacyRawRows = null
-  }
-
-  if (!rawRows) {
-    rawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)]))
-    ))
-  }
-  if (!legacyRawRows) {
-    legacyRawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyLegacyKey(target.wbApiKey, date, dailyCacheVariant(target), metric)]))
-    ))
-  }
-  if (!fallbackRawRows) {
-    fallbackRawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyKey(
-        target.dailyCacheFallbackWbApiKey || target.wbApiKey,
-        date,
-        target.dailyCacheFallbackWbApiKey ? dailyCacheFallbackVariant(target) : dailyCacheVariant(target),
-        metric,
-      )]))
-    ))
-  }
-  if (!fallbackLegacyRawRows) {
-    fallbackLegacyRawRows = await Promise.all(targets.flatMap((target) =>
-      dates.map((date) => redisCommand<string>(['GET', redisDailyLegacyKey(
-        target.dailyCacheFallbackWbApiKey || target.wbApiKey,
-        date,
-        target.dailyCacheFallbackWbApiKey ? dailyCacheFallbackVariant(target) : dailyCacheVariant(target),
-        metric,
-      )]))
-    ))
+  const lookupKeysByRow = targets.flatMap((target) => dates.map((date) => redisDailyReadKeys(target, date, metric)))
+  const uniqueKeys = [...new Set(lookupKeysByRow.flat())]
+  const mgetRows = await redisCommand<unknown[]>(['MGET', ...uniqueKeys])
+  const rawByKey = new Map<string, unknown>()
+  if (Array.isArray(mgetRows) && mgetRows.length === uniqueKeys.length) {
+    uniqueKeys.forEach((key, index) => rawByKey.set(key, mgetRows[index]))
   }
 
   const dailyRows: any[] = []
-  const presentRows = rawRows.map(() => false)
+  const presentRows = lookupKeysByRow.map(() => false)
   const presentByDate = new Map(dates.map((date) => [date, 0]))
   const incompleteFulfillmentEntrepreneurIdsByDate: Record<string, number[]> = {}
-  for (let index = 0; index < rawRows.length; index += 1) {
+  for (let index = 0; index < lookupKeysByRow.length; index += 1) {
     const date = dates[index % dates.length]
     const target = targets[Math.floor(index / dates.length)]
-    for (const raw of [rawRows[index], legacyRawRows[index], fallbackRawRows[index], fallbackLegacyRawRows[index]]) {
+    for (const key of lookupKeysByRow[index]) {
+      const raw = rawByKey.get(key)
       if (!raw || typeof raw !== 'string') continue
       try {
         const parsed = JSON.parse(raw)
@@ -641,7 +585,7 @@ async function readAvailableMergedRedisDailyPayload(
           break
         }
       } catch {
-        // Try the next rollout-compatible cache partition before treating this seller/day as missing.
+        // Try the next trusted fallback cache partition before treating this seller/day as missing.
       }
     }
   }

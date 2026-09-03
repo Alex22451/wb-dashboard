@@ -1,7 +1,13 @@
 import type { CurrentUser } from './auth'
 import { getEntrepreneurs } from './entrepreneurs-config'
 import { hasRedisConfig, redisCommand } from './redis-cache'
-import { applyWbApiKeyOverrides, getWbTargetIdentity, getWbTokenTtlSeconds } from './wb-api-key'
+import {
+  applyWbApiKeyOverrides,
+  getWbTargetIdentity,
+  getWbTokenTtlSeconds,
+  rollWbApiKeyOverride,
+  type WbApiKeyOverrideRecord,
+} from './wb-api-key'
 
 export interface StoredUser {
   id: number
@@ -30,6 +36,7 @@ export interface WbTarget {
   useCategoryMapping?: boolean
   dailyCacheFallbackWbApiKey?: string
   dailyCacheFallbackUseCategoryMapping?: boolean
+  dailyCacheFallbackFingerprints?: string[]
 }
 
 const REDIS_USER_ID_OFFSET = 100000
@@ -171,12 +178,19 @@ function adminApiKeyOverrideKey(id: number) {
   return `wb_admin_${id}_api_key_override`
 }
 
-function parseAdminApiKeyOverride(raw: unknown): string | null {
+function parseAdminApiKeyOverride(raw: unknown): WbApiKeyOverrideRecord | null {
   if (!raw) return null
   try {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown>
     const apiKey = typeof parsed?.apiKey === 'string' ? parsed.apiKey.trim() : ''
-    return apiKey || null
+    if (!apiKey) return null
+    return {
+      apiKey,
+      ...(typeof parsed?.updatedAt === 'string' ? { updatedAt: parsed.updatedAt } : {}),
+      ...(Array.isArray(parsed?.previousCacheFingerprints)
+        ? { previousCacheFingerprints: parsed.previousCacheFingerprints.filter((value): value is string => typeof value === 'string') }
+        : {}),
+    }
   } catch {
     return null
   }
@@ -200,9 +214,9 @@ async function getConfiguredAdminWbTargets(): Promise<WbTarget[]> {
       return [target.id, null] as const
     }
   }))
-  const overrides = new Map<number, string>()
-  for (const [id, apiKey] of overrideRows) {
-    if (apiKey) overrides.set(id, apiKey)
+  const overrides = new Map<number, WbApiKeyOverrideRecord>()
+  for (const [id, override] of overrideRows) {
+    if (override) overrides.set(id, override)
   }
   return applyWbApiKeyOverrides(targets, overrides)
 }
@@ -211,10 +225,9 @@ export async function saveAdminWbApiKeyOverride(id: number, apiKey: string): Pro
   const normalized = apiKey.trim().replace(/^bearer\s+/i, '').trim()
   const ttlSeconds = getWbTokenTtlSeconds(normalized)
   if (!Number.isFinite(id) || id <= 0 || !normalized || !ttlSeconds) throw new Error('INVALID_ADMIN_API_KEY_OVERRIDE')
-  const result = await redisCommand<string>(['SET', adminApiKeyOverrideKey(id), JSON.stringify({
-    apiKey: normalized,
-    updatedAt: new Date().toISOString(),
-  }), 'EX', ttlSeconds])
+  const currentRaw = await redisCommand<string>(['GET', adminApiKeyOverrideKey(id)])
+  const record = rollWbApiKeyOverride(parseAdminApiKeyOverride(currentRaw), normalized)
+  const result = await redisCommand<string>(['SET', adminApiKeyOverrideKey(id), JSON.stringify(record), 'EX', ttlSeconds])
   if (result !== 'OK') throw new Error('ADMIN_API_KEY_OVERRIDE_STORE_UNAVAILABLE')
 }
 

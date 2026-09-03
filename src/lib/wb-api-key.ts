@@ -6,6 +6,13 @@ export interface WbApiKeyTarget {
   useCategoryMapping?: boolean
   dailyCacheFallbackWbApiKey?: string
   dailyCacheFallbackUseCategoryMapping?: boolean
+  dailyCacheFallbackFingerprints?: string[]
+}
+
+export interface WbApiKeyOverrideRecord {
+  apiKey: string
+  updatedAt?: string
+  previousCacheFingerprints?: string[]
 }
 
 function normalizedToken(token: string): string {
@@ -13,13 +20,33 @@ function normalizedToken(token: string): string {
 }
 
 export function getWbApiKeyFingerprint(token: string): string {
-  return createHash('sha256').update(getWbTargetIdentity(token)).digest('hex').slice(0, 16)
+  return createHash('sha256').update(normalizedToken(token)).digest('hex').slice(0, 16)
 }
 
-export function getWbApiKeyFingerprintCandidates(token: string): string[] {
-  const stableFingerprint = getWbApiKeyFingerprint(token)
-  const legacyFingerprint = createHash('sha256').update(normalizedToken(token)).digest('hex').slice(0, 16)
-  return [...new Set([stableFingerprint, legacyFingerprint])]
+function normalizeCacheFingerprints(values: unknown): string[] {
+  if (!Array.isArray(values)) return []
+  return [...new Set(values
+    .filter((value): value is string => typeof value === 'string' && /^[a-f0-9]{16}$/.test(value)))]
+    .slice(-4)
+}
+
+export function rollWbApiKeyOverride(
+  current: WbApiKeyOverrideRecord | null,
+  apiKey: string,
+  updatedAt = new Date().toISOString(),
+): WbApiKeyOverrideRecord {
+  const normalized = normalizedToken(apiKey)
+  const currentFingerprint = current?.apiKey ? getWbApiKeyFingerprint(current.apiKey) : null
+  const nextFingerprint = getWbApiKeyFingerprint(normalized)
+  const previousCacheFingerprints = normalizeCacheFingerprints([
+    ...(current?.previousCacheFingerprints || []),
+    ...(currentFingerprint && currentFingerprint !== nextFingerprint ? [currentFingerprint] : []),
+  ])
+  return {
+    apiKey: normalized,
+    updatedAt,
+    ...(previousCacheFingerprints.length > 0 ? { previousCacheFingerprints } : {}),
+  }
 }
 
 function readJwtPayload(token: string): Record<string, unknown> | null {
@@ -61,11 +88,15 @@ export function haveSameWbSellerIdentity(currentToken: string, replacementToken:
 
 export function applyWbApiKeyOverrides<T extends WbApiKeyTarget>(
   targets: T[],
-  overrides: Map<number, string>,
+  overrides: Map<number, string | WbApiKeyOverrideRecord>,
 ): T[] {
   return targets.map((target) => {
-    const override = overrides.get(target.id)?.trim()
+    const rawOverride = overrides.get(target.id)
+    const override = (typeof rawOverride === 'string' ? rawOverride : rawOverride?.apiKey)?.trim()
     if (!override || !haveSameWbSellerIdentity(target.wbApiKey, override)) return target
+    const fallbackFingerprints = typeof rawOverride === 'string'
+      ? []
+      : normalizeCacheFingerprints(rawOverride?.previousCacheFingerprints)
     return {
       ...target,
       wbApiKey: override,
@@ -74,6 +105,9 @@ export function applyWbApiKeyOverrides<T extends WbApiKeyTarget>(
       dailyCacheFallbackUseCategoryMapping: target.dailyCacheFallbackWbApiKey
         ? target.dailyCacheFallbackUseCategoryMapping
         : target.useCategoryMapping,
+      ...(fallbackFingerprints.length > 0
+        ? { dailyCacheFallbackFingerprints: fallbackFingerprints }
+        : {}),
     }
   })
 }

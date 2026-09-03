@@ -4,11 +4,11 @@ import test from 'node:test'
 import {
   applyWbApiKeyOverrides,
   getWbApiKeyFingerprint,
-  getWbApiKeyFingerprintCandidates,
   getWbSellerIdentity,
   getWbTargetIdentity,
   getWbTokenTtlSeconds,
   haveSameWbSellerIdentity,
+  rollWbApiKeyOverride,
 // Node's native TypeScript runner requires the explicit extension.
 // @ts-expect-error TS5097 is intentional for this standalone test command.
 } from './wb-api-key.ts'
@@ -50,25 +50,28 @@ test('deduplicates rotated tokens by seller identity instead of token text', () 
   )
 })
 
-test('keeps the primary cache identity stable across repeated same-cabinet token rotations', () => {
+test('does not alias cache identities from unverified same-sid token strings', () => {
   const first = token({ sid: 'seller-1', nonce: 'first' })
   const second = token({ sid: 'seller-1', nonce: 'second' })
-  const otherCabinet = token({ sid: 'seller-2', nonce: 'second' })
 
-  assert.equal(getWbApiKeyFingerprint(first), getWbApiKeyFingerprint(second))
-  assert.notEqual(getWbApiKeyFingerprint(first), getWbApiKeyFingerprint(otherCabinet))
+  assert.notEqual(getWbApiKeyFingerprint(first), getWbApiKeyFingerprint(second))
 })
 
-test('keeps the current raw-token cache fingerprint as a rollout fallback', () => {
+test('retains bounded prior cache fingerprints without retaining prior tokens', () => {
   const first = token({ sid: 'seller-1', nonce: 'first' })
   const second = token({ sid: 'seller-1', nonce: 'second' })
-  const firstCandidates = getWbApiKeyFingerprintCandidates(first)
-  const secondCandidates = getWbApiKeyFingerprintCandidates(second)
+  const third = token({ sid: 'seller-1', nonce: 'third' })
+  const firstRotation = rollWbApiKeyOverride(null, first, '2026-09-01T00:00:00.000Z')
+  const secondRotation = rollWbApiKeyOverride(firstRotation, second, '2026-09-02T00:00:00.000Z')
+  const thirdRotation = rollWbApiKeyOverride(secondRotation, third, '2026-09-03T00:00:00.000Z')
 
-  assert.equal(firstCandidates[0], secondCandidates[0])
-  assert.equal(firstCandidates.length, 2)
-  assert.equal(secondCandidates.length, 2)
-  assert.notEqual(firstCandidates[1], secondCandidates[1])
+  assert.deepEqual(thirdRotation.previousCacheFingerprints, [
+    'd913792e82757a41',
+    '0f1939421d3aba00',
+  ])
+  assert.equal(JSON.stringify(thirdRotation).includes(first), false)
+  assert.equal(JSON.stringify(thirdRotation).includes(second), false)
+  assert.equal(thirdRotation.apiKey, third)
 })
 
 test('applies only non-empty API key overrides to matching configured targets', () => {
@@ -93,6 +96,31 @@ test('applies only non-empty API key overrides to matching configured targets', 
       dailyCacheFallbackUseCategoryMapping: undefined,
     },
     { id: 2, name: 'Seller 2', wbApiKey: 'old-2', wbPromotionApiKey: 'promo-2' },
+  ])
+})
+
+test('applies only trusted bounded cache fingerprints from an admin override record', () => {
+  const oldToken = token({ sid: 'seller-1', nonce: 'configured' })
+  const newToken = token({ sid: 'seller-1', nonce: 'current' })
+  const targets = [{ id: 1, name: 'Seller 1', wbApiKey: oldToken }]
+
+  const applied = applyWbApiKeyOverrides(targets, new Map([[1, {
+    apiKey: newToken,
+    previousCacheFingerprints: [
+      '0123456789abcdef',
+      'not-a-fingerprint',
+      'fedcba9876543210',
+      'aaaaaaaaaaaaaaaa',
+      'bbbbbbbbbbbbbbbb',
+      'cccccccccccccccc',
+    ],
+  }]]))
+
+  assert.deepEqual(applied[0]?.dailyCacheFallbackFingerprints, [
+    'fedcba9876543210',
+    'aaaaaaaaaaaaaaaa',
+    'bbbbbbbbbbbbbbbb',
+    'cccccccccccccccc',
   ])
 })
 
