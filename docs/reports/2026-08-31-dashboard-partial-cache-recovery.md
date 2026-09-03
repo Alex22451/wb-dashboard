@@ -113,3 +113,44 @@ Verifier verdict: final `PASS`; no blocking findings. The two earlier `FAIL` rou
 | Affected authenticated production scenario works | UNVERIFIED | requires post-deployment smoke without exposing credentials |
 
 Final review residuals: scheduling is process-local, so separate instances rely on bounded upstream 429 handling rather than a shared scheduler; a pathological sequence of slow 45-second upstream responses can exceed the 210-second client timeout. These are medium production risks. The required smoke must use the affected large cabinet, verify seven dates and totals, confirm incomplete FBO/FBS is hidden rather than zeroed, record duration below 210 seconds, and confirm the deployment SHA.
+
+## 2026-09-03 Follow-up: Масляков FBS/FBO and token rotation
+
+### Objective and production baseline
+
+- Acceptance: seller `5` must return the complete selected week `2026-08-27` through `2026-09-02`; every day and mapped category must satisfy `FBS + FBO = orders`; a valid replacement WB key must remain in use; future key rotations must retain access to trusted prior daily partitions without sharing cache data across sellers.
+- `OBSERVED`: production cache-only read initially contained `0/7` seller-day partitions for seller `5`, while the six-seller aggregate missed exactly those seven partitions.
+- `VERIFIED`: the stored override is newer than the repository key, differs from it, has the same WB cabinet identifier, and both Analytics and Statistics ping endpoints return HTTP 200. No key material was printed or committed.
+- `OBSERVED`: the deployed fallback returned `214` orders for `2026-09-02`, but an inexact auxiliary split of `168 FBS / 46 FBO`, marked fulfillment incomplete and hidden by the UI.
+- `VERIFIED` direct WB control using the active override: the Analytics funnel returned `214`; official Stock Analytics returned `153 FBS` (`stockType=mp`) and `61 FBO` (`stockType=wb`), with an exact mapped-category match.
+
+### Root causes and permanent changes
+
+- `VERIFIED`: commit `d8eaff0`, which adds the exact Stock Analytics recovery and incomplete-partition retry, existed only on `origin/hotfix/daily-cache-recovery`; production `origin/main` remained at `dcf23df`. The previous correction therefore was never deployed to production.
+- `VERIFIED`: daily Redis keys are deliberately derived from the full WB token fingerprint. Replacing an override changed that fingerprint, so six complete prior seller-day partitions still existed but became unreachable under the new key.
+- The final design keeps full-token cache isolation. A validated admin rotation stores at most four prior 16-character cache fingerprints, never prior tokens; daily reads issue one deduplicated `MGET` across current and trusted rollover fingerprints.
+- The Analytics total stays authoritative. The Stock Analytics fallback is accepted only when both date totals and every mapped category exactly equal the funnel totals; otherwise fulfillment remains incomplete and the UI does not present a false split.
+- An intermediate unsigned-JWT cabinet alias design was rejected during security review and was never pushed or deployed because it could have crossed tenant cache boundaries.
+
+### Verification and incident recovery
+
+| Check | Command or scenario | Result |
+|---|---|---|
+| Focused tests | native Node runner on WB cache/key suites | PASS, 37/37 |
+| Full unit suite | `npm run test:unit` | PASS, 128/128, exit 0 |
+| Lint | `npm run lint` | PASS, exit 0 |
+| Production build | `npm run build` | PASS, TypeScript and 21 pages, exit 0 |
+| Diff check | `git diff --check` | PASS, exit 0 |
+| Independent verifier | final candidate through `d7bf8a0` | PASS |
+| Security/production reviewer | final candidate through `d7bf8a0` | PASS WITH RISKS; no critical/high findings |
+| Active-key exact recovery | local final build against production WB/Redis for `2026-09-02` | HTTP 200 in 80.817 s; `214 = 153 FBS + 61 FBO`; no errors/warnings |
+| Production cache-only week | deployed API, seller `5`, `2026-08-27` through `2026-09-02` | HTTP 200; Redis `7/7`; totals `[172,155,157,172,168,167,214]`; FBS `[109,115,113,122,133,123,153]`; FBO `[63,40,44,50,35,44,61]`; every total/category sum matches; no warnings |
+
+The six unambiguous complete historical payloads were copied additively into the current token fingerprint with `SET ... NX`; `2026-09-02` was freshly fetched from WB using the final build. No source data, credentials, schema, or database rows were changed or deleted.
+
+### Delivery and remaining risks
+
+- Final local candidate: `d7bf8a09d2fba84170f0b06ba4c9ab7fcca81152` (includes `d8eaff0` exact fulfillment recovery and the safe rollover correction).
+- Remote state at the incident-recovery checkpoint: `origin/main=dcf23df`, `origin/hotfix/daily-cache-recovery=d8eaff0`; publication is blocked by the execution environment's outbound `git push` policy and still requires the operator command recorded in the handoff.
+- Production data presentation is restored immediately from the current Redis partitions, but recurrence prevention is `UNVERIFIED` in production until the final SHA is pushed, deployed, identified, and smoke-tested.
+- Residual medium risks accepted by the reviewers: rotating a key resets the token-specific rate/cooldown identity and can allow one early request if WB applies a cabinet-wide quota; sequential upstream fallbacks do not yet share one overall deadline and can approach the 120-second route cap during broad degradation. A low availability-only issue remains in a separate warm-target dedupe path that trusts an unsigned cabinet claim; it does not expose cache payloads.
