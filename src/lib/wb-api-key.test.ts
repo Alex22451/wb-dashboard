@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   applyWbApiKeyOverrides,
+  getWbApiKeyFingerprint,
+  getWbApiKeyFingerprintCandidates,
   getWbSellerIdentity,
   getWbTargetIdentity,
   getWbTokenTtlSeconds,
@@ -46,6 +48,27 @@ test('deduplicates rotated tokens by seller identity instead of token text', () 
     getWbTargetIdentity(token({ sid: 'seller-1' })),
     getWbTargetIdentity(token({ sid: 'seller-2' })),
   )
+})
+
+test('keeps the primary cache identity stable across repeated same-cabinet token rotations', () => {
+  const first = token({ sid: 'seller-1', nonce: 'first' })
+  const second = token({ sid: 'seller-1', nonce: 'second' })
+  const otherCabinet = token({ sid: 'seller-2', nonce: 'second' })
+
+  assert.equal(getWbApiKeyFingerprint(first), getWbApiKeyFingerprint(second))
+  assert.notEqual(getWbApiKeyFingerprint(first), getWbApiKeyFingerprint(otherCabinet))
+})
+
+test('keeps the current raw-token cache fingerprint as a rollout fallback', () => {
+  const first = token({ sid: 'seller-1', nonce: 'first' })
+  const second = token({ sid: 'seller-1', nonce: 'second' })
+  const firstCandidates = getWbApiKeyFingerprintCandidates(first)
+  const secondCandidates = getWbApiKeyFingerprintCandidates(second)
+
+  assert.equal(firstCandidates[0], secondCandidates[0])
+  assert.equal(firstCandidates.length, 2)
+  assert.equal(secondCandidates.length, 2)
+  assert.notEqual(firstCandidates[1], secondCandidates[1])
 })
 
 test('applies only non-empty API key overrides to matching configured targets', () => {

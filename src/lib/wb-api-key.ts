@@ -1,9 +1,25 @@
+import { createHash } from 'node:crypto'
+
 export interface WbApiKeyTarget {
   id: number
   wbApiKey: string
   useCategoryMapping?: boolean
   dailyCacheFallbackWbApiKey?: string
   dailyCacheFallbackUseCategoryMapping?: boolean
+}
+
+function normalizedToken(token: string): string {
+  return token.trim().replace(/^bearer\s+/i, '').trim()
+}
+
+export function getWbApiKeyFingerprint(token: string): string {
+  return createHash('sha256').update(getWbTargetIdentity(token)).digest('hex').slice(0, 16)
+}
+
+export function getWbApiKeyFingerprintCandidates(token: string): string[] {
+  const stableFingerprint = getWbApiKeyFingerprint(token)
+  const legacyFingerprint = createHash('sha256').update(normalizedToken(token)).digest('hex').slice(0, 16)
+  return [...new Set([stableFingerprint, legacyFingerprint])]
 }
 
 function readJwtPayload(token: string): Record<string, unknown> | null {
