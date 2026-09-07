@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 
 // ─── WB Subject → Excel Type Mapping ──────────────────────────────────
 export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
+  { subject: 'Сувениры религиозные', types: ['эзотерика'] },
   { subject: 'Подушки внутренние', types: ['подушка внутренняя', 'подушка декоративная'] },
   { subject: 'Подушки декоративные', types: ['подушка декоративная', 'подушка внутренняя'] },
   { subject: 'Подушки', types: ['подушка декоративная', 'подушка внутренняя'] },

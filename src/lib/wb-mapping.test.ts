@@ -16,6 +16,7 @@ import {
 const REVERSE_CONTAINMENT_MAPPING_VERSION = 'c40ed2344d4317a6bfbdc523e3533236bc1aaeddf3c53a550acde1b3a8239dad'
 
 const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
+  ['Сувениры религиозные', 'эзотерика'],
   ['Подушки внутренние', 'подушка внутренняя'],
   ['Подушки декоративные', 'подушка декоративная'],
   ['Подушки', 'подушка декоративная'],
@@ -58,6 +59,30 @@ const CURRENT_PRIMARY_MAPPINGS: Array<[string, string]> = [
   ['Ткань', 'ткань'],
   ['Ткани для рукоделия', 'ткань'],
 ]
+
+test('religious souvenirs are eligible without article markers or brand restrictions', () => {
+  for (const [article, brand] of [
+    ['Ведьма_68х68_ЭзотерикаРелигия_ГАБАРДИН_31143_ЗА', 'Зубахин'],
+    ['Лотос_68х68_ЭзотерикаРелигия_ГАБАРДИН_31134_ЗА', 'Другой ИП'],
+    ['SKU-001', 'Любой бренд'],
+  ]) {
+    assert.equal(mapWbOrderToType('Сувениры религиозные', article, brand), 'эзотерика')
+    assert.deepEqual(classifyFbsProduct({ subject: 'Сувениры религиозные', article, brand }), {
+      kind: 'eligible', productType: 'эзотерика', productDisplayName: 'Эзотерика',
+    })
+  }
+  assert.deepEqual(findSubjectTypes('Сувениры религиозные'), ['эзотерика'])
+})
+
+test('esoteric article text does not allow unknown or blacklisted WB categories', () => {
+  const article = 'Ведьма_68х68_Эзотерика_ГАБАРДИН_31143_ЗА'
+  assert.deepEqual(classifyFbsProduct({ subject: 'Неизвестная категория', article, brand: '' }), {
+    kind: 'blocked_unknown_category',
+  })
+  for (const subject of EXCLUDED_WB_SUBJECTS) {
+    assert.deepEqual(classifyFbsProduct({ subject, article, brand: '' }), { kind: 'ignored_blacklist' })
+  }
+})
 
 test('animal blankets use their specific WB category mapping', () => {
   assert.deepEqual(findSubjectTypes('Пледы для животных'), [
