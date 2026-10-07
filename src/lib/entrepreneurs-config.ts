@@ -9,6 +9,7 @@ export interface EntrepreneurConfig {
   id: number
   name: string
   apiKey: string
+  apiKeyEnv?: string
   promotionApiKey?: string
 }
 
@@ -48,7 +49,14 @@ function readEntrepreneursJson(): EntrepreneurConfig[] {
 }
 
 function normalizeEntrepreneurs(items: EntrepreneurConfig[]): EntrepreneurConfig[] {
-  return items.filter((item) => item.name !== 'Боев Ф.В.')
+  return items
+    .filter((item) => item.name !== 'Боев Ф.В.')
+    .map((item) => ({
+      ...item,
+      apiKey: item.apiKey || (item.apiKeyEnv?.startsWith('WB_API_KEY_')
+        ? process.env[item.apiKeyEnv]?.trim() || ''
+        : ''),
+    }))
 }
 
 /** Get entrepreneurs from env var or JSON file */
