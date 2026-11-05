@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { mapWbOrderToType } from '@/lib/wb-mapping'
 import { forbidden, getCurrentUser, unauthorized } from '@/lib/auth'
 import { isVercel } from '@/lib/entrepreneurs-config'
 import { NextRequest, NextResponse } from 'next/server'
@@ -119,9 +120,6 @@ const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }> = [
   { subject: 'Фартуки кухонные', types: ['фартуки'] },
   { subject: 'Флаги', types: ['флаги'] },
   { subject: 'Коврики пляжные', types: ['пляжные коврики'] },
-  // "Декор для одежды" → ALWAYS шевроны (clothing patches/decorations)
-  // Even for brand "Ремувикс": their products in "Декор для одежды" are шевроны,
-  // their ремувки are in the "Брелоки" subject instead
   { subject: 'Декор для одежды', types: ['шевроны'] },
   { subject: 'Мешки для обуви', types: ['мешки для обуви', 'чехол для обуви', 'шоппер для обуви'] },
   { subject: 'Коврики для мыши', types: ['коврики для мыши'] },
@@ -194,14 +192,10 @@ interface ArticleOverride {
 }
 
 const ARTICLE_OVERRIDES: ArticleOverride[] = [
-  // ═══ "Декор для одежды" subject → always шевроны ═══
-  // Brand "Ремувикс" has BOTH шевроны and ремувки:
-  //   - Шевроны are in WB subject "Декор для одежды" → Excel type "шевроны"
-  //   - Ремувки are in WB subject "Брелоки" → Excel type "ремувки"
-  // So "Декор для одежды" should always map to "шевроны", regardless of brand.
-  // Article contains "шеврон" → шевроны (explicit, high priority)
+  // Supplier articles containing наклейки take precedence over patches.
+  { subjectContains: 'декор для одежды', articlePattern: /наклейки/i, excelType: 'наклейки', priority: 120 },
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
-  // Default for "Декор для одежды": шевроны (this subject IS clothing patches)
+  // Other clothing decorations keep the existing patches category.
   { subjectContains: 'декор для одежды', articlePattern: /./i, excelType: 'шевроны', priority: 30 },
 
   // ═══ "Брелоки" subject → split by brand ═══
@@ -316,6 +310,9 @@ function determineExcelTypes(
   const subjectLower = subject.toLowerCase()
   const articleNorm = article.toLowerCase().replace(/_/g, '').replace(/\s/g, '')
   const brandLower = (brand || '').toLowerCase()
+
+  // Missing sticker rows in Excel must stay unmatched, never merge into patches.
+  if (mapWbOrderToType(subject, article, brand) === 'наклейки') return ['наклейки']
 
   // 1. Get all possible types from subject mapping
   let possibleTypes = findSubjectTypes(subject)

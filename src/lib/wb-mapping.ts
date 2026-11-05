@@ -18,7 +18,7 @@ export const SUBJECT_TO_EXCEL_TYPES: Array<{ subject: string; types: string[] }>
   { subject: 'Фартуки кухонные', types: ['фартуки'] },
   { subject: 'Флаги', types: ['флаги'] },
   { subject: 'Коврики пляжные', types: ['пляжные коврики'] },
-  { subject: 'Декор для одежды', types: ['шевроны'] },
+  { subject: 'Декор для одежды', types: ['шевроны', 'наклейки'] },
   { subject: 'Мешки для обуви', types: ['мешки для обуви', 'чехол для обуви', 'шоппер для обуви'] },
   { subject: 'Коврики для мыши', types: ['коврики для мыши'] },
   { subject: 'Колышки и скобы садовые', types: ['колышки для пляжных ковриков'] },
@@ -101,6 +101,7 @@ const PRODUCT_DISPLAY_OVERRIDES: Readonly<Record<string, string>> = {
 export const FBS_CLASSIFICATION_SEMANTICS_VERSION = 'pillowcase-size-v4'
 
 export const ARTICLE_OVERRIDES: ArticleOverride[] = [
+  { subjectContains: 'декор для одежды', articlePattern: /наклейки/i, excelType: 'наклейки', priority: 120 },
   { subjectContains: 'декор для одежды', articlePattern: /шеврон/i, excelType: 'шевроны', priority: 110 },
   { subjectContains: 'декор для одежды', articlePattern: /./i, excelType: 'шевроны', priority: 30 },
 
