@@ -515,3 +515,89 @@ test('selects only missing sellers for a scheduled cache retry', () => {
     missingEntrepreneurIdsByDate: { '2026-09-01': [5] },
   }, ['2026-09-01']), null)
 })
+
+test('recovery retries only transient failures and only their selected seller IDs', () => {
+  const retry = cachePerformance.getTransientDailyRetrySelection
+  const result = (error: string, id = 5) => ({ ok: true, json: {
+    daily: { fulfillmentComplete: false }, fulfillmentWarnings: [{ id, error }],
+  } })
+  assert.equal(retry(result('Ошибка складской аналитики FBS/FBO (500)'), '1,5,7'), '5')
+  for (const error of ['Нет доступа (403)', 'Ошибка (429)', 'не совпала с итогами воронки', 'Неизвестная ошибка']) {
+    assert.equal(retry(result(error), 'all'), null)
+  }
+  assert.equal(retry(result('Ошибка сети складской аналитики FBS/FBO'), 'all'), '5')
+  assert.equal(retry(result('Ошибка (500)', 9), '1,5,7'), null)
+  assert.equal(retry(result('Ошибка (500)', 0), 'all'), null)
+  const mixed = result('Ошибка (500)')
+  mixed.json.fulfillmentWarnings.push({ id: 7, error: 'Нет доступа (403)' })
+  assert.equal(retry(mixed, 'all'), null)
+  assert.equal(retry({ ok: false, status: 503, json: {} }, '1,5'), '1,5')
+  assert.equal(retry({ ok: false, status: 429, json: {} }, '1,5'), null)
+})
+
+test('daily recovery waits out failed cache and reuses successful sellers before retrying', async () => {
+  const selections: string[] = []
+  let waited = 0
+  const complete = { ok: true, json: { daily: { fulfillmentComplete: true } } }
+  const result = await cachePerformance.recoverDailyStep({
+    selection: '1,5,7', isActive: () => true,
+    sleep: async (ms) => { waited += ms },
+    request: async (selection) => {
+      selections.push(selection)
+      return selections.length === 1 ? { ok: true, json: {
+        daily: { fulfillmentComplete: false },
+        fulfillmentWarnings: [{ id: 5, error: 'Ошибка складской аналитики FBS/FBO (500)' }],
+      } } : complete
+    },
+  })
+  assert.deepEqual(selections, ['1,5,7', '5'])
+  assert.equal(waited, 65_000)
+  assert.ok(waited > cachePerformance.DAILY_FAILURE_CACHE_TTL_MS)
+  assert.equal(result, complete)
+})
+
+test('daily recovery caps persistent failures and never treats incomplete splits as complete', async () => {
+  let requests = 0
+  const incomplete = { ok: true, json: { daily: { fulfillmentComplete: false },
+    fulfillmentWarnings: [{ id: 5, error: 'Ошибка складской аналитики FBS/FBO (500)' }],
+  } }
+  const result = await cachePerformance.recoverDailyStep({
+    selection: '5', isActive: () => true, sleep: async () => {},
+    request: async () => { requests++; return incomplete },
+  })
+  assert.equal(requests, 3)
+  assert.equal(result, incomplete)
+  assert.equal(result?.json.daily.fulfillmentComplete, false)
+})
+
+test('daily recovery cancellation during backoff prevents stale selection requests', async () => {
+  let active = true
+  let requests = 0
+  const result = await cachePerformance.recoverDailyStep({
+    selection: '5', isActive: () => active,
+    sleep: async () => { active = false },
+    request: async () => { requests++; return { ok: true, json: {
+      fulfillmentWarnings: [{ id: 5, error: 'Ошибка (500)' }], daily: { fulfillmentComplete: false },
+    } } },
+  })
+  assert.equal(result, null)
+  assert.equal(requests, 1)
+})
+
+test('daily recovery does not retry authorization errors or unexplained incomplete data', async () => {
+  for (const json of [
+    { daily: { fulfillmentComplete: false } },
+    { fulfillmentWarnings: [{ id: 5, error: 'Нет доступа к складской аналитике FBS/FBO (403)' }] },
+  ]) {
+    let requests = 0
+    let waits = 0
+    const result = await cachePerformance.recoverDailyStep({
+      selection: '5', isActive: () => true,
+      sleep: async () => { waits++ },
+      request: async () => { requests++; return { ok: true, json } },
+    })
+    assert.equal(requests, 1)
+    assert.equal(waits, 0)
+    assert.equal(result?.json, json)
+  }
+})
