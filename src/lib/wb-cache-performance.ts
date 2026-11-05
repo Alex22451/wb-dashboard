@@ -485,3 +485,60 @@ export function applyFulfillmentBreakdown(
     entrepreneurDailyFbo: { [date]: { [entrepreneurId]: fboTotal } },
   }
 }
+
+// Keep failed fulfillment responses briefly to avoid repeated-click request bursts.
+export const DAILY_FAILURE_CACHE_TTL_MS = 60_000
+export const DAILY_TRANSIENT_RETRY_DELAY_MS = DAILY_FAILURE_CACHE_TTL_MS + 5_000
+
+export type DailyRecoveryResponse = {
+  ok: boolean
+  status?: number
+  json: any
+}
+
+export function getTransientDailyRetrySelection(result: DailyRecoveryResponse, selection: string): string | null {
+  // Retry throttling only with explicit upstream timing support, not a guessed delay.
+  if (result.status === 429 || result.status === 401 || result.status === 403) return null
+  const issues = [...(result.json?.rateLimitErrors || []), ...(result.json?.fulfillmentWarnings || [])]
+  if (!result.ok && [500, 502, 503, 504].includes(result.status || 0) && issues.length === 0) return selection
+  if (issues.length === 0) return null
+  const transient = issues.every((issue) => (
+    /\((500|502|503|504)\)$/.test(String(issue.error || ''))
+    || /^Ошибка сети (складской аналитики FBS\/FBO|при загрузке FBO\/FBS)$/.test(String(issue.error || ''))
+  ))
+  if (!transient) return null
+  const ids = [...new Set<number>(issues.map((issue) => Number(issue.id)))]
+  const allowed = selection === 'all' ? null : new Set(selection.split(',').map(Number))
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0 || (allowed && !allowed.has(id)))) return null
+  return ids.sort((a, b) => a - b).join(',')
+}
+
+export async function recoverDailyStep(options: {
+  selection: string
+  request: (selection: string) => Promise<DailyRecoveryResponse>
+  isActive: () => boolean
+  sleep: (ms: number) => Promise<void>
+}): Promise<DailyRecoveryResponse | null> {
+  let selection = options.selection
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!options.isActive()) return null
+    const result = await options.request(selection)
+    if (!options.isActive()) return null
+    if (shouldContinueDailyRecovery({
+      requestOk: result.ok,
+      errorCount: result.json?.rateLimitErrors?.length || 0,
+      warningCount: result.json?.fulfillmentWarnings?.length || 0,
+      hasDaily: !!result.json?.daily,
+      fulfillmentComplete: result.json?.daily?.fulfillmentComplete,
+    })) return result
+    const nextSelection = getTransientDailyRetrySelection(result, selection)
+    if (attempt === 2 || !nextSelection) return result
+    selection = nextSelection
+    // Check cancellation throughout the wait, so changed filters cannot issue old requests.
+    for (let remaining = DAILY_TRANSIENT_RETRY_DELAY_MS; remaining > 0; remaining -= 1000) {
+      if (!options.isActive()) return null
+      await options.sleep(Math.min(1000, remaining))
+    }
+  }
+  return null
+}

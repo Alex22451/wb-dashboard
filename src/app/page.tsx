@@ -69,7 +69,7 @@ import {
   createDashboardLoadFailure,
   normalizeDashboardLoadErrors,
 } from '@/lib/dashboard-load-errors'
-import { buildDailyRecoveryPlan, getFunnelRequestDelayMs, getMissingDailyDates, shouldContinueDailyRecovery, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
+import { recoverDailyStep, buildDailyRecoveryPlan, getFunnelRequestDelayMs, getMissingDailyDates, shouldContinueDailyRecovery, sliceDailyPayloadByDate } from '@/lib/wb-cache-performance'
 import {
   normalizeDashboardTabPreferences,
   OPTIONAL_DASHBOARD_TAB_IDS,
@@ -2349,7 +2349,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
           appendMetricParam(params, metric)
 
           const res = await fetch(`/api/wb-data?${params.toString()}`)
-          return { date, ok: res.ok, json: await res.json() }
+          return { date, ok: res.ok, status: res.status, json: await res.json() }
         }
         const trackSalesErrors = (date: string, dayErrors: RateLimitError[]) => {
           if (metric !== 'sales') return
@@ -2453,7 +2453,16 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
             if (!isActiveLoad()) return
             previousRecoveryStartedAt = Date.now()
             const { date, selection: recoverySelection } = recoveryPlan[index]
-            const liveResult = await requestDay(date, recoverySelection, { requireComplete: true })
+            const liveResult = await recoverDailyStep({
+              selection: recoverySelection,
+              request: (retrySelection) => {
+                previousRecoveryStartedAt = Date.now()
+                return requestDay(date, retrySelection, { requireComplete: true })
+              },
+              isActive: isActiveLoad,
+              sleep: async (ms) => { await sleep(ms) },
+            })
+            if (!liveResult) return
             const liveErrors = liveResult.json.rateLimitErrors || []
             const liveWarnings = liveResult.json.fulfillmentWarnings || []
             if (!shouldContinueDailyRecovery({

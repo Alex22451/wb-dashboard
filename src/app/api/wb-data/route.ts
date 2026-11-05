@@ -8,6 +8,7 @@ import { redisCommand } from '@/lib/redis-cache'
 import { getWbApiKeyFingerprint, shouldUseConfiguredCategoryMapping } from '@/lib/wb-api-key'
 import {
   canLiveLoadDailyRange,
+  DAILY_FAILURE_CACHE_TTL_MS,
   getCacheableDailyTargetIds,
   getDailyFunnelLoadStrategy,
   getFunnelRequestDelayMs,
@@ -215,7 +216,7 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
   const promise = loader()
     .then((result: any) => {
-      const ttl = result?.error ? CACHE_TTL_RATE_LIMIT : ttlMs
+      const ttl = result?.error ? CACHE_TTL_RATE_LIMIT : result?.returnError ? DAILY_FAILURE_CACHE_TTL_MS : ttlMs
       if (cacheErrors || !result?.error) setCache(key, result, ttl)
       return result
     })
