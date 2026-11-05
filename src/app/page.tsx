@@ -2460,7 +2460,7 @@ function DailyOrdersTab({ entrepreneurs, user, includeAngelina }: { entrepreneur
                 return requestDay(date, retrySelection, { requireComplete: true })
               },
               isActive: isActiveLoad,
-              sleep,
+              sleep: async (ms) => { await sleep(ms) },
             })
             if (!liveResult) return
             const liveErrors = liveResult.json.rateLimitErrors || []
