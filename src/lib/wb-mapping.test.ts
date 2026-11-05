@@ -410,3 +410,25 @@ test('mapping version is sensitive to the actual article override order', () => 
     ARTICLE_OVERRIDES[1] = second
   }
 })
+
+// The article/subject pair is the same rule for every seller and brand.
+test('clothing stickers are separate from patches regardless of brand and article case', () => {
+  for (const brand of ['', 'Ремувикс', 'Другой бренд']) {
+    for (const article of ['наклейки', 'НАКЛЕЙКИ_набор', 'Товар_наклейки_123', 'шеврон_наклейки']) {
+      assert.equal(mapWbOrderToType('Декор для одежды', article, brand), 'наклейки')
+      assert.equal(mapWbOrderToProductKey('Декор для одежды', article, brand), 'наклейки')
+    }
+  }
+  assert.equal(mapWbOrderToProductKey('Декор для одежды', 'Наклейки_8х5', ''), 'наклейки 8х5')
+  assert.equal(mapWbOrderToProductKey('Декор для одежды', 'Шеврон_8х5', ''), 'шевроны 8х5')
+  assert.equal(mapWbOrderToType('Декор для одежды', 'обычный артикул', ''), 'шевроны')
+  assert.equal(mapWbOrderToType('Декор для одежды', '', ''), 'шевроны')
+  assert.equal(mapWbOrderToType('Постеры', 'наклейки', ''), 'постеры')
+  assert.equal(mapWbOrderToType('Декор для одежды', 'Шеврон', 'наклейки'), 'шевроны')
+})
+
+test('shared FBS classifier exposes stickers under their separate product type', () => {
+  assert.deepEqual(classifyFbsProduct({ subject: 'Декор для одежды', article: 'НАКЛЕЙКИ_набор', brand: '' }), {
+    kind: 'eligible', productType: 'наклейки', productDisplayName: 'Наклейки',
+  })
+})

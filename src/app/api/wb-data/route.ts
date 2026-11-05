@@ -178,7 +178,7 @@ async function fetchWbFunnel(
 }
 
 function getCacheKey(entId: number, apiKey: string, dateFrom: string, dateTo: string, metric: DataMetric): string {
-  return `${entId}:${apiKeyFingerprint(apiKey)}:${metric}-v13:${dateFrom}:${dateTo}`
+  return `${entId}:${apiKeyFingerprint(apiKey)}:${metric}-v14:${dateFrom}:${dateTo}`
 }
 
 function getStockCacheKey(entId: number, apiKey: string, stockDate: string): string {
@@ -229,8 +229,8 @@ async function cachedRequest<T>(key: string, ttlMs: number, loader: () => Promis
 
 function redisDailyKeyForFingerprint(fingerprint: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
   const variantSuffix = variant === 'default' ? '' : `:${variant}`
-  if (metric === 'orders') return `wb:daily:v11:${fingerprint}:${date}${variantSuffix}`
-  return `wb:daily:sales:v6:${fingerprint}:${date}${variantSuffix}`
+  if (metric === 'orders') return `wb:daily:v12:${fingerprint}:${date}${variantSuffix}`
+  return `wb:daily:sales:v7:${fingerprint}:${date}${variantSuffix}`
 }
 
 function redisDailyKey(apiKey: string, date: string, variant = 'default', metric: DataMetric = 'orders') {
@@ -335,7 +335,7 @@ function redisReportKey(
     .sort()
     .join('|')
   const scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 20)
-  return `wb:report:${section}:${metric}:v7:${scopeHash}:${from}:${to}`
+  return `wb:report:${section}:${metric}:v8:${scopeHash}:${from}:${to}`
 }
 
 async function readRedisReportResponse(
