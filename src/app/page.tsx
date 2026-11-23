@@ -5220,7 +5220,7 @@ function WbCompareTab({ entrepreneurs }: { entrepreneurs: EntrepreneurInfo[] }) 
 }
 
 // --- API Key Management Tab ---
-function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurInfo[]; onRefresh: () => void }) {
+function ApiKeyTab({ entrepreneurs, onRefresh, isAdmin }: { entrepreneurs: EntrepreneurInfo[]; onRefresh: () => void; isAdmin: boolean }) {
   const [showKey, setShowKey] = useState<Record<number, boolean>>({})
   const [deleting, setDeleting] = useState<number | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -5228,10 +5228,14 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
   const [dialogKey, setDialogKey] = useState<string>('')
   const [dialogPromotionKey, setDialogPromotionKey] = useState<string>('')
   const [dialogSaving, setDialogSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saveSuccess, setSaveSuccess] = useState('')
 
   const handleSave = async (entId: number, apiKey: string, promotionApiKey: string) => {
     if (!apiKey.trim() && !promotionApiKey.trim()) return
     setDialogSaving(true)
+    setSaveError('')
+    setSaveSuccess('')
     try {
       const res = await fetch('/api/save-api-key', {
         method: 'POST',
@@ -5242,15 +5246,21 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
           promotionApiKey: promotionApiKey.trim(),
         }),
       })
+      const result = await res.json().catch(() => null)
+      if (!res.ok || !result?.success) {
+        setSaveError(result?.error || 'Не удалось сохранить ключ. Повторите попытку.')
+        return
+      }
       if (res.ok) {
+        setSaveSuccess(`Ключ для ${entrepreneurs.find(e => e.id === entId)?.name || 'ИП'} сохранён. Можно загрузить аналитику.`)
         onRefresh()
         setDialogOpen(false)
         setDialogKey('')
         setDialogPromotionKey('')
         setDialogEntId('')
       }
-    } catch (e) {
-      console.error(e)
+    } catch {
+      setSaveError('Не удалось получить подтверждение сохранения. Проверьте соединение и повторите попытку.')
     } finally {
       setDialogSaving(false)
     }
@@ -5278,6 +5288,8 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
     }
     setDialogKey('')
     setDialogPromotionKey('')
+    setSaveError('')
+    setSaveSuccess('')
     setDialogOpen(true)
   }
 
@@ -5305,7 +5317,11 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
             Управление API ключами для доступа к данным WB. {withKeys.length} из {entrepreneurs.length} ИП имеют ключи.
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={(open) => {
+          if (dialogSaving) return
+          setDialogOpen(open)
+          if (!open) { setDialogKey(''); setDialogPromotionKey(''); setSaveError('') }
+        }}>
           <DialogTrigger asChild>
             <Button onClick={() => openAddDialog()} className="gap-2">
               <Plus className="h-4 w-4" />
@@ -5314,15 +5330,15 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Добавить API ключ</DialogTitle>
+              <DialogTitle>{entrepreneurs.some(e => String(e.id) === dialogEntId && e.hasApiKey) ? 'Заменить API ключ' : 'Добавить API ключ'}</DialogTitle>
               <DialogDescription>
-                Введите API ключ Wildberries для выбранного ИП. Ключ можно получить в личном кабинете WB → Настройки → Доступ к API.
+                {isAdmin ? 'Вставьте новый ключ того же кабинета WB с доступом «Аналитика» и «Статистика». Перед заменой сайт проверит ключ. Если ключ не пройдёт проверку, текущий ключ останется прежним.' : 'Введите API ключ Wildberries для выбранного ИП.'}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>ИП</Label>
-                <Select value={dialogEntId} onValueChange={setDialogEntId}>
+                <Select value={dialogEntId} onValueChange={setDialogEntId} disabled={dialogSaving}>
                   <SelectTrigger>
                     <SelectValue placeholder="Выберите ИП" />
                   </SelectTrigger>
@@ -5336,40 +5352,47 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>API ключ Статистика</Label>
+                <Label htmlFor="wb-replacement-key">Ключ WB для аналитики и статистики</Label>
                 <Input
-                  type="text"
-                  placeholder="Для заказов, остатков и поставок"
+                  id="wb-replacement-key"
+                  type="password"
+                  autoComplete="new-password"
+                  disabled={dialogSaving}
+                  placeholder="Вставьте новый API ключ WB"
                   value={dialogKey}
                   onChange={(e) => setDialogKey(e.target.value)}
                   className="font-mono text-sm"
                 />
               </div>
-              <div className="space-y-2">
+              {!isAdmin && <div className="space-y-2">
                 <Label>API ключ Продвижение</Label>
                 <Input
                   type="text"
                   placeholder="Для рекламы и роста, можно оставить пустым"
+                  disabled={dialogSaving}
                   value={dialogPromotionKey}
                   onChange={(e) => setDialogPromotionKey(e.target.value)}
                   className="font-mono text-sm"
                 />
-              </div>
+              </div>}
+              {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Отмена</Button>
+              <Button variant="outline" disabled={dialogSaving} onClick={() => { setDialogOpen(false); setDialogKey(''); setDialogPromotionKey('') }}>Отмена</Button>
               <Button
                 onClick={() => handleSave(Number(dialogEntId), dialogKey, dialogPromotionKey)}
-                disabled={!dialogEntId || (!dialogKey.trim() && !dialogPromotionKey.trim()) || dialogSaving}
+                disabled={!dialogEntId || (!dialogKey.trim() && (isAdmin || !dialogPromotionKey.trim())) || dialogSaving}
                 className="gap-2"
               >
                 <Save className="h-4 w-4" />
-                {dialogSaving ? 'Сохранение...' : 'Сохранить'}
+                {dialogSaving ? 'Проверка и сохранение...' : 'Сохранить ключ'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
+
+      {saveSuccess && <p role="status" className="text-sm text-emerald-700 dark:text-emerald-400">{saveSuccess}</p>}
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -5413,7 +5436,7 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
           <CardContent>
             <div className="space-y-3">
               {withKeys.map((e) => (
-                <div key={e.id} className="flex items-center justify-between p-3 rounded-lg border bg-emerald-50/50 dark:bg-emerald-950/10">
+                <div key={e.id} className="flex flex-wrap gap-3 items-center justify-between p-3 rounded-lg border bg-emerald-50/50 dark:bg-emerald-950/10">
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center">
                       <Key className="h-4 w-4 text-emerald-600" />
@@ -5430,9 +5453,9 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
                       {showKey[e.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => openAddDialog(e.id)} className="text-muted-foreground">
-                      <Save className="h-4 w-4" />
+                      <Save className="h-4 w-4 mr-2" />Заменить ключ
                     </Button>
-                    <Button
+                    {!isAdmin && <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleDelete(e.id)}
@@ -5440,7 +5463,7 @@ function ApiKeyTab({ entrepreneurs, onRefresh }: { entrepreneurs: EntrepreneurIn
                       className="text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </Button>
+                    </Button>}
                   </div>
                 </div>
               ))}
@@ -7554,7 +7577,7 @@ export default function Home() {
             </TabsContent>
           )}
           <TabsContent value="apikeys">
-            <ApiKeyTab entrepreneurs={entrepreneurs} onRefresh={refreshEntrepreneurs} />
+            <ApiKeyTab entrepreneurs={entrepreneurs} onRefresh={refreshEntrepreneurs} isAdmin={isAdmin} />
           </TabsContent>
         </Tabs>
       </main>
